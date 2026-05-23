@@ -1302,6 +1302,10 @@ export class AppService {
         '缺少动作识别指标，请完成体感游戏后再回传。',
       );
     }
+    this.assertBrowserPoseResultMetrics(
+      session.gameContent.runtimeType,
+      dto.motionMetrics,
+    );
     const motionMetrics = dto.motionMetrics.map((metric) => {
       const metricType = this.requiredString(
         metric.metricType,
@@ -1381,7 +1385,6 @@ export class AppService {
         rawSummary,
       };
     });
-
     const quality = this.evaluateTrainingQuality(dto);
 
     const result = await this.prisma.$transaction(async (tx) => {
@@ -2703,6 +2706,50 @@ export class AppService {
       throw new BadRequestException(
         `训练结果来源 ${resultSource} 与游戏运行时 ${formalRuntimeType} 不匹配。`,
       );
+    }
+  }
+
+  private assertBrowserPoseResultMetrics(
+    runtimeType: string,
+    motionMetrics: Array<{
+      metricType: string;
+      confidence?: number;
+      sampleCount?: number;
+      qualityFlag?: string;
+    }>,
+  ) {
+    if (runtimeType !== 'browser_pose_game') return;
+
+    const byMetricType = new Map(
+      motionMetrics.map((metric) => [metric.metricType, metric]),
+    );
+    const missingMetricTypes = browserPoseGameRequiredMetricTypes.filter(
+      (metricType) => !byMetricType.has(metricType),
+    );
+    if (missingMetricTypes.length) {
+      throw new BadRequestException(
+        `浏览器体感训练结果缺少正式动作指标：${missingMetricTypes.join('、')}。`,
+      );
+    }
+
+    for (const metricType of browserPoseGameRequiredMetricTypes) {
+      const metric = byMetricType.get(metricType);
+      if (!metric) continue;
+      if (metric.confidence === undefined) {
+        throw new BadRequestException(
+          `浏览器体感训练指标 ${metricType} 缺少置信度。`,
+        );
+      }
+      if (metric.sampleCount === undefined) {
+        throw new BadRequestException(
+          `浏览器体感训练指标 ${metricType} 缺少采样数。`,
+        );
+      }
+      if (metric.qualityFlag !== 'valid') {
+        throw new BadRequestException(
+          `浏览器体感训练指标 ${metricType} 的 qualityFlag 必须显式为 valid。`,
+        );
+      }
     }
   }
 

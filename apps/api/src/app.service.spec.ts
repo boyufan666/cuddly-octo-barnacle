@@ -1259,6 +1259,31 @@ describe('AppService training write permissions', () => {
             unit: 'ms',
             confidence: 0.9,
             sampleCount: 120,
+            qualityFlag: 'valid',
+          },
+          {
+            metricType: 'target_hit_rate',
+            metricValue: 0.82,
+            unit: 'ratio',
+            confidence: 0.9,
+            sampleCount: 20,
+            qualityFlag: 'valid',
+          },
+          {
+            metricType: 'pose_visibility_avg',
+            metricValue: 0.88,
+            unit: 'ratio',
+            confidence: 0.92,
+            sampleCount: 120,
+            qualityFlag: 'valid',
+          },
+          {
+            metricType: 'arm_raise_accuracy',
+            metricValue: 0.84,
+            unit: 'ratio',
+            confidence: 0.9,
+            sampleCount: 20,
+            qualityFlag: 'valid',
           },
         ],
       }),
@@ -1290,8 +1315,143 @@ describe('AppService training write permissions', () => {
           confidence: 0.9,
           sampleCount: 120,
         }),
+        objectContaining({
+          metricType: 'target_hit_rate',
+        }),
+        objectContaining({
+          metricType: 'pose_visibility_avg',
+        }),
+        objectContaining({
+          metricType: 'arm_raise_accuracy',
+        }),
       ],
     });
+  });
+
+  it('rejects browser pose training result when required motion metrics are incomplete', async () => {
+    const { prisma, service } = createService();
+    mockTrainingAccess(prisma);
+    prisma.trainingSession.findUnique.mockResolvedValue({
+      id: 'session-id',
+      patientId: 'patient-profile-id',
+      gameRunId: 'pose-run-001',
+      unityBuildVersion: '1.0.0',
+      bridgeProtocolVersion: '1.0.0',
+      result: null,
+      gameContent: {
+        id: 'browser-game-id',
+        code: 'pose_reaction_hit',
+        runtimeType: 'browser_pose_game',
+        gameVersion: '1.0.0',
+      },
+    });
+
+    await expect(
+      service.submitTrainingResult(doctorUser, 'session-id', {
+        score: 88,
+        completionRate: 0.9,
+        durationSeconds: 480,
+        reactionTimeMs: 760,
+        motionAccuracy: 0.86,
+        exerciseIntensity: 'moderate',
+        metricsSummary: {
+          source: 'browser_pose_game',
+          gameRunId: 'pose-run-001',
+          gameVersion: '1.0.0',
+          protocolVersion: '1.0.0',
+          clientGeneratedAt: '2026-05-20T06:30:00.000Z',
+          rawPayloadHash: 'pose-hash-001',
+        },
+        motionMetrics: [
+          {
+            metricType: 'reaction_time_ms',
+            metricValue: 760,
+            unit: 'ms',
+            confidence: 0.9,
+            sampleCount: 120,
+          },
+        ],
+      }),
+    ).rejects.toThrow(/target_hit_rate|pose_visibility_avg|arm_raise_accuracy/);
+
+    expect(prisma.trainingSession.update).not.toHaveBeenCalled();
+    expect(prisma.trainingResult.create).not.toHaveBeenCalled();
+    expect(prisma.motionMetric.createMany).not.toHaveBeenCalled();
+  });
+
+  it('rejects browser pose training result when required motion metrics omit explicit quality flag', async () => {
+    const { prisma, service } = createService();
+    mockTrainingAccess(prisma);
+    prisma.trainingSession.findUnique.mockResolvedValue({
+      id: 'session-id',
+      patientId: 'patient-profile-id',
+      gameRunId: 'pose-run-001',
+      unityBuildVersion: '1.0.0',
+      bridgeProtocolVersion: '1.0.0',
+      result: null,
+      gameContent: {
+        id: 'browser-game-id',
+        code: 'pose_reaction_hit',
+        runtimeType: 'browser_pose_game',
+        gameVersion: '1.0.0',
+      },
+    });
+
+    await expect(
+      service.submitTrainingResult(doctorUser, 'session-id', {
+        score: 88,
+        completionRate: 0.9,
+        durationSeconds: 480,
+        reactionTimeMs: 760,
+        motionAccuracy: 0.86,
+        exerciseIntensity: 'moderate',
+        metricsSummary: {
+          source: 'browser_pose_game',
+          gameRunId: 'pose-run-001',
+          gameVersion: '1.0.0',
+          protocolVersion: '1.0.0',
+          clientGeneratedAt: '2026-05-20T06:30:00.000Z',
+          rawPayloadHash: 'pose-hash-001',
+        },
+        motionMetrics: [
+          {
+            metricType: 'reaction_time_ms',
+            metricValue: 760,
+            unit: 'ms',
+            confidence: 0.9,
+            sampleCount: 120,
+          },
+          {
+            metricType: 'target_hit_rate',
+            metricValue: 0.82,
+            unit: 'ratio',
+            confidence: 0.9,
+            sampleCount: 20,
+            qualityFlag: 'valid',
+          },
+          {
+            metricType: 'pose_visibility_avg',
+            metricValue: 0.88,
+            unit: 'ratio',
+            confidence: 0.92,
+            sampleCount: 120,
+            qualityFlag: 'valid',
+          },
+          {
+            metricType: 'arm_raise_accuracy',
+            metricValue: 0.84,
+            unit: 'ratio',
+            confidence: 0.9,
+            sampleCount: 20,
+            qualityFlag: 'valid',
+          },
+        ],
+      }),
+    ).rejects.toThrow(/qualityFlag|质量标记/);
+
+    expect(prisma.trainingSession.update).not.toHaveBeenCalled();
+    expect(prisma.trainingResult.create).not.toHaveBeenCalled();
+    expect(prisma.motionMetric.createMany).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -1484,7 +1644,10 @@ describe('AppService rehab plan recommendation game readiness', () => {
     };
   };
 
-  type RecommendationPlanCreateResult = RecommendationPlanCreateData & {
+  type RecommendationPlanCreateResult = Omit<
+    RecommendationPlanCreateData,
+    'items'
+  > & {
     id: string;
     items: (RecommendationPlanItemCreateInput & {
       gameContent: object;
