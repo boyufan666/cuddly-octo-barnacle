@@ -4,6 +4,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { verifyCompletedContractChecks } from "./local-contract-checks.mjs";
 
 const rootDir = resolve(import.meta.dirname, "..");
 const projectEnv = readProjectEnv(resolve(rootDir, ".env"));
@@ -21,13 +22,17 @@ const prisma = new PrismaClient();
 const seedPassword = "253913";
 const patientAccount = "patient001";
 const adminAccount = "admin";
+const doctorAccount = "doctor001";
 const runKey = `contract_${Date.now()}_${randomUUID().slice(0, 8)}`;
 
 const created = {
-  sessionId: undefined,
+  sessionIds: [],
 };
+const completedChecks = new Set();
 
-console.log("接口契约验收：本脚本验证本地 API 真实写入、运行时约束和清理流程。");
+console.log(
+  "接口契约验收：本脚本验证本地 API 真实写入、运行时约束和清理流程。",
+);
 console.log("注意：本脚本不进行摄像头实采，也不会生成姿态帧或伪造训练过程。");
 
 try {
@@ -62,6 +67,17 @@ try {
       loginResponse.context?.adminPermissions?.includes("audit.read"),
       "admin 缺少 audit.read 权限。",
     );
+    return loginResponse;
+  });
+
+  const doctorLogin = await step("负责医师账号登录", async () => {
+    const loginResponse = await login(doctorAccount);
+    assert(loginResponse.accessToken, "负责医师登录未返回 accessToken。");
+    assert(
+      loginResponse.context?.doctorPatientIds?.includes(patientId),
+      "doctor001 未绑定 patient001 负责患者，请先执行 seed。",
+    );
+    completedChecks.add("doctor_login_verified");
     return loginResponse;
   });
 
@@ -113,30 +129,21 @@ try {
   );
 
   const session = await step("创建正式训练会话", async () => {
-    const startedAt = new Date().toISOString();
-    const response = await request("/training-sessions", {
-      method: "POST",
+    const response = await createTrainingSession({
       token: patientLogin.accessToken,
-      body: {
-        patientId: patient.id,
-        rehabPlanId: currentPlan.id,
-        planItemId: planItem.id,
-        gameContentId: game.id,
-        idempotencyKey: runKey,
-        gameRunId: `${runKey}_browser_pose`,
-        deviceCode: `${runKey}_camera_device`,
-        calibrationStatus: "checked",
-        clientStartedAt: startedAt,
-      },
+      patient,
+      currentPlan,
+      planItem,
+      game,
+      caseKey: "valid",
     });
-    created.sessionId = response.id;
     assert(response.id, "创建训练会话未返回 id。");
     assert(
       response.sessionStatus === "in_progress",
       "训练会话状态应为 in_progress。",
     );
     assert(
-      response.gameRunId === `${runKey}_browser_pose`,
+      response.gameRunId === `${runKey}_valid_browser_pose`,
       "训练会话 gameRunId 与请求不一致。",
     );
     assert(
@@ -167,39 +174,62 @@ try {
     );
   });
 
-  const result = await step("提交合法 Browser Pose 结构化训练结果", async () => {
-    const response = await request(`/training-sessions/${session.id}/results`, {
-      method: "POST",
-      token: patientLogin.accessToken,
-      body: buildTrainingResultPayload({
-        source: "browser_pose_game",
-        session,
-        game,
-      }),
-    });
-    assert(response.source === "browser_pose_game", "结果 source 不正确。");
-    assert(response.gameRunId === session.gameRunId, "结果 gameRunId 不正确。");
-    assert(response.gameVersion === game.gameVersion, "结果 gameVersion 不正确。");
-    assert(
-      response.bridgeProtocolVersion === game.bridgeProtocolVersion,
-      "结果 bridgeProtocolVersion 不正确。",
-    );
-    assert(response.qualityFlag === "valid", "合法结果 qualityFlag 应为 valid。");
-    assert(response.abnormalFlag === false, "合法结果 abnormalFlag 应为 false。");
-    return response;
-  });
+  const result = await step(
+    "提交合法 Browser Pose 结构化训练结果",
+    async () => {
+      const response = await request(
+        `/training-sessions/${session.id}/results`,
+        {
+          method: "POST",
+          token: patientLogin.accessToken,
+          body: buildTrainingResultPayload({
+            source: "browser_pose_game",
+            session,
+            game,
+          }),
+        },
+      );
+      assert(response.source === "browser_pose_game", "结果 source 不正确。");
+      assert(
+        response.gameRunId === session.gameRunId,
+        "结果 gameRunId 不正确。",
+      );
+      assert(
+        response.gameVersion === game.gameVersion,
+        "结果 gameVersion 不正确。",
+      );
+      assert(
+        response.bridgeProtocolVersion === game.bridgeProtocolVersion,
+        "结果 bridgeProtocolVersion 不正确。",
+      );
+      assert(
+        response.qualityFlag === "valid",
+        "合法结果 qualityFlag 应为 valid。",
+      );
+      assert(
+        response.abnormalFlag === false,
+        "合法结果 abnormalFlag 应为 false。",
+      );
+      return response;
+    },
+  );
 
   await step("训练记录可查询且动作指标已入库", async () => {
     const records = await request(`/patients/${patient.id}/training-records`, {
       token: patientLogin.accessToken,
     });
-    const persistedSession = records.sessions?.find((item) => item.id === session.id);
+    const persistedSession = records.sessions?.find(
+      (item) => item.id === session.id,
+    );
     assert(persistedSession, "训练记录中未找到刚提交的 session。");
     assert(
       persistedSession.sessionStatus === "completed",
       "提交合法结果后 sessionStatus 应为 completed。",
     );
-    assert(persistedSession.result?.id === result.id, "训练记录 result 未关联。");
+    assert(
+      persistedSession.result?.id === result.id,
+      "训练记录 result 未关联。",
+    );
     assert(
       persistedSession.motionMetrics?.length === 4,
       "训练记录应包含 4 条动作指标。",
@@ -208,6 +238,215 @@ try {
       records.summary.completedSessions >= 1,
       "训练记录 summary.completedSessions 应包含本次完成训练。",
     );
+  });
+
+  await step("拒绝正常训练结果进入人工复核", async () => {
+    const rejectedReview = await request(
+      `/training-results/${result.id}/review`,
+      {
+        method: "PATCH",
+        token: doctorLogin.accessToken,
+        body: {
+          reviewConclusion: "accepted_valid",
+          reviewNote: "正常训练结果不应进入人工复核流程。",
+        },
+        expectedStatus: 400,
+      },
+    );
+    assert(
+      typeof rejectedReview.message === "string" &&
+        rejectedReview.message.length > 0,
+      "正常训练结果复核被拒绝时应返回明确错误消息。",
+    );
+    completedChecks.add("valid_result_review_rejected");
+  });
+
+  const suspiciousSession = await step("创建可疑训练复核会话", async () => {
+    const response = await createTrainingSession({
+      token: patientLogin.accessToken,
+      patient,
+      currentPlan,
+      planItem,
+      game,
+      caseKey: "suspicious_review",
+    });
+    assert(response.id, "创建可疑训练会话未返回 id。");
+    assert(
+      response.sessionStatus === "in_progress",
+      "可疑训练会话状态应为 in_progress。",
+    );
+    assert(
+      response.gameRunId === `${runKey}_suspicious_review_browser_pose`,
+      "可疑训练会话 gameRunId 与请求不一致。",
+    );
+    return response;
+  });
+
+  const suspiciousResult = await step(
+    "提交可疑 Browser Pose 训练结果并触发复核",
+    async () => {
+      const response = await request(
+        `/training-sessions/${suspiciousSession.id}/results`,
+        {
+          method: "POST",
+          token: patientLogin.accessToken,
+          body: buildTrainingResultPayload({
+            source: "browser_pose_game",
+            session: suspiciousSession,
+            game,
+            caseKey: "suspicious_review",
+            overrides: {
+              durationSeconds: 45,
+            },
+          }),
+        },
+      );
+      assert(response.id, "提交可疑训练结果未返回 id。");
+      assert(
+        response.qualityFlag === "suspicious",
+        "可疑结果 qualityFlag 应为 suspicious。",
+      );
+      assert(
+        response.abnormalFlag === true,
+        "可疑结果 abnormalFlag 应为 true。",
+      );
+      assert(
+        response.qualityReasons?.includes("训练时长过短"),
+        "可疑结果 qualityReasons 应包含训练时长过短。",
+      );
+      completedChecks.add("suspicious_result_created");
+      return response;
+    },
+  );
+
+  const reviewedResult = await step("负责医师复核可疑训练结果", async () => {
+    const response = await request(
+      `/training-results/${suspiciousResult.id}/review`,
+      {
+        method: "PATCH",
+        token: doctorLogin.accessToken,
+        body: {
+          reviewConclusion: "needs_retrain",
+          reviewNote:
+            "训练时长过短，本次结果不纳入有效训练趋势，请患者重新完成训练。",
+        },
+      },
+    );
+    assert(
+      response.id === suspiciousResult.id,
+      "复核结果 id 与可疑结果不一致。",
+    );
+    assert(
+      response.reviewStatus === "reviewed",
+      "复核后 reviewStatus 应为 reviewed。",
+    );
+    assert(
+      response.reviewConclusion === "needs_retrain",
+      "复核结论应为 needs_retrain。",
+    );
+    assert(
+      response.reviewNote ===
+        "训练时长过短，本次结果不纳入有效训练趋势，请患者重新完成训练。",
+      "复核说明与请求不一致。",
+    );
+    assert(response.reviewedByUserId, "复核结果缺少 reviewedByUserId。");
+    assert(response.reviewedAt, "复核结果缺少 reviewedAt。");
+    assert(
+      response.qualityFlag === "suspicious",
+      "人工复核不应改写原始 qualityFlag。",
+    );
+    assert(
+      response.abnormalFlag === true,
+      "人工复核不应改写原始 abnormalFlag。",
+    );
+    completedChecks.add("suspicious_result_reviewed");
+    return response;
+  });
+
+  await step("训练记录持久化复核结论且保留原始质量状态", async () => {
+    const records = await request(`/patients/${patient.id}/training-records`, {
+      token: patientLogin.accessToken,
+    });
+    const persistedSession = records.sessions?.find(
+      (item) => item.id === suspiciousSession.id,
+    );
+    assert(persistedSession, "训练记录中未找到可疑训练 session。");
+    assert(
+      persistedSession.sessionStatus === "upload_failed",
+      "可疑训练结果应将 sessionStatus 标记为 upload_failed。",
+    );
+    assert(
+      persistedSession.result?.id === suspiciousResult.id,
+      "训练记录未关联可疑 result。",
+    );
+    assert(
+      persistedSession.result?.reviewStatus === "reviewed",
+      "训练记录未持久化 reviewStatus。",
+    );
+    assert(
+      persistedSession.result?.reviewConclusion === "needs_retrain",
+      "训练记录未持久化 reviewConclusion。",
+    );
+    assert(
+      persistedSession.result?.reviewNote === reviewedResult.reviewNote,
+      "训练记录未持久化 reviewNote。",
+    );
+    completedChecks.add("review_fields_persisted");
+    assert(
+      persistedSession.result?.qualityFlag === "suspicious",
+      "训练记录中原始 qualityFlag 不应被复核改写。",
+    );
+    assert(
+      persistedSession.result?.abnormalFlag === true,
+      "训练记录中原始 abnormalFlag 不应被复核改写。",
+    );
+    completedChecks.add("review_preserved_quality_flags");
+  });
+
+  await step("审计日志记录训练结果复核", async () => {
+    const reviewLogs = await request(
+      `/admin/audit-logs?${new URLSearchParams({
+        action: "training_result.review",
+        targetType: "training_result",
+        targetId: suspiciousResult.id,
+        result: "success",
+        limit: "10",
+      })}`,
+      { token: adminLogin.accessToken },
+    );
+    assert(reviewLogs.length > 0, "未查询到 training_result.review 审计日志。");
+    const reviewLog = reviewLogs.find(
+      (item) =>
+        item.metadata?.sessionId === suspiciousSession.id &&
+        item.metadata?.patientId === patient.id &&
+        item.metadata?.reviewConclusion === "needs_retrain",
+    );
+    assert(
+      reviewLog,
+      "training_result.review 审计日志缺少 sessionId/patientId/reviewConclusion 元数据。",
+    );
+    completedChecks.add("review_audit_log_persisted");
+  });
+
+  await step("拒绝重复复核同一可疑训练结果", async () => {
+    const duplicateReview = await request(
+      `/training-results/${suspiciousResult.id}/review`,
+      {
+        method: "PATCH",
+        token: doctorLogin.accessToken,
+        body: {
+          reviewConclusion: "excluded_from_analysis",
+          reviewNote: "重复复核应被阻断。",
+        },
+        expectedStatus: 400,
+      },
+    );
+    assert(
+      typeof duplicateReview.message === "string" &&
+        duplicateReview.message.length > 0,
+      "重复复核被拒绝时应返回明确错误消息。",
+    );
+    completedChecks.add("duplicate_review_rejected");
   });
 
   await step("审计日志记录训练开始与结果提交", async () => {
@@ -236,6 +475,12 @@ try {
     assert(submitLogs.length > 0, "未查询到 training_result.submit 审计日志。");
   });
 
+  const missingChecks = verifyCompletedContractChecks(completedChecks);
+  assert(
+    missingChecks.length === 0,
+    `接口契约验收缺少复核闭环检查：${missingChecks.join("、")}。`,
+  );
+
   console.log("接口契约验收通过。");
 } finally {
   await cleanupCreatedData();
@@ -249,7 +494,41 @@ async function login(account) {
   });
 }
 
-function buildTrainingResultPayload({ source, session, game }) {
+async function createTrainingSession({
+  token,
+  patient,
+  currentPlan,
+  planItem,
+  game,
+  caseKey,
+}) {
+  const startedAt = new Date().toISOString();
+  const response = await request("/training-sessions", {
+    method: "POST",
+    token,
+    body: {
+      patientId: patient.id,
+      rehabPlanId: currentPlan.id,
+      planItemId: planItem.id,
+      gameContentId: game.id,
+      idempotencyKey: `${runKey}_${caseKey}`,
+      gameRunId: `${runKey}_${caseKey}_browser_pose`,
+      deviceCode: `${runKey}_${caseKey}_camera_device`,
+      calibrationStatus: "checked",
+      clientStartedAt: startedAt,
+    },
+  });
+  created.sessionIds.push(response.id);
+  return response;
+}
+
+function buildTrainingResultPayload({
+  source,
+  session,
+  game,
+  caseKey = "valid",
+  overrides = {},
+}) {
   const clientGeneratedAt = new Date().toISOString();
   const metricsSummary = {
     source,
@@ -259,14 +538,16 @@ function buildTrainingResultPayload({ source, session, game }) {
     clientGeneratedAt,
     rawPayloadHash: hashPayload({
       runKey,
+      caseKey,
       source,
       sessionId: session.id,
       clientGeneratedAt,
+      overrides,
     }),
     contractVerification: true,
   };
 
-  return {
+  const payload = {
     score: 88,
     completionRate: 0.86,
     durationSeconds: 120,
@@ -281,6 +562,7 @@ function buildTrainingResultPayload({ source, session, game }) {
       metric("arm_raise_accuracy", 0.88, "ratio", 36),
     ],
   };
+  return { ...payload, ...overrides, metricsSummary };
 }
 
 function metric(metricType, metricValue, unit, sampleCount) {
@@ -340,21 +622,32 @@ async function readResponseBody(response) {
 }
 
 async function cleanupCreatedData() {
-  if (!created.sessionId) return;
+  if (!created.sessionIds.length) return;
+  const sessionIds = [...created.sessionIds].filter(Boolean);
   await prisma.auditLog.deleteMany({
-    where: { targetId: created.sessionId },
+    where: { targetId: { in: sessionIds } },
   });
   await prisma.motionMetric.deleteMany({
-    where: { trainingSessionId: created.sessionId },
+    where: { trainingSessionId: { in: sessionIds } },
   });
-  await prisma.trainingResult.deleteMany({
-    where: { sessionId: created.sessionId },
+  const createdResults = await prisma.trainingResult.findMany({
+    where: { sessionId: { in: sessionIds } },
+    select: { id: true },
   });
+  const resultIds = createdResults.map((result) => result.id);
+  if (resultIds.length) {
+    await prisma.auditLog.deleteMany({
+      where: { targetType: "training_result", targetId: { in: resultIds } },
+    });
+    await prisma.trainingResult.deleteMany({
+      where: { id: { in: resultIds } },
+    });
+  }
   await prisma.trainingSession.deleteMany({
-    where: { id: created.sessionId },
+    where: { id: { in: sessionIds } },
   });
   const remaining = await prisma.trainingSession.count({
-    where: { id: created.sessionId },
+    where: { id: { in: sessionIds } },
   });
   assert(remaining === 0, "接口契约验收数据清理失败。");
   console.log("已清理本次接口契约验收数据。");
