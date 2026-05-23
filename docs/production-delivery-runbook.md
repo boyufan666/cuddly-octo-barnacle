@@ -30,6 +30,17 @@
 - PostgreSQL 密码
 - Redis 密码或访问策略
 - AI/语音服务密钥
+- `AI_PROVIDER`
+- `AI_MODEL_VERSION`
+- `AI_MODEL_ENDPOINT`
+- `AI_API_KEY_REF`
+- `AI_PROMPT_VERSION`
+- `AI_CALL_LOG_RETENTION_DAYS`
+- `AI_HUMAN_REVIEW_REQUIRED`
+- `SPEECH_PROVIDER`
+- `SPEECH_TO_TEXT_ENDPOINT`
+- `SPEECH_API_KEY_REF`
+- `SPEECH_MODEL_VERSION`
 - 对象存储或静态资源访问密钥
 
 不得使用本地 `.env`、固定通用密码、开发数据库或开发 JWT 密钥上线。
@@ -53,6 +64,8 @@
 - 是否允许上传健康数据、语音转写和评估摘要到第三方服务。
 - 模型调用日志保存内容、脱敏策略和审计要求。
 - 医师是否必须人工确认 AI 生成结果。
+
+生产配置必须显式提供 `AI_PROVIDER`、`AI_MODEL_VERSION`、`AI_MODEL_ENDPOINT`、`AI_API_KEY_REF`、`AI_PROMPT_VERSION`、`AI_CALL_LOG_RETENTION_DAYS`、`AI_HUMAN_REVIEW_REQUIRED`、`SPEECH_PROVIDER`、`SPEECH_TO_TEXT_ENDPOINT`、`SPEECH_API_KEY_REF` 和 `SPEECH_MODEL_VERSION`。`AI_MODEL_ENDPOINT` 与 `SPEECH_TO_TEXT_ENDPOINT` 必须使用正式 HTTPS 地址；供应商、模型、提示词、密钥引用不能包含 `mock`、`demo` 或 `local` 标记；`AI_API_KEY_REF` 与 `SPEECH_API_KEY_REF` 必须使用 `secret-manager://...` 形式的密钥引用，不能把真实密钥值直接写入环境变量；`AI_HUMAN_REVIEW_REQUIRED` 必须为 `true`；调用日志留存天数必须为 30 到 3650 的整数。
 
 未完成上述接入时，只能交付结构化录入和接口边界，不能宣传真实 AI 自动评估已完成。
 
@@ -103,7 +116,7 @@ pnpm build
 pnpm --filter @rehab-platform/api exec jest --runInBand
 ```
 
-`pnpm delivery:check:production` 必须在正式 `DATABASE_URL`、`REDIS_URL`、`JWT_SECRET`、`WEB_ORIGIN`、`NEXT_PUBLIC_API_BASE_URL` 和 `DEFAULT_PATIENT_PASSWORD` 已由客户或运维显式配置后运行。缺少正式值、仍指向 localhost、使用开发密钥、固定密码或 HTTP 地址时应失败，不允许脚本自行兜底。
+`pnpm delivery:check:production` 必须在正式 `DATABASE_URL`、`REDIS_URL`、`JWT_SECRET`、`WEB_ORIGIN`、`NEXT_PUBLIC_API_BASE_URL`、`DEFAULT_PATIENT_PASSWORD`、AI 服务配置和语音转写服务配置已由客户或运维显式配置后运行。缺少正式值、仍指向 localhost、使用开发密钥、固定密码、HTTP 地址、mock/demo/local 标记或未要求人工复核时应失败，不允许脚本自行兜底。
 
 真实闭环验收：
 

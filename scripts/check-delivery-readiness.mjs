@@ -27,6 +27,17 @@ const requiredProductionEnv = [
   "WEB_ORIGIN",
   "NEXT_PUBLIC_API_BASE_URL",
   "DEFAULT_PATIENT_PASSWORD",
+  "AI_PROVIDER",
+  "AI_MODEL_VERSION",
+  "AI_MODEL_ENDPOINT",
+  "AI_API_KEY_REF",
+  "AI_PROMPT_VERSION",
+  "AI_CALL_LOG_RETENTION_DAYS",
+  "AI_HUMAN_REVIEW_REQUIRED",
+  "SPEECH_PROVIDER",
+  "SPEECH_TO_TEXT_ENDPOINT",
+  "SPEECH_API_KEY_REF",
+  "SPEECH_MODEL_VERSION",
 ];
 
 const weakOrLocalValues = new Map([
@@ -97,9 +108,18 @@ export function checkProductionEnvironment(env) {
     if (/localhost|127\.0\.0\.1|0\.0\.0\.0/i.test(value)) {
       failures.push(`${name} 指向 localhost，本项必须使用正式环境地址。`);
     }
+
+    if (isDemoMockOrLocalValue(value)) {
+      failures.push(`${name} 包含 mock/demo/local 标记，不能作为正式 AI/语音配置。`);
+    }
   }
 
-  for (const name of ["WEB_ORIGIN", "NEXT_PUBLIC_API_BASE_URL"]) {
+  for (const name of [
+    "WEB_ORIGIN",
+    "NEXT_PUBLIC_API_BASE_URL",
+    "AI_MODEL_ENDPOINT",
+    "SPEECH_TO_TEXT_ENDPOINT",
+  ]) {
     const value = env[name]?.trim();
     if (value && !value.startsWith("https://")) {
       failures.push(`${name} 必须使用正式 HTTPS 地址。`);
@@ -111,7 +131,30 @@ export function checkProductionEnvironment(env) {
     failures.push("JWT_SECRET 长度不足 32 字符。");
   }
 
+  const aiRetentionDays = env.AI_CALL_LOG_RETENTION_DAYS?.trim();
+  if (aiRetentionDays) {
+    const days = Number(aiRetentionDays);
+    if (!Number.isInteger(days) || days < 30 || days > 3650) {
+      failures.push("AI_CALL_LOG_RETENTION_DAYS 必须是 30 到 3650 之间的整数。");
+    }
+  }
+
+  if (env.AI_HUMAN_REVIEW_REQUIRED?.trim() !== "true") {
+    failures.push("AI_HUMAN_REVIEW_REQUIRED 必须显式配置为 true。");
+  }
+
+  for (const name of ["AI_API_KEY_REF", "SPEECH_API_KEY_REF"]) {
+    const value = env[name]?.trim();
+    if (value && !value.startsWith("secret-manager://")) {
+      failures.push(`${name} 必须使用 secret-manager:// 形式的密钥引用，不能直接填写密钥值。`);
+    }
+  }
+
   return { failures };
+}
+
+function isDemoMockOrLocalValue(value) {
+  return /(^|[^a-z0-9])(mock|demo|local)([^a-z0-9]|$)/i.test(value);
 }
 
 export function runDeliveryReadinessChecks({
