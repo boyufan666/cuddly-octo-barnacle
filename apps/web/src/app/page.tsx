@@ -29,6 +29,9 @@ import {
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, api } from "@/lib/api";
 import {
+  buildBrowserPoseEvidenceInputFromRecord,
+} from "@/lib/browser-pose-evidence";
+import {
   checkPoseReadiness,
   createPoseTrainingRuntime,
   poseModelVersion,
@@ -468,6 +471,42 @@ const emptyTrainingResultForm: TrainingResultFormState = {
   motionMetrics: "",
 };
 
+type BrowserPoseEvidenceFormState = {
+  testerName: string;
+  siteName: string;
+  environment: string;
+  browserName: string;
+  browserVersion: string;
+  cameraDeviceIdHash: string;
+  cameraResolution: string;
+  patientExportId: string;
+  confirmedByDoctorId: string;
+  confirmedAt: string;
+  auditLogIdsText: string;
+  screenshotPath: string;
+  screenshotCapturedAt: string;
+  recordingPath: string;
+  recordingCapturedAt: string;
+};
+
+const emptyBrowserPoseEvidenceForm: BrowserPoseEvidenceFormState = {
+  testerName: "",
+  siteName: "",
+  environment: "",
+  browserName: "",
+  browserVersion: "",
+  cameraDeviceIdHash: "",
+  cameraResolution: "",
+  patientExportId: "",
+  confirmedByDoctorId: "",
+  confirmedAt: "",
+  auditLogIdsText: "",
+  screenshotPath: "",
+  screenshotCapturedAt: "",
+  recordingPath: "",
+  recordingCapturedAt: "",
+};
+
 type UnityTrainingBridgeStatus =
   | {
       state: "idle";
@@ -625,6 +664,8 @@ export default function Home() {
     useState<UnityBuildFormState>(emptyUnityBuildForm);
   const [trainingResultForm, setTrainingResultForm] =
     useState<TrainingResultFormState>(emptyTrainingResultForm);
+  const [browserPoseEvidenceForm, setBrowserPoseEvidenceForm] =
+    useState<BrowserPoseEvidenceFormState>(emptyBrowserPoseEvidenceForm);
   const [trainingReadiness, setTrainingReadiness] = useState<TrainingReadiness>(
     emptyTrainingReadiness,
   );
@@ -680,6 +721,7 @@ export default function Home() {
     setActiveTrainingSession(null);
     setTrainingReadiness(emptyTrainingReadiness);
     setTrainingResultForm(emptyTrainingResultForm);
+    setBrowserPoseEvidenceForm(emptyBrowserPoseEvidenceForm);
     setGameContentCreateForm(emptyGameContentCreateForm);
     setUnityBuildForm(emptyUnityBuildForm);
     setAuditLogFilters(defaultAuditLogFilters);
@@ -836,6 +878,7 @@ export default function Home() {
     setActiveTrainingSession(null);
     setTrainingReadiness(emptyTrainingReadiness);
     setTrainingResultForm(emptyTrainingResultForm);
+    setBrowserPoseEvidenceForm(emptyBrowserPoseEvidenceForm);
     await reloadRoleData(session, patientId);
   }
 
@@ -876,6 +919,13 @@ export default function Home() {
     value: DataExportFormState[keyof DataExportFormState],
   ) {
     setDataExportForm((current) => ({ ...current, [field]: value }));
+  }
+
+  function updateBrowserPoseEvidenceForm(
+    field: keyof BrowserPoseEvidenceFormState,
+    value: string,
+  ) {
+    setBrowserPoseEvidenceForm((current) => ({ ...current, [field]: value }));
   }
 
   function updateGameContentCreateForm<K extends keyof GameContentCreateFormState>(
@@ -1764,7 +1814,14 @@ export default function Home() {
               />
             )}
             {active === "result" && (
-              <ResultScreen trainingRecords={visibleTrainingRecords} />
+              <ResultScreen
+                patient={data.patient}
+                currentPlan={currentPlan}
+                trainingRecords={visibleTrainingRecords}
+                readiness={trainingReadiness}
+                evidenceForm={browserPoseEvidenceForm}
+                onEvidenceFormChange={updateBrowserPoseEvidenceForm}
+              />
             )}
             {active === "family" && (
               <FamilyScreen caregiverSummary={data.caregiverSummary} />
@@ -4532,12 +4589,27 @@ function GameScreen({
 }
 
 function ResultScreen({
+  patient,
+  currentPlan,
   trainingRecords,
+  readiness,
+  evidenceForm,
+  onEvidenceFormChange,
 }: {
+  patient?: PatientProfile;
+  currentPlan?: RehabPlan | null;
   trainingRecords?: TrainingRecordsResponse;
+  readiness: TrainingReadiness;
+  evidenceForm: BrowserPoseEvidenceFormState;
+  onEvidenceFormChange: (
+    field: keyof BrowserPoseEvidenceFormState,
+    value: string,
+  ) => void;
 }) {
   const latest = trainingRecords?.sessions.find((session) => session.result);
   const result = latest?.result;
+  const browserPoseSession =
+    latest?.gameContent.runtimeType === "browser_pose_game" ? latest : undefined;
 
   return (
     <ScreenGrid
@@ -4585,6 +4657,16 @@ function ResultScreen({
                 icon={HeartPulse}
               />
             </div>
+            {browserPoseSession ? (
+              <BrowserPoseEvidencePanel
+                patient={patient}
+                currentPlan={currentPlan}
+                session={browserPoseSession}
+                readiness={readiness}
+                form={evidenceForm}
+                onFormChange={onEvidenceFormChange}
+              />
+            ) : null}
           </>
         ) : (
           <div className="mt-8 rounded-3xl border border-dashed border-[#c9e3e7] bg-white/70 p-8">
@@ -4598,6 +4680,249 @@ function ResultScreen({
         )}
       </GlassCard>
     </ScreenGrid>
+  );
+}
+
+function BrowserPoseEvidencePanel({
+  patient,
+  currentPlan,
+  session,
+  readiness,
+  form,
+  onFormChange,
+}: {
+  patient?: PatientProfile;
+  currentPlan?: RehabPlan | null;
+  session: TrainingRecordsResponse["sessions"][number];
+  readiness: TrainingReadiness;
+  form: BrowserPoseEvidenceFormState;
+  onFormChange: (
+    field: keyof BrowserPoseEvidenceFormState,
+    value: string,
+  ) => void;
+}) {
+  const [message, setMessage] = useState<string | null>(null);
+  const result = session.result;
+  const planItem = currentPlan?.items.find((item) => item.id === session.planItemId);
+  const browserRuntimeReady =
+    readiness.poseRuntimeStatus === "ready" &&
+    Boolean(readiness.poseModelVersion) &&
+    Boolean(readiness.poseLandmarkCount) &&
+    readiness.poseAverageVisibility !== undefined &&
+    Boolean(readiness.poseCheckedAt);
+
+  function handleDownload() {
+    setMessage(null);
+    if (!patient || !currentPlan || !planItem || !result) {
+      setMessage("缺少患者、当前方案、方案项目或训练结果，不能导出实机证据。");
+      return;
+    }
+    if (!browserRuntimeReady) {
+      setMessage("缺少姿态识别就绪记录，请先在训练准备页完成摄像头和姿态检测。");
+      return;
+    }
+
+    const evidenceResult = buildBrowserPoseEvidenceInputFromRecord({
+      acceptance: {
+        acceptedAt: result.submittedAt,
+        testerName: form.testerName.trim(),
+        siteName: form.siteName.trim(),
+        environment: form.environment.trim(),
+      },
+      browser: {
+        name: form.browserName.trim(),
+        version: form.browserVersion.trim(),
+        userAgent: navigator.userAgent,
+        pageUrl: window.location.href,
+      },
+      device: {
+        deviceCode: session.deviceCode ?? "",
+        cameraLabel: readiness.cameraLabel ?? "",
+        cameraDeviceIdHash: form.cameraDeviceIdHash.trim(),
+        resolution: form.cameraResolution.trim(),
+      },
+      poseRuntime: {
+        runtimeType: "browser_pose_game",
+        modelName: "MediaPipe PoseLandmarker",
+        modelVersion: readiness.poseModelVersion ?? "",
+        poseLandmarkCount: readiness.poseLandmarkCount ?? 0,
+        checkedAt: readiness.poseCheckedAt ?? "",
+        averageVisibility: readiness.poseAverageVisibility ?? Number.NaN,
+      },
+      patient: {
+        patientId: patient.id,
+        patientExportId: form.patientExportId.trim(),
+      },
+      gameContent: session.gameContent,
+      rehabPlan: {
+        rehabPlanId: currentPlan.id,
+        planItemId: planItem.id,
+        confirmedByDoctorId: form.confirmedByDoctorId.trim(),
+        confirmedAt: form.confirmedAt.trim(),
+      },
+      trainingSession: session,
+      trainingResult: result,
+      motionMetrics: session.motionMetrics ?? [],
+      auditEvidence: {
+        auditLogIds: parseEvidenceTextList(form.auditLogIdsText),
+        requiredActions: ["training_session.start", "training_result.submit"],
+        checkedAt: new Date().toISOString(),
+      },
+      artifacts: {
+        screenshots: [
+          {
+            label: "训练完成页",
+            path: form.screenshotPath.trim(),
+            capturedAt: form.screenshotCapturedAt.trim(),
+          },
+        ],
+        recordings: [
+          {
+            label: "训练过程录屏",
+            path: form.recordingPath.trim(),
+            capturedAt: form.recordingCapturedAt.trim(),
+          },
+        ],
+      },
+    });
+
+    if (!evidenceResult.ok) {
+      setMessage(evidenceResult.error);
+      return;
+    }
+
+    downloadJsonFile(
+      evidenceResult.evidence,
+      `browser-pose-evidence-${session.id}.json`,
+    );
+    setMessage("浏览器体感实机证据 JSON 已生成，请使用 pnpm verify:browser-pose-evidence 校验。");
+  }
+
+  return (
+    <div className="mt-8 rounded-[28px] border border-[#c9e3e7] bg-[#eefaf7] p-5">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <Badge label="实机证据包" icon={FileText} />
+          <h4 className="mt-3 text-2xl font-black text-[#173945]">
+            导出浏览器体感验收 JSON
+          </h4>
+          <p className="mt-2 max-w-3xl font-bold leading-7 text-[#526b74]">
+            仅在训练结果已入库后生成证据。现场验收人、审计日志和截图录屏必须显式填写，系统不会自动补造缺失证据。
+          </p>
+        </div>
+        <Chip tone={browserRuntimeReady ? "success" : "warning"}>
+          {browserRuntimeReady ? "姿态记录已就绪" : "缺姿态就绪记录"}
+        </Chip>
+      </div>
+
+      <div className="mt-5 grid gap-4 md:grid-cols-3">
+        <FieldLine
+          label="验收人员"
+          value={form.testerName}
+          onChange={(value) => onFormChange("testerName", value)}
+        />
+        <FieldLine
+          label="验收现场"
+          value={form.siteName}
+          onChange={(value) => onFormChange("siteName", value)}
+        />
+        <FieldLine
+          label="环境标识"
+          value={form.environment}
+          onChange={(value) => onFormChange("environment", value)}
+        />
+        <FieldLine
+          label="浏览器名称"
+          value={form.browserName}
+          onChange={(value) => onFormChange("browserName", value)}
+        />
+        <FieldLine
+          label="浏览器版本"
+          value={form.browserVersion}
+          onChange={(value) => onFormChange("browserVersion", value)}
+        />
+        <FieldLine
+          label="摄像头分辨率"
+          value={form.cameraResolution}
+          onChange={(value) => onFormChange("cameraResolution", value)}
+        />
+        <FieldLine
+          label="摄像头设备哈希"
+          value={form.cameraDeviceIdHash}
+          onChange={(value) => onFormChange("cameraDeviceIdHash", value)}
+        />
+        <FieldLine
+          label="脱敏患者导出 ID"
+          value={form.patientExportId}
+          onChange={(value) => onFormChange("patientExportId", value)}
+        />
+        <FieldLine
+          label="确认方案医师 ID"
+          value={form.confirmedByDoctorId}
+          onChange={(value) => onFormChange("confirmedByDoctorId", value)}
+        />
+        <FieldLine
+          label="方案确认时间"
+          value={form.confirmedAt}
+          onChange={(value) => onFormChange("confirmedAt", value)}
+        />
+        <FieldLine
+          label="训练完成截图路径"
+          value={form.screenshotPath}
+          onChange={(value) => onFormChange("screenshotPath", value)}
+        />
+        <FieldLine
+          label="截图时间"
+          value={form.screenshotCapturedAt}
+          onChange={(value) => onFormChange("screenshotCapturedAt", value)}
+        />
+        <FieldLine
+          label="训练录屏路径"
+          value={form.recordingPath}
+          onChange={(value) => onFormChange("recordingPath", value)}
+        />
+        <FieldLine
+          label="录屏时间"
+          value={form.recordingCapturedAt}
+          onChange={(value) => onFormChange("recordingCapturedAt", value)}
+        />
+        <TextAreaField
+          label="审计日志 ID（每行一条）"
+          value={form.auditLogIdsText}
+          onChange={(value) => onFormChange("auditLogIdsText", value)}
+        />
+      </div>
+
+      <div className="mt-5 rounded-3xl border border-white/75 bg-white/70 p-4">
+        <StatusList
+          items={[
+            ["训练会话", `${session.sessionStatus} / ${session.syncStatus}`, session.sessionStatus === "completed" && session.syncStatus === "synced" ? "success" : "warning"],
+            ["训练来源", result?.source ?? "待采集", result?.source === "browser_pose_game" ? "success" : "warning"],
+            ["动作指标", `${session.motionMetrics?.length ?? 0} 项`, (session.motionMetrics?.length ?? 0) >= 4 ? "success" : "warning"],
+            ["摄像头标签", readiness.cameraLabel ?? "未记录", readiness.cameraLabel ? "success" : "warning"],
+          ]}
+        />
+      </div>
+
+      {message ? (
+        <p className="mt-4 rounded-2xl border border-[#d8b76a] bg-[#fff8db] p-4 font-bold leading-7 text-[#7a5a1f]">
+          {message}
+        </p>
+      ) : null}
+
+      <div className="mt-5 flex flex-wrap items-center justify-between gap-4">
+        <p className="font-bold leading-7 text-[#526b74]">
+          导出后请把 JSON、截图、录屏和审计截图一起归档；模板占位符或空字段会被校验脚本拒绝。
+        </p>
+        <PrimaryButton
+          className="bg-[#173945] hover:bg-[#1f7a8c]"
+          onClick={handleDownload}
+          type="button"
+        >
+          导出证据 JSON
+        </PrimaryButton>
+      </div>
+    </div>
   );
 }
 
@@ -8368,6 +8693,20 @@ function downloadExportedFile(exported: DownloadedExport) {
   anchor.click();
   anchor.remove();
   URL.revokeObjectURL(url);
+}
+
+function downloadJsonFile(value: unknown, filename: string) {
+  const blob = new Blob([JSON.stringify(value, null, 2)], {
+    type: "application/json;charset=utf-8",
+  });
+  downloadExportedFile({ blob, filename });
+}
+
+function parseEvidenceTextList(value: string) {
+  return value
+    .split(/\r?\n|,/)
+    .map((item) => item.trim())
+    .filter(Boolean);
 }
 
 function parseOptionalDate(value: string | undefined, label: string) {
