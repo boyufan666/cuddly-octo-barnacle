@@ -25,6 +25,7 @@ const prisma = new PrismaClient();
 const seedPassword = "253913";
 const patientAccount = "patient001";
 const adminAccount = "admin";
+const auditorAccount = "auditor001";
 const doctorAccount = "doctor001";
 const runKey = `contract_${Date.now()}_${randomUUID().slice(0, 8)}`;
 
@@ -35,6 +36,19 @@ const created = {
   auditLogIds: [],
 };
 const completedChecks = new Set();
+const expectedPatientExportColumns = [
+  "patientExportId",
+  "maskedName",
+  "gender",
+  "age",
+  "maskedMobilePhone",
+  "maskedCaregiverName",
+  "maskedCaregiverPhone",
+  "responsibleDoctor",
+  "currentRiskLevel",
+  "status",
+  "createdAt",
+];
 
 console.log(
   "接口契约验收：本脚本验证本地 API 真实写入、运行时约束和清理流程。",
@@ -73,6 +87,10 @@ try {
       loginResponse.context?.adminPermissions?.includes("audit.read"),
       "admin 缺少 audit.read 权限。",
     );
+    assert(
+      loginResponse.context?.adminPermissions?.includes("data.export"),
+      "admin 缺少 data.export 权限。",
+    );
     return loginResponse;
   });
 
@@ -84,6 +102,20 @@ try {
       "doctor001 未绑定 patient001 负责患者，请先执行 seed。",
     );
     completedChecks.add("doctor_login_verified");
+    return loginResponse;
+  });
+
+  const auditorLogin = await step("只读审计账号登录", async () => {
+    const loginResponse = await login(auditorAccount);
+    assert(loginResponse.accessToken, "只读审计登录未返回 accessToken。");
+    assert(
+      loginResponse.context?.adminPermissions?.includes("audit.read"),
+      "auditor001 缺少 audit.read 权限。",
+    );
+    assert(
+      !loginResponse.context?.adminPermissions?.includes("data.export"),
+      "auditor001 不应具备 data.export 权限。",
+    );
     return loginResponse;
   });
 
@@ -584,6 +616,180 @@ try {
     completedChecks.add("consent_revoke_audit_log_persisted");
   });
 
+  const exportReason = `本地契约验收导出原因 ${runKey}：验证脱敏，不应出现在导出结果或审计 metadata。`;
+  await step("管理员脱敏导出患者数据", async () => {
+    const requestedAt = new Date().toISOString();
+    const exported = await request("/admin/exports/patients", {
+      method: "POST",
+      token: adminLogin.accessToken,
+      body: {
+        format: "json",
+        reason: exportReason,
+        patientId: patient.id,
+        limit: "10",
+      },
+    });
+    const payload = exported;
+    assert(payload?.dataset === "patients", "患者导出 dataset 应为 patients。");
+    assert(payload?.format === "json", "患者导出 format 应为 json。");
+    assert(payload?.rowCount === 1, "按 patientId 导出患者数据应只有 1 行。");
+    assertStringArrayEqual(
+      payload.columns,
+      expectedPatientExportColumns,
+      "患者导出 columns 必须是完整脱敏列集合。",
+    );
+    const row = payload.rows?.[0];
+    assert(row, "患者导出缺少数据行。");
+    assert(
+      typeof row.patientExportId === "string" &&
+        row.patientExportId.startsWith("patient_"),
+      "患者导出必须使用伪匿名 patientExportId。",
+    );
+    assert(row.maskedName === "李*", "患者导出姓名必须脱敏。");
+    assert(row.maskedMobilePhone === "138****6721", "患者导出手机号必须脱敏。");
+    assert(row.maskedCaregiverName === "李*", "照护人姓名必须脱敏。");
+    assert(
+      row.maskedCaregiverPhone === "139****8206",
+      "照护人手机号必须脱敏。",
+    );
+    const exportedText = JSON.stringify(exported);
+    assert(
+      !exportedText.includes(patient.id),
+      "患者导出不得包含原始 patientId。",
+    );
+    assert(!exportedText.includes("李秀兰"), "患者导出不得包含完整姓名。");
+    assert(!exportedText.includes("李明"), "患者导出不得包含完整照护人姓名。");
+    assert(
+      !exportedText.includes("13800006721"),
+      "患者导出不得包含完整手机号。",
+    );
+    assert(
+      !exportedText.includes("13900008206"),
+      "患者导出不得包含完整照护人手机号。",
+    );
+    assert(
+      !exportedText.includes(exportReason),
+      "患者导出不得包含导出原因全文。",
+    );
+    completedChecks.add("desensitized_patient_export_verified");
+
+    const exportLog = await findDataExportAuditLog({
+      adminToken: adminLogin.accessToken,
+      actorUserId: adminLogin.user.id,
+      dataset: "patients",
+      result: "success",
+      requestedAt,
+      reason: exportReason,
+      expectedMetadata: (metadata) =>
+        metadata?.desensitized === true &&
+        metadata?.format === "json" &&
+        metadata?.rowCount === 1 &&
+        metadata?.reasonLength === exportReason.length &&
+        assertStringArrayEqual(
+          metadata.columns,
+          expectedPatientExportColumns,
+          "data.export 审计 columns 必须是完整患者脱敏导出列集合。",
+        ) &&
+        metadata?.filters?.patientFilterApplied === true &&
+        typeof metadata?.filters?.patientExportId === "string" &&
+        metadata.filters.patientExportId.startsWith("patient_"),
+    });
+    created.auditLogIds.push(exportLog.id);
+    const auditText = JSON.stringify(exportLog);
+    assert(!auditText.includes(exportReason), "导出审计不得保存原因全文。");
+    assert(!auditText.includes(patient.id), "导出审计不得保存原始 patientId。");
+    assert(!auditText.includes("李明"), "导出审计不得保存完整照护人姓名。");
+    completedChecks.add("data_export_audit_log_persisted");
+  });
+
+  await step("拒绝医师账号导出患者数据并记录审计", async () => {
+    const deniedReason = `医师越权导出契约验收原因 ${runKey}`;
+    const requestedAt = new Date().toISOString();
+    const denied = await request("/admin/exports/patients", {
+      method: "POST",
+      token: doctorLogin.accessToken,
+      body: {
+        format: "json",
+        reason: deniedReason,
+        patientId: patient.id,
+        limit: "10",
+      },
+      expectedStatus: 403,
+    });
+    assert(
+      typeof denied.message === "string" && denied.message.length > 0,
+      "医师越权导出被拒绝时应返回明确错误消息。",
+    );
+    const deniedLog = await findDataExportAuditLog({
+      adminToken: adminLogin.accessToken,
+      actorUserId: doctorLogin.user.id,
+      dataset: "patients",
+      result: "denied",
+      requestedAt,
+      reason: deniedReason,
+      expectedMetadata: (metadata) =>
+        metadata?.desensitized === true &&
+        metadata?.stage === "authorization" &&
+        metadata?.requestedDatasetKnown === true,
+    });
+    created.auditLogIds.push(deniedLog.id);
+    const auditText = JSON.stringify(deniedLog);
+    assert(!auditText.includes(deniedReason), "拒绝导出审计不得保存原因全文。");
+    assert(
+      !auditText.includes(patient.id),
+      "拒绝导出审计不得保存原始 patientId。",
+    );
+    assert(!auditText.includes("李明"), "拒绝导出审计不得保存完整照护人姓名。");
+    completedChecks.add("doctor_export_role_denied");
+  });
+
+  await step("拒绝只读审计账号导出患者数据并记录审计", async () => {
+    const deniedReason = `只读审计越权导出契约验收原因 ${runKey}`;
+    const requestedAt = new Date().toISOString();
+    const denied = await request("/admin/exports/patients", {
+      method: "POST",
+      token: auditorLogin.accessToken,
+      body: {
+        format: "json",
+        reason: deniedReason,
+        patientId: patient.id,
+        limit: "10",
+      },
+      expectedStatus: 403,
+    });
+    assert(
+      typeof denied.message === "string" && denied.message.length > 0,
+      "只读审计越权导出被拒绝时应返回明确错误消息。",
+    );
+    const deniedLog = await findDataExportAuditLog({
+      adminToken: adminLogin.accessToken,
+      actorUserId: auditorLogin.user.id,
+      dataset: "patients",
+      result: "denied",
+      requestedAt,
+      reason: deniedReason,
+      expectedMetadata: (metadata) =>
+        metadata?.desensitized === true &&
+        metadata?.stage === "authorization" &&
+        metadata?.requestedDatasetKnown === true,
+    });
+    created.auditLogIds.push(deniedLog.id);
+    const auditText = JSON.stringify(deniedLog);
+    assert(
+      !auditText.includes(deniedReason),
+      "只读审计拒绝导出审计不得保存原因全文。",
+    );
+    assert(
+      !auditText.includes(patient.id),
+      "只读审计拒绝导出审计不得保存原始 patientId。",
+    );
+    assert(
+      !auditText.includes("李明"),
+      "只读审计拒绝导出审计不得保存完整照护人姓名。",
+    );
+    completedChecks.add("auditor_export_role_denied");
+  });
+
   const missingChecks = verifyCompletedContractChecks(completedChecks);
   assert(
     missingChecks.length === 0,
@@ -721,6 +927,51 @@ function buildTrainingResultPayload({
   return { ...payload, ...overrides, metricsSummary };
 }
 
+async function findDataExportAuditLog({
+  adminToken,
+  actorUserId,
+  dataset,
+  result,
+  requestedAt,
+  reason,
+  expectedMetadata,
+}) {
+  const logs = await request(
+    `/admin/audit-logs?${new URLSearchParams({
+      action: "data.export",
+      targetType: "data_export",
+      targetId: dataset,
+      actorUserId,
+      dateFrom: requestedAt,
+      result,
+      limit: "200",
+    })}`,
+    { token: adminToken },
+  );
+  const reasonHash = hashText(reason).slice(0, 16);
+  const requestedAtMs = new Date(requestedAt).getTime();
+  const log = logs.find((item) => {
+    const metadata = item.metadata ?? {};
+    return (
+      item.actorUserId === actorUserId &&
+      new Date(item.createdAt).getTime() >= requestedAtMs &&
+      metadata.reasonHash === reasonHash &&
+      expectedMetadata(metadata)
+    );
+  });
+  assert(log, `未查询到本次 ${dataset} ${result} data.export 审计日志。`);
+  return log;
+}
+
+function assertStringArrayEqual(actual, expected, message) {
+  assert(Array.isArray(actual), message);
+  assert(actual.length === expected.length, message);
+  for (const [index, value] of expected.entries()) {
+    assert(actual[index] === value, message);
+  }
+  return true;
+}
+
 function metric(metricType, metricValue, unit, sampleCount) {
   return {
     metricType,
@@ -779,6 +1030,7 @@ async function readResponseBody(response) {
 
 async function cleanupCreatedData() {
   await restoreRevokedConsents();
+  await cleanupRecordedAuditLogs();
   if (!created.sessionIds.length) return;
   const sessionIds = [...created.sessionIds].filter(Boolean);
   await prisma.auditLog.deleteMany({
@@ -822,12 +1074,15 @@ async function restoreRevokedConsents() {
       revokedAt: null,
     },
   });
+  console.log("已恢复本次接口契约验收临时撤回的授权。");
+}
+
+async function cleanupRecordedAuditLogs() {
   if (created.auditLogIds.length) {
     await prisma.auditLog.deleteMany({
-      where: { id: { in: created.auditLogIds } },
+      where: { id: { in: Array.from(new Set(created.auditLogIds)) } },
     });
   }
-  console.log("已恢复本次接口契约验收临时撤回的授权。");
 }
 
 async function step(label, action) {
@@ -839,6 +1094,10 @@ async function step(label, action) {
 
 function hashPayload(payload) {
   return createHash("sha256").update(JSON.stringify(payload)).digest("hex");
+}
+
+function hashText(text) {
+  return createHash("sha256").update(text).digest("hex");
 }
 
 function assert(condition, message) {

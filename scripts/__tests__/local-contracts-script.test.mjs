@@ -27,7 +27,45 @@ test("local contract verifier covers the training result review workflow", () =>
   assert.match(source, /重复复核.*expectedStatus:\s*400/s);
 });
 
+test("local contract verifier covers desensitized patient export evidence", () => {
+  const source = readFileSync(scriptPath, "utf8");
+
+  assert.match(source, /\/admin\/exports\/patients/);
+  assert.match(source, /const payload = exported;/);
+  assert.match(source, /desensitized_patient_export_verified/);
+  assert.match(source, /data_export_audit_log_persisted/);
+  assert.match(source, /doctor_export_role_denied/);
+  assert.match(source, /auditor_export_role_denied/);
+  assert.doesNotMatch(source, /non_export_role_denied/);
+  assert.match(source, /data\.export/);
+  assert.match(source, /targetType:\s*"data_export"/);
+  assert.match(source, /actorUserId,/);
+  assert.match(source, /dateFrom:\s*requestedAt/);
+  assert.match(source, /result:\s*"denied"/);
+  assert.match(source, /limit:\s*"200"/);
+  assert.match(source, /expectedStatus:\s*403/);
+  assert.match(source, /patientExportId/);
+  assert.match(source, /reasonHash/);
+  assert.match(source, /reasonLength/);
+  assert.match(source, /expectedPatientExportColumns/);
+  assert.match(source, /assertStringArrayEqual\(\s*metadata\.columns/s);
+  assert.match(source, /exportReason = `[^`]*\$\{runKey\}/s);
+  assert.match(source, /deniedReason = `[^`]*\$\{runKey\}/s);
+  assert.match(source, /!exportedText\.includes\("李明"\)/);
+  assert.match(source, /!auditText\.includes\("李明"\)/);
+});
+
 test("local contract checklist requires every runtime review gate", () => {
+  assert.ok(
+    requiredLocalContractChecks.includes("desensitized_patient_export_verified"),
+  );
+  assert.ok(
+    requiredLocalContractChecks.includes("data_export_audit_log_persisted"),
+  );
+  assert.ok(requiredLocalContractChecks.includes("doctor_export_role_denied"));
+  assert.ok(requiredLocalContractChecks.includes("auditor_export_role_denied"));
+  assert.ok(!requiredLocalContractChecks.includes("non_export_role_denied"));
+
   assert.deepEqual(
     verifyCompletedContractChecks(new Set(requiredLocalContractChecks)),
     [],

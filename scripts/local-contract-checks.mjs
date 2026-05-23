@@ -10,6 +10,10 @@ export const requiredLocalContractChecks = [
   "camera_consent_revoked",
   "revoked_camera_consent_blocks_training",
   "consent_revoke_audit_log_persisted",
+  "desensitized_patient_export_verified",
+  "data_export_audit_log_persisted",
+  "doctor_export_role_denied",
+  "auditor_export_role_denied",
 ];
 
 export function verifyCompletedContractChecks(completedChecks) {
