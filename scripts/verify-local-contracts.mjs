@@ -4,7 +4,10 @@ import { createHash, randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { verifyCompletedContractChecks } from "./local-contract-checks.mjs";
+import {
+  buildConsentRestoreWhere,
+  verifyCompletedContractChecks,
+} from "./local-contract-checks.mjs";
 
 const rootDir = resolve(import.meta.dirname, "..");
 const projectEnv = readProjectEnv(resolve(rootDir, ".env"));
@@ -27,6 +30,9 @@ const runKey = `contract_${Date.now()}_${randomUUID().slice(0, 8)}`;
 
 const created = {
   sessionIds: [],
+  revokedConsentIds: [],
+  revokedAtByConsentId: {},
+  auditLogIds: [],
 };
 const completedChecks = new Set();
 
@@ -475,6 +481,109 @@ try {
     assert(submitLogs.length > 0, "未查询到 training_result.submit 审计日志。");
   });
 
+  const revokedCameraConsent = await step(
+    "患者撤回摄像头授权并阻断后续训练",
+    async () => {
+      const cameraConsent = findCurrentConsent(
+        patient.consents,
+        "camera_capture",
+      );
+      assert(
+        cameraConsent,
+        "未找到当前 camera_capture 授权，无法验证撤回阻断。",
+      );
+      const currentCameraConsentIds = await currentConsentIds(
+        patient.id,
+        patient.userId,
+        "camera_capture",
+      );
+      assert(
+        currentCameraConsentIds.includes(cameraConsent.id),
+        "当前 camera_capture 授权列表与患者详情不一致。",
+      );
+      const revokeRequestedAt = new Date().toISOString();
+
+      const revoked = await request(`/consents/${cameraConsent.id}/revoke`, {
+        method: "PATCH",
+        token: patientLogin.accessToken,
+      });
+      created.revokedConsentIds.push(...currentCameraConsentIds);
+      assert(
+        revoked.status === "revoked",
+        "摄像头授权撤回后 status 应为 revoked。",
+      );
+      assert(revoked.revokedAt, "摄像头授权撤回后应记录 revokedAt。");
+      const revokedSnapshots = await revokedConsentSnapshots(
+        currentCameraConsentIds,
+      );
+      assert(
+        revokedSnapshots.length === currentCameraConsentIds.length,
+        "摄像头授权撤回后未找到所有授权快照。",
+      );
+      for (const snapshot of revokedSnapshots) {
+        assert(
+          snapshot.status === "revoked" && snapshot.revokedAt,
+          "摄像头授权撤回后所有当前授权都应为 revoked。",
+        );
+        created.revokedAtByConsentId[snapshot.id] = snapshot.revokedAt;
+      }
+      completedChecks.add("camera_consent_revoked");
+
+      const blocked = await request("/training-sessions", {
+        method: "POST",
+        token: patientLogin.accessToken,
+        body: buildTrainingSessionPayload({
+          patient,
+          currentPlan,
+          planItem,
+          game,
+          caseKey: "camera_revoked_block",
+        }),
+        expectedStatus: 403,
+      });
+      assert(
+        typeof blocked.message === "string" &&
+          blocked.message.includes("camera_capture"),
+        "摄像头授权撤回后开始训练应被明确阻断。",
+      );
+      completedChecks.add("revoked_camera_consent_blocks_training");
+
+      return { ...revoked, revokeRequestedAt };
+    },
+  );
+
+  await step("审计日志记录摄像头授权撤回", async () => {
+    const revokeLogs = await request(
+      `/admin/audit-logs?${new URLSearchParams({
+        action: "consent.revoke",
+        targetType: "consent_record",
+        targetId: revokedCameraConsent.id,
+        result: "success",
+        limit: "10",
+      })}`,
+      { token: adminLogin.accessToken },
+    );
+    assert(revokeLogs.length > 0, "未查询到 consent.revoke 审计日志。");
+    const candidateLogs = revokeLogs.filter(
+      (item) =>
+        item.actorUserId === patient.userId &&
+        new Date(item.createdAt).getTime() >=
+          new Date(revokedCameraConsent.revokeRequestedAt).getTime(),
+    );
+    created.auditLogIds.push(...candidateLogs.map((item) => item.id));
+    const revokeLog = candidateLogs.find(
+      (item) =>
+        item.metadata?.patientId === patient.id &&
+        item.metadata?.consentType === "camera_capture",
+    );
+    assert(
+      revokeLog,
+      "consent.revoke 审计日志缺少 patientId/consentType 元数据。",
+    );
+    created.auditLogIds.push(revokeLog.id);
+    completedChecks.add("consent_revoke_audit_log_persisted");
+  });
+
   const missingChecks = verifyCompletedContractChecks(completedChecks);
   assert(
     missingChecks.length === 0,
@@ -502,24 +611,71 @@ async function createTrainingSession({
   game,
   caseKey,
 }) {
-  const startedAt = new Date().toISOString();
   const response = await request("/training-sessions", {
     method: "POST",
     token,
-    body: {
-      patientId: patient.id,
-      rehabPlanId: currentPlan.id,
-      planItemId: planItem.id,
-      gameContentId: game.id,
-      idempotencyKey: `${runKey}_${caseKey}`,
-      gameRunId: `${runKey}_${caseKey}_browser_pose`,
-      deviceCode: `${runKey}_${caseKey}_camera_device`,
-      calibrationStatus: "checked",
-      clientStartedAt: startedAt,
-    },
+    body: buildTrainingSessionPayload({
+      patient,
+      currentPlan,
+      planItem,
+      game,
+      caseKey,
+    }),
   });
   created.sessionIds.push(response.id);
   return response;
+}
+
+function buildTrainingSessionPayload({
+  patient,
+  currentPlan,
+  planItem,
+  game,
+  caseKey,
+}) {
+  return {
+    patientId: patient.id,
+    rehabPlanId: currentPlan.id,
+    planItemId: planItem.id,
+    gameContentId: game.id,
+    idempotencyKey: `${runKey}_${caseKey}`,
+    gameRunId: `${runKey}_${caseKey}_browser_pose`,
+    deviceCode: `${runKey}_${caseKey}_camera_device`,
+    calibrationStatus: "checked",
+    clientStartedAt: new Date().toISOString(),
+  };
+}
+
+function findCurrentConsent(consents, consentType) {
+  return consents?.find(
+    (consent) =>
+      consent.consentType === consentType &&
+      consent.consentVersion === "v1.2" &&
+      consent.status === "granted" &&
+      !consent.revokedAt,
+  );
+}
+
+async function currentConsentIds(patientId, subjectUserId, consentType) {
+  const consents = await prisma.consentRecord.findMany({
+    where: {
+      patientId,
+      subjectUserId,
+      consentType,
+      consentVersion: "v1.2",
+      status: "granted",
+      revokedAt: null,
+    },
+    select: { id: true },
+  });
+  return consents.map((consent) => consent.id);
+}
+
+async function revokedConsentSnapshots(consentIds) {
+  return prisma.consentRecord.findMany({
+    where: { id: { in: consentIds } },
+    select: { id: true, status: true, revokedAt: true },
+  });
 }
 
 function buildTrainingResultPayload({
@@ -622,6 +778,7 @@ async function readResponseBody(response) {
 }
 
 async function cleanupCreatedData() {
+  await restoreRevokedConsents();
   if (!created.sessionIds.length) return;
   const sessionIds = [...created.sessionIds].filter(Boolean);
   await prisma.auditLog.deleteMany({
@@ -651,6 +808,26 @@ async function cleanupCreatedData() {
   });
   assert(remaining === 0, "接口契约验收数据清理失败。");
   console.log("已清理本次接口契约验收数据。");
+}
+
+async function restoreRevokedConsents() {
+  if (!created.revokedConsentIds.length) return;
+  const consentIds = Array.from(new Set(created.revokedConsentIds)).filter(
+    Boolean,
+  );
+  await prisma.consentRecord.updateMany({
+    where: buildConsentRestoreWhere(consentIds, created.revokedAtByConsentId),
+    data: {
+      status: "granted",
+      revokedAt: null,
+    },
+  });
+  if (created.auditLogIds.length) {
+    await prisma.auditLog.deleteMany({
+      where: { id: { in: created.auditLogIds } },
+    });
+  }
+  console.log("已恢复本次接口契约验收临时撤回的授权。");
 }
 
 async function step(label, action) {

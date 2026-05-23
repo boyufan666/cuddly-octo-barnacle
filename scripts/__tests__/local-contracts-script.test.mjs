@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
+  buildConsentRestoreWhere,
   requiredLocalContractChecks,
   verifyCompletedContractChecks,
 } from "../local-contract-checks.mjs";
@@ -38,4 +39,27 @@ test("local contract checklist requires every runtime review gate", () => {
   assert.deepEqual(verifyCompletedContractChecks(incompleteChecks), [
     "review_audit_log_persisted",
   ]);
+});
+
+test("consent restore condition only targets this run's revoked snapshots", () => {
+  assert.deepEqual(
+    buildConsentRestoreWhere(["consent-a", "consent-a", "", "consent-b"], {
+      "consent-a": new Date("2026-05-23T09:00:00.000Z"),
+      "consent-b": new Date("2026-05-23T09:00:01.000Z"),
+    }),
+    {
+      OR: [
+        {
+          id: "consent-a",
+          status: "revoked",
+          revokedAt: new Date("2026-05-23T09:00:00.000Z"),
+        },
+        {
+          id: "consent-b",
+          status: "revoked",
+          revokedAt: new Date("2026-05-23T09:00:01.000Z"),
+        },
+      ],
+    },
+  );
 });
