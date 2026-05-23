@@ -1,0 +1,782 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>阿尔茨海默病 AI+体感康复平台 - 客户原型</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <section class="screen login-screen" data-screen="01-login-roles">
+      <div class="login-hero">
+        <div class="brand-lockup">
+          <div class="brand-mark">康</div>
+          <div>
+            <div class="eyebrow">AI + Somatic Rehab Platform</div>
+            <h1>阿尔茨海默病 AI+体感康复平台</h1>
+          </div>
+        </div>
+        <div class="loop-strip">
+          <span>AI 评估</span>
+          <b></b>
+          <span>风险分级</span>
+          <b></b>
+          <span>方案匹配</span>
+          <b></b>
+          <span>体感训练</span>
+          <b></b>
+          <span>医师回看</span>
+        </div>
+        <div class="hero-message">
+          <p>面向患者、医师、家属和运营后台的一体化康复闭环。</p>
+          <p>从首次建档到训练数据回传，每一步都有授权、留痕与可解释结果。</p>
+        </div>
+        <div class="hero-metrics">
+          <div>
+            <strong>13</strong>
+            <span>核心原型画面</span>
+          </div>
+          <div>
+            <strong>4</strong>
+            <span>角色入口</span>
+          </div>
+          <div>
+            <strong>1</strong>
+            <span>康复闭环</span>
+          </div>
+        </div>
+      </div>
+      <div class="login-panel">
+        <div class="panel-head">
+          <span class="status-dot"></span>
+          <span>统一身份入口</span>
+        </div>
+        <div class="role-switch">
+          <button class="active">患者端</button>
+          <button>家属端</button>
+          <button>医师端</button>
+          <button>管理后台</button>
+        </div>
+        <label class="field-label">账号</label>
+        <div class="input-line">patient_001</div>
+        <label class="field-label">密码</label>
+        <div class="input-line masked">••••••••</div>
+        <div class="consent-row">
+          <span class="checkmark"></span>
+          <div>
+            <strong>已阅读并同意隐私协议</strong>
+            <p>协议版本 v1.2，登录后记录同意时间与设备授权状态</p>
+          </div>
+        </div>
+        <button class="primary-action">进入康复平台</button>
+        <div class="login-foot">
+          <span>语音评估</span>
+          <span>家属协同</span>
+          <span>Unity 训练</span>
+          <span>数据审计</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="screen family-screen" data-screen="13-family-login">
+      <div class="family-hero">
+        <div class="brand-lockup family-lockup">
+          <div class="brand-mark">家</div>
+          <div>
+            <div class="eyebrow">Family Collaboration Portal</div>
+            <h1>家属登录与患者授权绑定</h1>
+          </div>
+        </div>
+        <div class="family-summary">
+          <span class="chip info">家属端</span>
+          <h2>照护人只看必要信息，帮助患者按时训练。</h2>
+          <p>家属可查看训练计划摘要、完成情况和提醒消息，但不能修改医师下发的康复方案。</p>
+        </div>
+        <div class="caregiver-permissions">
+          <article>
+            <strong>今日任务提醒</strong>
+            <span>查看训练是否完成，支持提醒患者开始训练。</span>
+          </article>
+          <article>
+            <strong>阶段进展摘要</strong>
+            <span>查看近 7 天完成率、训练分数和异常提示。</span>
+          </article>
+          <article>
+            <strong>隐私授权边界</strong>
+            <span>仅展示脱敏摘要，不开放完整病历与原始评估对话。</span>
+          </article>
+        </div>
+      </div>
+      <div class="family-login-panel">
+        <div class="panel-head">
+          <span class="status-dot"></span>
+          <span>家属账号登录</span>
+        </div>
+        <label class="field-label">手机号</label>
+        <div class="input-line">139****8206</div>
+        <label class="field-label">短信验证码</label>
+        <div class="input-line verification-line">
+          <span>482916</span>
+          <em>重新获取 48s</em>
+        </div>
+        <div class="binding-card">
+          <h3>患者授权绑定</h3>
+          <div class="binding-row">
+            <span>绑定患者</span>
+            <strong>李秀兰</strong>
+          </div>
+          <div class="binding-row">
+            <span>家属关系</span>
+            <strong>儿子 · 李明</strong>
+          </div>
+          <div class="binding-row">
+            <span>授权方式</span>
+            <strong>患者端确认 + 医师备案</strong>
+          </div>
+          <div class="binding-row">
+            <span>授权状态</span>
+            <strong class="success-text">已授权至 2026-10-27</strong>
+          </div>
+        </div>
+        <div class="consent-row family-consent">
+          <span class="checkmark"></span>
+          <div>
+            <strong>已同意家属端隐私与照护协同协议</strong>
+            <p>协议版本 v1.2，记录登录时间、绑定关系和查看日志。</p>
+          </div>
+        </div>
+        <button class="primary-action">进入家属端</button>
+      </div>
+    </section>
+
+    <section class="screen patient-screen" data-screen="02-profile-consent">
+      <header class="patient-topbar">
+        <div class="brand-mini">
+          <span>康</span>
+          <strong>患者首次使用</strong>
+        </div>
+        <div class="stepper">
+          <span class="done">1 建档</span>
+          <span class="active">2 授权</span>
+          <span>3 评估</span>
+          <span>4 训练</span>
+        </div>
+      </header>
+      <main class="profile-layout">
+        <section class="patient-profile-main">
+          <div class="section-title">
+            <span class="eyebrow">Patient Profile</span>
+            <h2>李秀兰，完成基础建档</h2>
+            <p>信息仅用于康复评估、训练方案匹配与医师随访。</p>
+          </div>
+          <div class="form-grid">
+            <div class="form-cell">
+              <label>姓名</label>
+              <strong>李秀兰</strong>
+            </div>
+            <div class="form-cell">
+              <label>年龄</label>
+              <strong>72 岁</strong>
+            </div>
+            <div class="form-cell">
+              <label>联系方式</label>
+              <strong>138****6721</strong>
+            </div>
+            <div class="form-cell">
+              <label>照护人</label>
+              <strong>李明，儿子</strong>
+            </div>
+            <div class="form-cell wide">
+              <label>基础健康指标</label>
+              <div class="metric-row">
+                <span>血压 132/82</span>
+                <span>心率 76</span>
+                <span>步态风险 低</span>
+              </div>
+            </div>
+          </div>
+        </section>
+        <aside class="consent-panel">
+          <h3>知情同意与设备授权</h3>
+          <div class="agreement-card">
+            <span class="chip info">隐私协议 v1.2</span>
+            <p>已签署：2026-04-27 09:18</p>
+            <p>授权范围：评估录音、摄像头动作识别、训练结果回传。</p>
+          </div>
+          <div class="permission-list">
+            <div>
+              <span class="device-icon mic"></span>
+              <strong>麦克风</strong>
+              <em class="chip success">已授权</em>
+            </div>
+            <div>
+              <span class="device-icon camera"></span>
+              <strong>摄像头</strong>
+              <em class="chip success">已授权</em>
+            </div>
+            <div>
+              <span class="device-icon lock"></span>
+              <strong>敏感数据加密</strong>
+              <em class="chip success">已开启</em>
+            </div>
+          </div>
+          <button class="primary-action">继续 AI 评估</button>
+        </aside>
+      </main>
+    </section>
+
+    <section class="screen patient-screen" data-screen="03-ai-assessment">
+      <header class="patient-topbar">
+        <div class="brand-mini">
+          <span>康</span>
+          <strong>AI 认知评估</strong>
+        </div>
+        <div class="progress-label">MMSE 6/12 · CDR 2/5 · 预计剩余 5 分钟</div>
+      </header>
+      <main class="assessment-layout">
+        <section class="question-area">
+          <div class="progress-track">
+            <i style="width: 52%"></i>
+          </div>
+          <div class="question-card">
+            <span class="chip info">当前题目：时间定向力</span>
+            <h2>请告诉我，今天是星期几？</h2>
+            <p>您可以直接说出来，系统会自动转成文字。</p>
+            <div class="voice-console">
+              <div class="wave">
+                <span></span><span></span><span></span><span></span><span></span><span></span>
+              </div>
+              <div>
+                <strong>正在听您回答</strong>
+                <p>语音转文字：今天是星期一。</p>
+              </div>
+            </div>
+            <div class="assessment-actions">
+              <button class="secondary-action">重听问题</button>
+              <button class="primary-action compact">提交本题</button>
+            </div>
+          </div>
+        </section>
+        <aside class="ai-status-panel">
+          <h3>实时识别状态</h3>
+          <div class="status-stack">
+            <div>
+              <span class="chip success">语音清晰</span>
+              <strong>转写置信度 96%</strong>
+            </div>
+            <div>
+              <span class="chip success">面部入镜</span>
+              <strong>表情与注意力稳定</strong>
+            </div>
+            <div>
+              <span class="chip warning">待医师确认</span>
+              <strong>近记忆题存在迟疑</strong>
+            </div>
+          </div>
+          <div class="transcript-card">
+            <h4>AI 对话记录</h4>
+            <p>系统：现在请您记住三个词：苹果、桌子、硬币。</p>
+            <p>用户：苹果，桌子，硬币。</p>
+            <p>系统：很好，我们继续下一题。</p>
+          </div>
+        </aside>
+      </main>
+    </section>
+
+    <section class="screen patient-screen" data-screen="04-assessment-plan-match">
+      <header class="patient-topbar">
+        <div class="brand-mini">
+          <span>康</span>
+          <strong>评估结果与康复建议</strong>
+        </div>
+        <div class="progress-label">模型版本 Cog-MMSE-2026.04 · 结果待医师复核</div>
+      </header>
+      <main class="result-layout">
+        <section class="risk-summary">
+          <span class="eyebrow">AI Structured Result</span>
+          <h2>当前认知评级：中度风险</h2>
+          <p>MMSE 20/30，CDR 1.0。主要表现为近记忆、执行力和定向力波动。</p>
+          <div class="score-grid">
+            <div><strong>20</strong><span>MMSE</span></div>
+            <div><strong>1.0</strong><span>CDR</span></div>
+            <div><strong>84%</strong><span>模型置信</span></div>
+          </div>
+          <div class="capability-bars">
+            <label>记忆力 <i><b style="width: 48%"></b></i></label>
+            <label>定向力 <i><b style="width: 58%"></b></i></label>
+            <label>执行力 <i><b style="width: 52%"></b></i></label>
+            <label>语言表达 <i><b style="width: 73%"></b></i></label>
+          </div>
+        </section>
+        <section class="plan-match">
+          <div class="section-title compact-title">
+            <span class="eyebrow">Personalized Matching</span>
+            <h2>智能匹配康复方案</h2>
+            <p>根据评估结果推荐 3 个训练游戏，医师可在后台微调。</p>
+          </div>
+          <div class="game-recommend-list">
+            <article>
+              <span class="chip success">推荐 1</span>
+              <h3>节奏光剑 · 反应训练</h3>
+              <p>每日 8 分钟，每周 5 次，速度从 0.8x 递进到 1.1x。</p>
+            </article>
+            <article>
+              <span class="chip info">推荐 2</span>
+              <h3>记忆果篮 · 近记忆训练</h3>
+              <p>每日 10 分钟，每周 4 次，题量从 4 组递进到 6 组。</p>
+            </article>
+            <article>
+              <span class="chip warning">推荐 3</span>
+              <h3>路径寻宝 · 执行力训练</h3>
+              <p>每日 6 分钟，每周 3 次，路径复杂度逐周提升。</p>
+            </article>
+          </div>
+          <button class="primary-action">进入今日训练</button>
+        </section>
+      </main>
+    </section>
+
+    <section class="screen patient-screen" data-screen="05-today-training">
+      <header class="patient-topbar">
+        <div class="brand-mini">
+          <span>康</span>
+          <strong>今日训练</strong>
+        </div>
+        <div class="progress-label">当前计划：第 1 周 · 中低强度 · 医师已确认</div>
+      </header>
+      <main class="today-layout">
+        <section class="today-main">
+          <div class="greeting-block">
+            <span class="eyebrow">Good Morning</span>
+            <h2>早上好，李奶奶</h2>
+            <p>今天完成 24 分钟训练即可。我们会一步一步陪您做。</p>
+          </div>
+          <div class="training-focus">
+            <div class="ring-progress">
+              <span>33%</span>
+            </div>
+            <div>
+              <h3>今日 3 项训练</h3>
+              <p>已完成 1 项，剩余预计 16 分钟。</p>
+              <button class="primary-action">开始下一项训练</button>
+            </div>
+          </div>
+        </section>
+        <aside class="task-list">
+          <article class="done">
+            <span class="chip success">已完成</span>
+            <h3>记忆果篮</h3>
+            <p>10 分钟 · 得分 86</p>
+          </article>
+          <article class="active">
+            <span class="chip info">下一项</span>
+            <h3>节奏光剑</h3>
+            <p>8 分钟 · 反应与动作准确率</p>
+          </article>
+          <article>
+            <span class="chip muted">未开始</span>
+            <h3>路径寻宝</h3>
+            <p>6 分钟 · 执行力训练</p>
+          </article>
+        </aside>
+      </main>
+    </section>
+
+    <section class="screen patient-screen" data-screen="06-game-prep">
+      <header class="patient-topbar">
+        <div class="brand-mini">
+          <span>康</span>
+          <strong>训练准备</strong>
+        </div>
+        <div class="progress-label">Unity WebGL 游戏 · 平台账号已绑定</div>
+      </header>
+      <main class="prep-layout">
+        <section class="game-brief">
+          <span class="chip info">节奏光剑</span>
+          <h2>上肢反应与注意力训练</h2>
+          <p>跟随屏幕节奏挥动双手，系统会记录肢体轨迹、反应时间和动作准确率。</p>
+          <div class="brief-stats">
+            <div><strong>8 分钟</strong><span>预计时长</span></div>
+            <div><strong>中低</strong><span>初始难度</span></div>
+            <div><strong>0.8x</strong><span>初始速度</span></div>
+          </div>
+          <div class="instruction-band">
+            <strong>开始前请站在摄像头前 1.5 米处</strong>
+            <p>保持上半身入镜，双脚站稳，旁边请留出安全空间。</p>
+          </div>
+          <button class="primary-action">开始训练</button>
+        </section>
+        <aside class="camera-check">
+          <h3>设备检测</h3>
+          <div class="camera-preview">
+            <div class="body-line head"></div>
+            <div class="body-line torso"></div>
+            <div class="body-line arm left"></div>
+            <div class="body-line arm right"></div>
+            <div class="body-line leg left"></div>
+            <div class="body-line leg right"></div>
+          </div>
+          <div class="permission-list slim">
+            <div><strong>摄像头</strong><em class="chip success">正常</em></div>
+            <div><strong>动作识别</strong><em class="chip success">已校准</em></div>
+            <div><strong>账号同步</strong><em class="chip success">患者 ID 已绑定</em></div>
+          </div>
+        </aside>
+      </main>
+    </section>
+
+    <section class="screen game-screen" data-screen="07-game-realtime">
+      <header class="game-hud">
+        <div>
+          <span class="eyebrow">Unity Somatic Game</span>
+          <strong>节奏光剑 · 训练中</strong>
+        </div>
+        <div class="hud-pill">剩余 05:32</div>
+        <div class="hud-pill success">同步中</div>
+      </header>
+      <main class="game-layout">
+        <section class="playfield">
+          <div class="lane-grid"></div>
+          <div class="motion-skeleton">
+            <span class="joint head"></span>
+            <span class="joint shoulder"></span>
+            <span class="joint hand-left"></span>
+            <span class="joint hand-right"></span>
+            <span class="joint hip"></span>
+            <span class="track left"></span>
+            <span class="track right"></span>
+          </div>
+          <div class="target-block one">左</div>
+          <div class="target-block two">右</div>
+          <div class="target-block three">上</div>
+          <div class="encourage">漂亮！保持节奏</div>
+        </section>
+        <aside class="realtime-panel">
+          <h3>实时采集</h3>
+          <div class="metric-card">
+            <span>反应时间</span>
+            <strong>0.82s</strong>
+          </div>
+          <div class="metric-card">
+            <span>动作准确率</span>
+            <strong>91%</strong>
+          </div>
+          <div class="metric-card">
+            <span>运动强度</span>
+            <strong>中等</strong>
+          </div>
+          <div class="adaptive-card">
+            <span class="chip warning">动态调节</span>
+            <p>根据前 2 分钟表现，方块速度提升至 0.92x。</p>
+          </div>
+        </aside>
+      </main>
+    </section>
+
+    <section class="screen patient-screen" data-screen="08-result-history">
+      <header class="patient-topbar">
+        <div class="brand-mini">
+          <span>康</span>
+          <strong>训练反馈</strong>
+        </div>
+        <div class="progress-label">结果已加密回传 · 2026-04-27 10:12</div>
+      </header>
+      <main class="feedback-layout">
+        <section class="feedback-card">
+          <span class="chip success">已完成</span>
+          <h2>这次训练完成得很好</h2>
+          <div class="big-score">92</div>
+          <p>动作更稳定，反应时间比上次快 0.14 秒。</p>
+          <div class="result-metrics">
+            <div><strong>96%</strong><span>完成度</span></div>
+            <div><strong>91%</strong><span>准确率</span></div>
+            <div><strong>0.82s</strong><span>反应时间</span></div>
+            <div><strong>中等</strong><span>运动强度</span></div>
+          </div>
+          <button class="primary-action">返回今日训练</button>
+        </section>
+        <aside class="history-panel">
+          <h3>最近 7 天记录</h3>
+          <div class="bar-chart">
+            <span style="height: 64%"></span>
+            <span style="height: 72%"></span>
+            <span style="height: 58%"></span>
+            <span style="height: 80%"></span>
+            <span style="height: 74%"></span>
+            <span style="height: 88%"></span>
+            <span style="height: 92%"></span>
+          </div>
+          <div class="record-list">
+            <div><strong>节奏光剑</strong><span>今日 10:12 · 得分 92</span></div>
+            <div><strong>记忆果篮</strong><span>今日 09:48 · 得分 86</span></div>
+            <div><strong>路径寻宝</strong><span>昨日 16:32 · 已完成</span></div>
+          </div>
+        </aside>
+      </main>
+    </section>
+
+    <section class="screen doctor-screen" data-screen="09-doctor-overview">
+      <aside class="doctor-sidebar">
+        <div class="brand-mini inverse">
+          <span>康</span>
+          <strong>医师工作台</strong>
+        </div>
+        <nav>
+          <a class="active">患者管理</a>
+          <a>评估结果</a>
+          <a>康复计划</a>
+          <a>训练记录</a>
+          <a>异常待办</a>
+        </nav>
+      </aside>
+      <main class="doctor-main">
+        <header class="doctor-top">
+          <div>
+            <span class="eyebrow">Patient Overview</span>
+            <h2>李秀兰 · 患者详情总览</h2>
+          </div>
+          <button class="secondary-action">导出脱敏摘要</button>
+        </header>
+        <div class="doctor-grid">
+          <section class="doctor-panel patient-card">
+            <h3>基础信息</h3>
+            <p>72 岁 · 女 · 照护人李明 · 联系方式 138****6721</p>
+            <div class="tag-row">
+              <span class="chip warning">中度风险</span>
+              <span class="chip success">计划生效中</span>
+              <span class="chip info">最近训练：今日</span>
+            </div>
+          </section>
+          <section class="doctor-panel">
+            <h3>最近评估</h3>
+            <div class="doctor-metrics">
+              <div><strong>20</strong><span>MMSE</span></div>
+              <div><strong>1.0</strong><span>CDR</span></div>
+              <div><strong>84%</strong><span>AI 置信</span></div>
+            </div>
+          </section>
+          <section class="doctor-panel wide">
+            <h3>当前康复计划</h3>
+            <div class="plan-row"><span>节奏光剑</span><b>每周 5 次 · 8 分钟 · 0.8x-1.1x</b></div>
+            <div class="plan-row"><span>记忆果篮</span><b>每周 4 次 · 10 分钟 · 4-6 组</b></div>
+            <div class="plan-row"><span>路径寻宝</span><b>每周 3 次 · 6 分钟 · 2 级阶梯</b></div>
+          </section>
+          <section class="doctor-panel">
+            <h3>训练完成率</h3>
+            <div class="mini-bars">
+              <span style="height: 68%"></span><span style="height: 76%"></span><span style="height: 92%"></span><span style="height: 80%"></span><span style="height: 88%"></span>
+            </div>
+            <p class="muted-text">近 7 天完成率 86%，较上周提升 9%。</p>
+          </section>
+          <section class="doctor-panel alert-panel">
+            <h3>异常提醒</h3>
+            <div class="alert-item"><span class="chip warning">待处理</span><p>昨日路径寻宝出现 1 次中断。</p></div>
+            <div class="alert-item"><span class="chip danger">需关注</span><p>近记忆分项连续两次低于 55%。</p></div>
+          </section>
+        </div>
+      </main>
+    </section>
+
+    <section class="screen doctor-screen" data-screen="10-doctor-plan-editor">
+      <aside class="doctor-sidebar">
+        <div class="brand-mini inverse">
+          <span>康</span>
+          <strong>医师工作台</strong>
+        </div>
+        <nav>
+          <a>患者管理</a>
+          <a>评估结果</a>
+          <a class="active">康复计划</a>
+          <a>训练记录</a>
+          <a>异常待办</a>
+        </nav>
+      </aside>
+      <main class="doctor-main">
+        <header class="doctor-top">
+          <div>
+            <span class="eyebrow">Plan Review</span>
+            <h2>康复计划确认与人工调整</h2>
+          </div>
+          <button class="primary-action compact">下发生效</button>
+        </header>
+        <div class="editor-layout">
+          <section class="doctor-panel recommend-panel">
+            <h3>系统推荐方案</h3>
+            <div class="compare-row">
+              <span>认知评级</span>
+              <strong>中度风险</strong>
+            </div>
+            <div class="compare-row">
+              <span>每日时长</span>
+              <strong>24 分钟</strong>
+            </div>
+            <div class="compare-row">
+              <span>每周频次</span>
+              <strong>5 天</strong>
+            </div>
+            <div class="compare-row">
+              <span>难度阶梯</span>
+              <strong>0.8x → 1.1x</strong>
+            </div>
+            <p class="ai-reason">依据：MMSE 近记忆与执行力分项较弱，训练优先覆盖反应、记忆与路径规划。</p>
+          </section>
+          <section class="doctor-panel edit-panel">
+            <h3>医师调整</h3>
+            <div class="edit-grid">
+              <div><label>每日训练时长</label><strong>20 分钟</strong></div>
+              <div><label>节奏光剑速度</label><strong>0.75x → 1.0x</strong></div>
+              <div><label>每周训练频次</label><strong>4 天</strong></div>
+              <div><label>计划周期</label><strong>4 周</strong></div>
+            </div>
+            <div class="reason-box">
+              <label>调整原因</label>
+              <p>患者近期肩部不适，先降低上肢反应训练速度，保留记忆训练频次。</p>
+            </div>
+            <div class="version-note">计划版本：v2026.04.27-02，保留 AI 原值、人工修正值与修正原因。</div>
+          </section>
+          <section class="doctor-panel game-picker">
+            <h3>游戏组合</h3>
+            <div class="game-line"><span class="chip success">保留</span><strong>记忆果篮</strong><em>10 分钟</em></div>
+            <div class="game-line"><span class="chip warning">降速</span><strong>节奏光剑</strong><em>6 分钟</em></div>
+            <div class="game-line"><span class="chip info">保留</span><strong>路径寻宝</strong><em>4 分钟</em></div>
+          </section>
+        </div>
+      </main>
+    </section>
+
+    <section class="screen admin-screen" data-screen="11-admin-overview">
+      <aside class="admin-sidebar">
+        <div class="brand-mini inverse">
+          <span>康</span>
+          <strong>管理后台</strong>
+        </div>
+        <nav>
+          <a class="active">运营概览</a>
+          <a>用户管理</a>
+          <a>指标数据</a>
+          <a>游戏内容</a>
+          <a>模型结果</a>
+          <a>审计日志</a>
+        </nav>
+      </aside>
+      <main class="admin-main">
+        <header class="admin-top">
+          <div>
+            <span class="eyebrow">Operations Dashboard</span>
+            <h2>基础运营配置与查询统计</h2>
+          </div>
+          <span class="chip success">SSL 加密链路已开启</span>
+        </header>
+        <div class="admin-metrics">
+          <div><span>总用户</span><strong>1,284</strong><em>+12%</em></div>
+          <div><span>AI 评估量</span><strong>438</strong><em>本月</em></div>
+          <div><span>游戏训练次数</span><strong>3,726</strong><em>92% 已回传</em></div>
+          <div><span>设备在线率</span><strong>99.2%</strong><em>Stable</em></div>
+        </div>
+        <div class="admin-grid">
+          <section class="admin-panel">
+            <h3>训练内容状态</h3>
+            <div class="content-row"><strong>节奏光剑</strong><span class="chip success">启用</span><em>v1.4</em></div>
+            <div class="content-row"><strong>记忆果篮</strong><span class="chip success">启用</span><em>v1.1</em></div>
+            <div class="content-row"><strong>路径寻宝</strong><span class="chip warning">灰度</span><em>v0.9</em></div>
+          </section>
+          <section class="admin-panel">
+            <h3>最近告警</h3>
+            <div class="audit-row"><span class="chip danger">高风险</span><p>患者张* 评估结果待医师确认</p></div>
+            <div class="audit-row"><span class="chip warning">同步中</span><p>3 条训练记录等待补偿回传</p></div>
+            <div class="audit-row"><span class="chip info">内容</span><p>游戏库新增版本待审核</p></div>
+          </section>
+        </div>
+      </main>
+    </section>
+
+    <section class="screen admin-screen" data-screen="12-admin-security">
+      <aside class="admin-sidebar">
+        <div class="brand-mini inverse">
+          <span>康</span>
+          <strong>管理后台</strong>
+        </div>
+        <nav>
+          <a>运营概览</a>
+          <a>用户管理</a>
+          <a>指标数据</a>
+          <a>游戏内容</a>
+          <a>模型结果</a>
+          <a class="active">审计日志</a>
+        </nav>
+      </aside>
+      <main class="admin-main">
+        <header class="admin-top">
+          <div>
+            <span class="eyebrow">Security & Privacy</span>
+            <h2>权限、脱敏与日志审计</h2>
+          </div>
+          <button class="secondary-action">脱敏导出</button>
+        </header>
+        <div class="security-layout">
+          <section class="admin-panel roles-panel">
+            <h3>分级访问控制</h3>
+            <div class="role-row"><strong>超级管理员</strong><span>账号、权限、审计、配置全量管理</span></div>
+            <div class="role-row"><strong>普通运营</strong><span>查看脱敏数据，维护内容与设备</span></div>
+            <div class="role-row"><strong>只读审计</strong><span>仅查看日志，不可修改业务数据</span></div>
+          </section>
+          <section class="admin-panel privacy-panel">
+            <h3>隐私保护状态</h3>
+            <div class="privacy-grid">
+              <div><strong>姓名</strong><span>导出显示：李*</span></div>
+              <div><strong>联系方式</strong><span>导出显示：138****6721</span></div>
+              <div><strong>健康指标</strong><span>AES-256 加密存储</span></div>
+              <div><strong>协议版本</strong><span>v1.2 · 已留痕</span></div>
+            </div>
+          </section>
+          <section class="admin-panel audit-table-panel">
+            <h3>实时审计流水</h3>
+            <table class="audit-table">
+              <thead>
+                <tr>
+                  <th>时间</th>
+                  <th>执行人</th>
+                  <th>操作行为</th>
+                  <th>目标对象</th>
+                  <th>状态</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>2026-04-27 10:21</td>
+                  <td>王医生</td>
+                  <td>修改风险等级</td>
+                  <td>患者 李*</td>
+                  <td><span class="chip warning">已留痕</span></td>
+                </tr>
+                <tr>
+                  <td>2026-04-27 10:04</td>
+                  <td>admin</td>
+                  <td>导出脱敏报表</td>
+                  <td>训练数据集</td>
+                  <td><span class="chip success">成功</span></td>
+                </tr>
+                <tr>
+                  <td>2026-04-27 09:42</td>
+                  <td>审计员</td>
+                  <td>查看访问日志</td>
+                  <td>医师 刘*</td>
+                  <td><span class="chip info">只读</span></td>
+                </tr>
+              </tbody>
+            </table>
+          </section>
+        </div>
+      </main>
+    </section>
+
+    <script>
+      const params = new URLSearchParams(window.location.search);
+      const requested = params.get("screen") || "01-login-roles";
+      const screens = Array.from(document.querySelectorAll("[data-screen]"));
+      const target = screens.find((screen) => screen.dataset.screen === requested) || screens[0];
+      target.classList.add("active");
+      document.body.dataset.screen = target.dataset.screen;
+    </script>
+  </body>
+</html>

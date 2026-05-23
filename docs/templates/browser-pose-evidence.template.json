@@ -1,0 +1,145 @@
+{
+  "evidenceVersion": "browser-pose-field-acceptance/v1",
+  "acceptance": {
+    "acceptedAt": "2026-05-23T10:00:00.000Z",
+    "testerName": "现场验收员姓名",
+    "siteName": "试点现场名称",
+    "environment": "trial"
+  },
+  "browser": {
+    "name": "Chrome",
+    "version": "126.0.0.0",
+    "userAgent": "验收浏览器 navigator.userAgent",
+    "pageUrl": "https://rehab.example.com/training"
+  },
+  "device": {
+    "deviceCode": "trial-room-a-camera-01",
+    "cameraLabel": "摄像头型号或系统标签",
+    "cameraDeviceIdHash": "sha256:<camera-device-id-hash>",
+    "resolution": "1280x720"
+  },
+  "poseRuntime": {
+    "runtimeType": "browser_pose_game",
+    "modelName": "MediaPipe PoseLandmarker",
+    "modelVersion": "实际模型版本",
+    "poseLandmarkCount": 33,
+    "checkedAt": "2026-05-23T09:58:00.000Z",
+    "averageVisibility": 0.86
+  },
+  "patient": {
+    "patientId": "真实或验收患者 ID",
+    "patientExportId": "脱敏患者导出 ID"
+  },
+  "gameContent": {
+    "gameContentId": "正式训练内容 ID",
+    "code": "upper-limb-reach-v1",
+    "name": "上肢触达反应训练",
+    "runtimeType": "browser_pose_game",
+    "gameVersion": "1.0.0",
+    "bridgeProtocolVersion": "1.0.0",
+    "releaseChannel": "production",
+    "buildStatus": "released"
+  },
+  "rehabPlan": {
+    "rehabPlanId": "当前生效康复计划 ID",
+    "planItemId": "当前训练项目 ID",
+    "confirmedByDoctorId": "确认方案的医师 ID",
+    "confirmedAt": "2026-05-22T08:00:00.000Z"
+  },
+  "trainingSession": {
+    "sessionId": "训练 session ID",
+    "gameRunId": "本次训练 gameRunId",
+    "deviceCode": "trial-room-a-camera-01",
+    "sessionStatus": "completed",
+    "syncStatus": "synced",
+    "calibrationStatus": "checked",
+    "clientStartedAt": "2026-05-23T09:59:00.000Z",
+    "clientEndedAt": "2026-05-23T10:02:00.000Z"
+  },
+  "trainingResult": {
+    "resultId": "训练结果 ID",
+    "source": "browser_pose_game",
+    "gameRunId": "本次训练 gameRunId",
+    "gameVersion": "1.0.0",
+    "bridgeProtocolVersion": "1.0.0",
+    "rawPayloadHash": "sha256:<training-payload-hash>",
+    "submittedAt": "2026-05-23T10:02:08.000Z",
+    "qualityFlag": "valid",
+    "abnormalFlag": false,
+    "score": 82,
+    "completionRate": 0.91,
+    "durationSeconds": 180,
+    "reactionTimeMs": 760,
+    "motionAccuracy": 0.84,
+    "exerciseIntensity": "moderate"
+  },
+  "motionMetrics": [
+    {
+      "metricType": "reaction_time_ms",
+      "metricValue": 760,
+      "unit": "ms",
+      "sampleCount": 24,
+      "confidence": 0.91,
+      "qualityFlag": "valid",
+      "windowStartedAt": "2026-05-23T09:59:00.000Z",
+      "windowEndedAt": "2026-05-23T10:02:00.000Z"
+    },
+    {
+      "metricType": "target_hit_rate",
+      "metricValue": 0.88,
+      "unit": "ratio",
+      "sampleCount": 24,
+      "confidence": 0.89,
+      "qualityFlag": "valid",
+      "windowStartedAt": "2026-05-23T09:59:00.000Z",
+      "windowEndedAt": "2026-05-23T10:02:00.000Z"
+    },
+    {
+      "metricType": "pose_visibility_avg",
+      "metricValue": 0.86,
+      "unit": "ratio",
+      "sampleCount": 1200,
+      "confidence": 0.93,
+      "qualityFlag": "valid",
+      "windowStartedAt": "2026-05-23T09:59:00.000Z",
+      "windowEndedAt": "2026-05-23T10:02:00.000Z"
+    },
+    {
+      "metricType": "arm_raise_accuracy",
+      "metricValue": 0.82,
+      "unit": "ratio",
+      "sampleCount": 24,
+      "confidence": 0.87,
+      "qualityFlag": "valid",
+      "windowStartedAt": "2026-05-23T09:59:00.000Z",
+      "windowEndedAt": "2026-05-23T10:02:00.000Z"
+    }
+  ],
+  "auditEvidence": {
+    "auditLogIds": [
+      "training_session.start 对应审计日志 ID",
+      "training_result.submit 对应审计日志 ID"
+    ],
+    "requiredActions": [
+      "training_session.start",
+      "training_result.submit"
+    ],
+    "checkedAt": "2026-05-23T10:05:00.000Z"
+  },
+  "artifacts": {
+    "screenshots": [
+      {
+        "label": "训练完成页",
+        "path": "evidence/browser-pose/session-id-complete.png",
+        "capturedAt": "2026-05-23T10:03:00.000Z"
+      }
+    ],
+    "recordings": [
+      {
+        "label": "训练过程录屏",
+        "path": "evidence/browser-pose/session-id-recording.mp4",
+        "capturedAt": "2026-05-23T10:03:30.000Z"
+      }
+    ]
+  }
+}

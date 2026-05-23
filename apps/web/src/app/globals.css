@@ -1,0 +1,33 @@
+@import "tailwindcss";
+
+:root {
+  --background: #eef7f7;
+  --foreground: #16333d;
+  --font-sans-cn: "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+  --font-number: "DIN Alternate", "IBM Plex Sans", "SF Mono", monospace;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-sans-cn);
+  --font-mono: var(--font-number);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans-cn), "Noto Sans SC", sans-serif;
+}
+
+button {
+  cursor: pointer;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+::selection {
+  background: rgba(45, 134, 155, 0.22);
+}

@@ -1,0 +1,44 @@
+{
+  "gameCode": "rhythm_saber",
+  "gameName": "节奏光剑",
+  "gameVersion": "1.0.0",
+  "bridgeProtocolVersion": "1.0.0",
+  "build": {
+    "loaderUrl": "/unity/rhythm_saber/1.0.0/Build/rhythm_saber.loader.js",
+    "dataUrl": "/unity/rhythm_saber/1.0.0/Build/rhythm_saber.data",
+    "frameworkUrl": "/unity/rhythm_saber/1.0.0/Build/rhythm_saber.framework.js",
+    "codeUrl": "/unity/rhythm_saber/1.0.0/Build/rhythm_saber.wasm",
+    "streamingAssetsUrl": "/unity/rhythm_saber/1.0.0/StreamingAssets"
+  },
+  "runtimeRequirements": {
+    "cameraRequired": true,
+    "microphoneRequired": false,
+    "supportedInputModes": ["camera_pose"],
+    "minimumBrowser": {
+      "chrome": 120,
+      "edge": 120,
+      "safari": 17
+    }
+  },
+  "requiredResultMetrics": [
+    {
+      "metricType": "arm_raise_accuracy",
+      "unit": "ratio",
+      "min": 0,
+      "max": 1
+    },
+    {
+      "metricType": "reaction_stability",
+      "unit": "ratio",
+      "min": 0,
+      "max": 1
+    }
+  ],
+  "deliveryStatus": "example_only",
+  "releaseChecklist": [
+    "Build 文件必须放入 apps/web/public/unity/rhythm_saber/1.0.0/",
+    "数据库 game_content.manifestUrl 指向 /unity/rhythm_saber/1.0.0/manifest.json",
+    "数据库 game_content.buildStatus 改为 released 后才允许开始训练",
+    "Unity 结果必须使用 window.RehabUnityBridge.getRuntimeConfig() 中的 sessionId/gameRunId/gameVersion"
+  ]
+}

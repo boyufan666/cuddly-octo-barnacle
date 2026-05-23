@@ -1,0 +1,149 @@
+# 阿尔茨海默病 AI+体感康复平台
+
+一期工程采用全栈 monorepo，目标是跑通真实数据闭环：
+
+- `apps/web`：Next.js 患者端、家属端、医师端、运营管理端
+- `apps/api`：NestJS API，负责认证、权限、评估、康复计划、训练采集、审计与导出
+- `packages/db`：Prisma schema、迁移与本地初始化脚本
+- `infra/docker-compose.yml`：本地开发用 PostgreSQL 与 Redis
+
+## 本地开发启动
+
+1. 准备环境变量：
+
+```bash
+cp .env.example .env
+```
+
+`.env.example` 只提供字段结构。试点或生产环境必须替换为独立生成的密钥、数据库凭证、Redis 地址、域名和 CORS 配置。
+
+2. 启动本地数据库和 Redis：
+
+```bash
+pnpm infra:up
+```
+
+如果提示 Docker daemon 未运行，请先启动 Docker Desktop 或 Colima。
+
+3. 生成 Prisma Client、执行迁移和本地初始化：
+
+```bash
+pnpm db:generate
+pnpm db:migrate
+pnpm db:seed
+```
+
+`pnpm db:seed` 仅用于本地开发与自动化验收，不作为试点或生产数据初始化方案。
+
+试点环境只初始化机构、平台管理账号和首个医师账号时，使用：
+
+```bash
+pnpm db:seed:trial
+```
+
+该脚本要求显式提供 `TRIAL_*` 环境变量，不创建患者、评估、康复计划或训练记录。
+完整步骤和验收边界见 `docs/trial-initialization-runbook.md`。
+
+4. 启动前后端：
+
+```bash
+pnpm dev
+```
+
+- Web: `http://localhost:3000`
+- API: `http://localhost:4000/health`
+
+## 本地初始化账号
+
+以下账号仅用于本地开发和验收脚本，试点/生产环境必须通过正式账号开通流程创建，不得使用固定密码。
+
+| 角色 | 本地账号 |
+| --- | --- |
+| 患者 | `patient001` |
+| 家属 | `caregiver001` |
+| 医师 | `doctor001` |
+| 平台管理人员 | `admin` |
+| 运营人员 | `operator001` |
+| 审计查看人员 | `auditor001` |
+
+本地初始化密码由 seed 脚本设置，正式交付时应由客户或运维人员按安全策略重置。
+
+## 试点初始化变量
+
+`pnpm db:seed:trial` 至少需要：
+
+```text
+DATABASE_URL
+TRIAL_ORG_CODE
+TRIAL_ORG_NAME
+TRIAL_ORG_TYPE
+TRIAL_ADMIN_ACCOUNT
+TRIAL_ADMIN_DISPLAY_NAME
+TRIAL_ADMIN_INITIAL_PASSWORD
+TRIAL_DOCTOR_ACCOUNT
+TRIAL_DOCTOR_DISPLAY_NAME
+TRIAL_DOCTOR_INITIAL_PASSWORD
+TRIAL_DOCTOR_TITLE
+TRIAL_DOCTOR_DEPARTMENT
+```
+
+可选变量：
+
+```text
+TRIAL_ADMIN_MOBILE_PHONE
+TRIAL_DOCTOR_MOBILE_PHONE
+```
+
+## 当前已落地能力
+
+- 统一账号登录、角色识别和数据范围控制
+- 患者建档、知情同意、家属授权绑定
+- 评估记录、风险评级、康复方案推荐与医师确认
+- 浏览器体感训练壳、结构化训练结果提交、动作指标入库
+- 家属摘要查看、脱敏数据导出、审计日志查询
+- 训练结果幂等、异常数据标记、授权阻断、医师患者归属校验
+
+## 仍需补齐的交付项
+
+- 真实 AI/语音服务接入：语音转文字、大模型分析、模型版本与调用记录
+- 至少 1 个正式可训练内容的实机验收：摄像头授权、姿态识别、结果生成、入库与审计
+- Unity WebGL 正式构建接入：`manifest.json`、Build 文件、Bridge 回传验收
+- 生产部署配置：HTTPS、域名、CORS、强密钥、备份、监控、日志留存
+- 试点后续正式数据进入流程：患者、训练内容、隐私协议版本与真实业务数据采集
+
+## Unity/体感训练交付策略
+
+一期优先保证至少一个训练内容真实可用，再扩展多游戏库：
+
+- 浏览器体感训练使用摄像头姿态识别采集结构化指标。
+- 经客户确认一期范围为浏览器体感主线后，由具备发布权限的管理员发布浏览器体感训练内容，用于真实采集闭环。
+- 客户已有 Unity 游戏时，按平台 Bridge 协议接入。
+- 我方自研 Unity 游戏时，需提供真实 WebGL 构建产物和版本清单。
+- 所有训练内容都必须回传真实结构化训练结果，不接受固定成绩或缺失动作指标。
+
+桥接协议和 Unity 调用模板见：
+
+- `docs/formal-training-content-runbook.md`
+- `docs/unity/unity-webgl-bridge-protocol.md`
+- `apps/web/public/unity/rehab-unity-bridge.js`
+
+Unity WebGL 构建产物建议放在：
+
+```text
+apps/web/public/unity/<gameCode>/<version>/
+```
+
+## 交付边界
+
+`客户提供/康复平台3.0` 为客户历史版本和参考资料目录，不属于当前新项目的正式交付源码。正式交付以本 README 中列出的 monorepo 主工程、迁移、接口、前端页面、训练桥接协议和验收脚本为准。
+
+详细交付边界、排除目录和上线前准备清单见：
+
+- `docs/delivery-boundary-and-readiness.md`
+- `docs/trial-initialization-runbook.md`
+- `docs/formal-training-content-runbook.md`
+- `docs/formal-delivery-gap-analysis.md`
+- `docs/game-module-delivery-strategy.md`
+- `docs/customer-acceptance-criteria.md`
+- `docs/production-delivery-runbook.md`
+- `docs/browser-pose-field-acceptance-runbook.md`
