@@ -236,6 +236,11 @@ export type TrainingResult = {
   abnormalFlag: boolean;
   qualityFlag: string;
   qualityReasons: string[];
+  reviewStatus?: "reviewed" | null;
+  reviewConclusion?: TrainingReviewConclusion | null;
+  reviewNote?: string | null;
+  reviewedByUserId?: string | null;
+  reviewedAt?: string | null;
   metricsSummary?: unknown;
   createdAt: string;
 };
@@ -361,6 +366,17 @@ export type SubmitTrainingResultRequest = {
     jointName?: string;
     rawSummary?: Record<string, unknown>;
   }>;
+};
+
+export type TrainingReviewConclusion =
+  | "confirmed_abnormal"
+  | "accepted_valid"
+  | "excluded_from_analysis"
+  | "needs_retrain";
+
+export type SubmitTrainingReviewRequest = {
+  reviewConclusion: TrainingReviewConclusion;
+  reviewNote: string;
 };
 
 export type DoctorProfile = {

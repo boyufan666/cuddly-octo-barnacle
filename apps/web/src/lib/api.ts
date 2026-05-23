@@ -23,6 +23,7 @@ import type {
   RecommendPlanRequest,
   RehabPlan,
   StartTrainingSessionRequest,
+  SubmitTrainingReviewRequest,
   SubmitTrainingResultRequest,
   TrainingRecordsResponse,
   TrainingResult,
@@ -284,6 +285,16 @@ export const api = {
     request<TrainingResult>(`/training-sessions/${sessionId}/results`, {
       token,
       method: "POST",
+      body,
+    }),
+  reviewTrainingResult: (
+    token: string,
+    resultId: string,
+    body: SubmitTrainingReviewRequest,
+  ) =>
+    request<TrainingResult>(`/training-results/${resultId}/review`, {
+      token,
+      method: "PATCH",
       body,
     }),
   trainingRecords: (token: string, patientId: string) =>

@@ -108,6 +108,7 @@ model User {
   caregiverRelations CaregiverRelation[]
   auditLogs          AuditLog[]
   systemEvents       SystemEventLog[]
+  reviewedTrainingResults TrainingResult[] @relation("TrainingResultReviewedBy")
 
   @@map("user")
 }
@@ -449,11 +450,18 @@ model TrainingResult {
   abnormalFlag      Boolean  @default(false)
   qualityFlag       String   @default("valid")
   qualityReasons    String[] @default([])
+  reviewStatus      String?
+  reviewConclusion  String?
+  reviewNote        String?
+  reviewedByUserId  String?
+  reviewedAt        DateTime?
   metricsSummary    Json     @default("{}")
   createdAt         DateTime @default(now())
 
   session TrainingSession @relation(fields: [sessionId], references: [id])
+  reviewedBy User? @relation("TrainingResultReviewedBy", fields: [reviewedByUserId], references: [id])
 
+  @@index([reviewStatus], map: "training_result_reviewStatus_idx")
   @@map("training_result")
 }
 

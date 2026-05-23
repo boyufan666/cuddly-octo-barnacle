@@ -1597,6 +1597,193 @@ describe('AppService training write permissions', () => {
   );
 });
 
+describe('AppService training result review', () => {
+  function createService() {
+    const prisma = {
+      trainingResult: {
+        findUnique: jest.fn(),
+        update: jest.fn(),
+      },
+      patientProfile: {
+        findUnique: jest.fn(),
+      },
+      auditLog: {
+        create: jest.fn(),
+      },
+    };
+
+    return {
+      prisma,
+      service: new AppService(prisma as unknown as PrismaService),
+    };
+  }
+
+  const suspiciousResult = {
+    id: 'result-id',
+    sessionId: 'session-id',
+    qualityFlag: 'suspicious',
+    abnormalFlag: true,
+    qualityReasons: ['训练时长过短', '完成率过低'],
+    reviewStatus: null,
+    reviewConclusion: null,
+    reviewNote: null,
+    reviewedByUserId: null,
+    reviewedAt: null,
+    session: {
+      id: 'session-id',
+      patientId: 'patient-profile-id',
+      patient: {
+        id: 'patient-profile-id',
+        responsibleDoctorId: 'doctor-profile-id',
+      },
+    },
+  };
+
+  it('allows responsible doctors to review suspicious training results and audits the conclusion', async () => {
+    const { prisma, service } = createService();
+    const reviewedAt = new Date('2026-05-20T07:00:00.000Z');
+    prisma.trainingResult.findUnique.mockResolvedValue(suspiciousResult);
+    prisma.trainingResult.update.mockResolvedValue({
+      ...suspiciousResult,
+      reviewStatus: 'reviewed',
+      reviewConclusion: 'needs_retrain',
+      reviewNote: '姿态置信度不足，本次结果不纳入训练趋势，请患者重新训练。',
+      reviewedByUserId: 'doctor-user-id',
+      reviewedAt,
+    });
+
+    await expect(
+      service.reviewTrainingResult(doctorUser, 'result-id', {
+        reviewConclusion: 'needs_retrain',
+        reviewNote: '姿态置信度不足，本次结果不纳入训练趋势，请患者重新训练。',
+      }),
+    ).resolves.toMatchObject({
+      id: 'result-id',
+      reviewStatus: 'reviewed',
+      reviewConclusion: 'needs_retrain',
+      reviewNote: '姿态置信度不足，本次结果不纳入训练趋势，请患者重新训练。',
+      reviewedByUserId: 'doctor-user-id',
+    });
+
+    expect(prisma.trainingResult.update).toHaveBeenCalledWith({
+      where: { id: 'result-id' },
+      data: {
+        reviewStatus: 'reviewed',
+        reviewConclusion: 'needs_retrain',
+        reviewNote: '姿态置信度不足，本次结果不纳入训练趋势，请患者重新训练。',
+        reviewedByUserId: 'doctor-user-id',
+        reviewedAt: expect.any(Date) as Date,
+      },
+      include: {
+        session: {
+          include: {
+            patient: true,
+            gameContent: true,
+            motionMetrics: true,
+          },
+        },
+      },
+    });
+    expect(prisma.auditLog.create).toHaveBeenCalledWith({
+      data: {
+        actorUserId: 'doctor-user-id',
+        actorRole: 'doctor',
+        action: 'training_result.review',
+        targetType: 'training_result',
+        targetId: 'result-id',
+        result: 'success',
+        metadata: {
+          patientId: 'patient-profile-id',
+          sessionId: 'session-id',
+          reviewConclusion: 'needs_retrain',
+        },
+      },
+    });
+  });
+
+  it('rejects blank review conclusion and note before updating or auditing', async () => {
+    const { prisma, service } = createService();
+
+    await expect(
+      service.reviewTrainingResult(doctorUser, 'result-id', {
+        reviewConclusion: '',
+        reviewNote: '   ',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(prisma.trainingResult.findUnique).not.toHaveBeenCalled();
+    expect(prisma.trainingResult.update).not.toHaveBeenCalled();
+    expect(prisma.auditLog.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects review for normal training results that do not require manual review', async () => {
+    const { prisma, service } = createService();
+    prisma.trainingResult.findUnique.mockResolvedValue({
+      ...suspiciousResult,
+      qualityFlag: 'valid',
+      abnormalFlag: false,
+      qualityReasons: [],
+    });
+
+    await expect(
+      service.reviewTrainingResult(doctorUser, 'result-id', {
+        reviewConclusion: 'accepted_valid',
+        reviewNote: '正常训练结果不应进入人工复核流程。',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(prisma.trainingResult.update).not.toHaveBeenCalled();
+    expect(prisma.auditLog.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects duplicate training result review before updating or auditing', async () => {
+    const { prisma, service } = createService();
+    prisma.trainingResult.findUnique.mockResolvedValue({
+      ...suspiciousResult,
+      reviewStatus: 'reviewed',
+      reviewConclusion: 'needs_retrain',
+      reviewNote: '已要求重新训练。',
+      reviewedByUserId: 'doctor-user-id',
+      reviewedAt: new Date('2026-05-20T07:00:00.000Z'),
+    });
+
+    await expect(
+      service.reviewTrainingResult(doctorUser, 'result-id', {
+        reviewConclusion: 'excluded_from_analysis',
+        reviewNote: '重复复核应被阻断。',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(prisma.trainingResult.update).not.toHaveBeenCalled();
+    expect(prisma.auditLog.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects read-only auditors from reviewing training results', async () => {
+    const { prisma, service } = createService();
+    prisma.trainingResult.findUnique.mockResolvedValue(suspiciousResult);
+
+    await expect(
+      service.reviewTrainingResult(auditorAdminUser, 'result-id', {
+        reviewConclusion: 'confirmed_abnormal',
+        reviewNote: '审计账号仅可查看，不允许写入业务复核结论。',
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+
+    expect(prisma.trainingResult.update).not.toHaveBeenCalled();
+    expect(prisma.auditLog.create).toHaveBeenCalledWith({
+      data: {
+        actorUserId: 'auditor-user-id',
+        actorRole: 'admin_auditor',
+        action: 'access.denied',
+        targetType: 'training_result',
+        targetId: 'patient-profile-id',
+        result: 'denied',
+        metadata: { reason: 'training_review_required' },
+      },
+    });
+  });
+});
+
 describe('AppService rehab plan recommendation game readiness', () => {
   type RecommendationPrismaMock = {
     patientProfile: {

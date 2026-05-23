@@ -31,8 +31,15 @@ const browserPoseGameRequiredMetricTypes = [
   'pose_visibility_avg',
   'arm_raise_accuracy',
 ] as const;
+const trainingReviewConclusions = [
+  'confirmed_abnormal',
+  'accepted_valid',
+  'excluded_from_analysis',
+  'needs_retrain',
+] as const;
 
 type FormalRuntimeType = (typeof supportedFormalRuntimeTypes)[number];
+type TrainingReviewConclusion = (typeof trainingReviewConclusions)[number];
 
 type LoginDto = {
   account: string;
@@ -135,6 +142,11 @@ type SubmitTrainingResultDto = {
     jointName?: string;
     rawSummary?: Prisma.InputJsonValue;
   }>;
+};
+
+type ReviewTrainingResultDto = {
+  reviewConclusion?: string;
+  reviewNote?: string;
 };
 
 type AuditLogQueryDto = {
@@ -1493,6 +1505,74 @@ export class AppService {
     };
   }
 
+  async reviewTrainingResult(
+    user: RequestUser,
+    resultId: string,
+    dto: ReviewTrainingResultDto,
+  ) {
+    const reviewConclusion = this.validateTrainingReviewConclusion(
+      dto.reviewConclusion,
+    );
+    const reviewNote = this.requiredString(
+      dto.reviewNote,
+      '训练复核说明不能为空。',
+    );
+
+    const result = await this.prisma.trainingResult.findUnique({
+      where: { id: resultId },
+      include: {
+        session: {
+          include: {
+            patient: true,
+            gameContent: true,
+            motionMetrics: true,
+          },
+        },
+      },
+    });
+    if (!result) throw new NotFoundException('训练结果不存在');
+    this.assertTrainingResultRequiresReview(result);
+    this.assertTrainingResultNotReviewed(result);
+
+    await this.assertTrainingReviewAccess(user, result.session.patient);
+
+    const reviewed = await this.prisma.trainingResult.update({
+      where: { id: resultId },
+      data: {
+        reviewStatus: 'reviewed',
+        reviewConclusion,
+        reviewNote,
+        reviewedByUserId: user.id,
+        reviewedAt: new Date(),
+      },
+      include: {
+        session: {
+          include: {
+            patient: true,
+            gameContent: true,
+            motionMetrics: true,
+          },
+        },
+      },
+    });
+
+    await this.audit(
+      user.id,
+      this.primaryRole(user),
+      'training_result.review',
+      'training_result',
+      resultId,
+      'success',
+      {
+        patientId: result.session.patientId,
+        sessionId: result.sessionId,
+        reviewConclusion,
+      },
+    );
+
+    return reviewed;
+  }
+
   async caregiverSummary(user: RequestUser, patientId: string) {
     await this.assertPatientAccess(user, patientId, 'summary');
     const caregiverRelation = await this.findActiveCaregiverAuthorization(
@@ -2345,6 +2425,38 @@ export class AppService {
       { reason: 'training_write_required' },
     );
     throw new ForbiddenException('无权写入训练数据');
+  }
+
+  private async assertTrainingReviewAccess(
+    user: RequestUser,
+    patient: { id: string; responsibleDoctorId: string | null },
+  ) {
+    if (
+      this.hasRole(user, 'admin') ||
+      this.hasRole(user, 'admin_super') ||
+      this.hasRole(user, 'admin_operator')
+    ) {
+      return;
+    }
+
+    const doctorRole = user.roles.find(
+      (role) =>
+        role.roleCode === 'doctor' &&
+        patient.responsibleDoctorId !== null &&
+        role.relatedObjectId === patient.responsibleDoctorId,
+    );
+    if (doctorRole) return;
+
+    await this.audit(
+      user.id,
+      this.primaryRole(user),
+      'access.denied',
+      'training_result',
+      patient.id,
+      'denied',
+      { reason: 'training_review_required' },
+    );
+    throw new ForbiddenException('无权复核该训练结果');
   }
 
   private async buildUserContext(user: RequestUser) {
@@ -3334,6 +3446,35 @@ export class AppService {
     if (!['low', 'moderate', 'high'].includes(intensity)) {
       throw new BadRequestException('运动强度必须是 low、moderate 或 high。');
     }
+  }
+
+  private validateTrainingReviewConclusion(
+    value: unknown,
+  ): TrainingReviewConclusion {
+    const conclusion = this.requiredString(value, '训练复核结论不能为空。');
+    if (
+      !trainingReviewConclusions.includes(
+        conclusion as TrainingReviewConclusion,
+      )
+    ) {
+      throw new BadRequestException(
+        '训练复核结论必须是 confirmed_abnormal、accepted_valid、excluded_from_analysis 或 needs_retrain。',
+      );
+    }
+    return conclusion as TrainingReviewConclusion;
+  }
+
+  private assertTrainingResultRequiresReview(result: {
+    abnormalFlag: boolean;
+    qualityFlag: string;
+  }) {
+    if (result.abnormalFlag || result.qualityFlag !== 'valid') return;
+    throw new BadRequestException('该训练结果未被标记为异常或可疑，无需人工复核。');
+  }
+
+  private assertTrainingResultNotReviewed(result: { reviewStatus: string | null }) {
+    if (result.reviewStatus !== 'reviewed') return;
+    throw new BadRequestException('该训练结果已完成复核，请勿重复提交。');
   }
 
   private validateConsentType(value: unknown): ConsentDto['consentType'] {

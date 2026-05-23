@@ -156,6 +156,16 @@ export class AppController {
   }
 
   @UseGuards(AuthGuard)
+  @Patch('training-results/:id/review')
+  reviewTrainingResult(
+    @CurrentUser() user: RequestUser,
+    @Param('id') resultId: string,
+    @Body() body: unknown,
+  ) {
+    return this.appService.reviewTrainingResult(user, resultId, body as never);
+  }
+
+  @UseGuards(AuthGuard)
   @Get('patients/:id/training-records')
   listTrainingRecords(
     @CurrentUser() user: RequestUser,

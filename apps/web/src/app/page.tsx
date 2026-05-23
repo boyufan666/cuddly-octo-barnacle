@@ -68,8 +68,11 @@ import type {
   RehabPlan,
   RoleCode,
   SubmitTrainingResultRequest,
+  SubmitTrainingReviewRequest,
   TrainingRecordsResponse,
+  TrainingRecordSession,
   TrainingSession,
+  TrainingReviewConclusion,
   UpdateGameContentStatusRequest,
   UpdateUnityBuildRequest,
 } from "@/types/api";
@@ -267,6 +270,7 @@ type ActionKey =
   | "checkDevice"
   | "checkPose"
   | "submitResult"
+  | "reviewTraining"
   | "consent"
   | "revokeConsent"
   | "createPatient"
@@ -471,6 +475,18 @@ const emptyTrainingResultForm: TrainingResultFormState = {
   motionMetrics: "",
 };
 
+type TrainingReviewFormState = {
+  resultId: string;
+  reviewConclusion: "" | TrainingReviewConclusion;
+  reviewNote: string;
+};
+
+const emptyTrainingReviewForm: TrainingReviewFormState = {
+  resultId: "",
+  reviewConclusion: "",
+  reviewNote: "",
+};
+
 type BrowserPoseEvidenceFormState = {
   testerName: string;
   siteName: string;
@@ -664,6 +680,8 @@ export default function Home() {
     useState<UnityBuildFormState>(emptyUnityBuildForm);
   const [trainingResultForm, setTrainingResultForm] =
     useState<TrainingResultFormState>(emptyTrainingResultForm);
+  const [trainingReviewForm, setTrainingReviewForm] =
+    useState<TrainingReviewFormState>(emptyTrainingReviewForm);
   const [browserPoseEvidenceForm, setBrowserPoseEvidenceForm] =
     useState<BrowserPoseEvidenceFormState>(emptyBrowserPoseEvidenceForm);
   const [trainingReadiness, setTrainingReadiness] = useState<TrainingReadiness>(
@@ -721,6 +739,7 @@ export default function Home() {
     setActiveTrainingSession(null);
     setTrainingReadiness(emptyTrainingReadiness);
     setTrainingResultForm(emptyTrainingResultForm);
+    setTrainingReviewForm(emptyTrainingReviewForm);
     setBrowserPoseEvidenceForm(emptyBrowserPoseEvidenceForm);
     setGameContentCreateForm(emptyGameContentCreateForm);
     setUnityBuildForm(emptyUnityBuildForm);
@@ -878,6 +897,7 @@ export default function Home() {
     setActiveTrainingSession(null);
     setTrainingReadiness(emptyTrainingReadiness);
     setTrainingResultForm(emptyTrainingResultForm);
+    setTrainingReviewForm(emptyTrainingReviewForm);
     setBrowserPoseEvidenceForm(emptyBrowserPoseEvidenceForm);
     await reloadRoleData(session, patientId);
   }
@@ -952,6 +972,13 @@ export default function Home() {
     value: TrainingResultFormState[K],
   ) {
     setTrainingResultForm((current) => ({ ...current, [field]: value }));
+  }
+
+  function updateTrainingReviewForm<K extends keyof TrainingReviewFormState>(
+    field: K,
+    value: TrainingReviewFormState[K],
+  ) {
+    setTrainingReviewForm((current) => ({ ...current, [field]: value }));
   }
 
   async function handleRefreshAuditLogs(filters: AuditLogFilters) {
@@ -1604,6 +1631,26 @@ export default function Home() {
     }
   }
 
+  async function handleSubmitTrainingReview(form: TrainingReviewFormState) {
+    if (!session || !data.patient) return;
+
+    setBusyAction("reviewTraining");
+    setDataError(null);
+    setActionStatus("正在提交训练复核结论");
+
+    try {
+      const payload = buildTrainingReviewPayload(form);
+      await api.reviewTrainingResult(session.accessToken, form.resultId, payload);
+      setTrainingReviewForm(emptyTrainingReviewForm);
+      await reloadRoleData(session, data.patient.id);
+      setActionStatus("训练复核结论已保存，审计日志已记录本次操作。");
+    } catch (error) {
+      handleRequestError(error, "训练复核提交失败");
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
   return (
     <main className="min-h-dvh overflow-hidden bg-[radial-gradient(circle_at_12%_8%,rgba(117,207,209,0.35),transparent_28%),linear-gradient(135deg,#f7fbf8_0%,#e8f5f4_48%,#f8f4ee_100%)] text-[#16333d]">
       <div className="pointer-events-none fixed inset-0 bg-[linear-gradient(rgba(22,51,61,0.035)_1px,transparent_1px),linear-gradient(90deg,rgba(22,51,61,0.035)_1px,transparent_1px)] bg-[size:42px_42px]" />
@@ -1838,6 +1885,11 @@ export default function Home() {
                 isCreatingPatient={busyAction === "createPatient"}
                 primaryRole={primaryRole}
                 canCreatePatient={canCreatePatient}
+                trainingRecords={visibleTrainingRecords}
+                reviewForm={trainingReviewForm}
+                onReviewFormChange={updateTrainingReviewForm}
+                onSubmitTrainingReview={handleSubmitTrainingReview}
+                isReviewingTraining={busyAction === "reviewTraining"}
               />
             )}
             {active === "plan" && (
@@ -5006,6 +5058,11 @@ function DoctorScreen({
   isCreatingPatient,
   primaryRole,
   canCreatePatient,
+  trainingRecords,
+  reviewForm,
+  onReviewFormChange,
+  onSubmitTrainingReview,
+  isReviewingTraining,
 }: {
   patients?: PatientProfile[];
   patient?: PatientProfile;
@@ -5017,6 +5074,14 @@ function DoctorScreen({
   isCreatingPatient: boolean;
   primaryRole?: RoleCode;
   canCreatePatient: boolean;
+  trainingRecords?: TrainingRecordsResponse;
+  reviewForm: TrainingReviewFormState;
+  onReviewFormChange: <K extends keyof TrainingReviewFormState>(
+    field: K,
+    value: TrainingReviewFormState[K],
+  ) => void;
+  onSubmitTrainingReview: (form: TrainingReviewFormState) => Promise<void>;
+  isReviewingTraining: boolean;
 }) {
   const assessment = patient?.assessments?.[0];
   const scoreSummary = assessment?.scoreSummary ?? {};
@@ -5089,6 +5154,13 @@ function DoctorScreen({
         <StatusList items={prerequisiteState.items} />
       </GlassCard>
       <DoctorPatientAlerts patient={patient} />
+      <TrainingReviewPanel
+        trainingRecords={trainingRecords}
+        form={reviewForm}
+        onChange={onReviewFormChange}
+        onSubmit={onSubmitTrainingReview}
+        isBusy={isReviewingTraining}
+      />
       <PatientCreatePanel
         form={patientForm}
         onChange={onPatientFormChange}
@@ -5327,6 +5399,149 @@ function DoctorPatientAlerts({ patient }: { patient?: PatientProfile }) {
     <GlassCard className="md:col-span-2">
       <h3 className="text-2xl font-black">当前患者待关注事项</h3>
       <StatusList items={items} />
+    </GlassCard>
+  );
+}
+
+function TrainingReviewPanel({
+  trainingRecords,
+  form,
+  onChange,
+  onSubmit,
+  isBusy,
+}: {
+  trainingRecords?: TrainingRecordsResponse;
+  form: TrainingReviewFormState;
+  onChange: <K extends keyof TrainingReviewFormState>(
+    field: K,
+    value: TrainingReviewFormState[K],
+  ) => void;
+  onSubmit: (form: TrainingReviewFormState) => Promise<void>;
+  isBusy: boolean;
+}) {
+  const reviewSessions = findTrainingSessionsRequiringReview(trainingRecords);
+  const selectedSession = reviewSessions.find(
+    (session) => session.result?.id === form.resultId,
+  );
+  const canSubmit = isTrainingReviewFormComplete(form);
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!canSubmit || isBusy) return;
+    void onSubmit(form);
+  }
+
+  return (
+    <GlassCard className="md:col-span-4">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <Badge label="人工复核" icon={MonitorCheck} />
+          <h3 className="mt-4 text-2xl font-black">待复核训练结果</h3>
+          <p className="mt-2 max-w-3xl font-bold leading-7 text-[#526b74]">
+            系统只列出真实回传且被标记为异常或可疑的训练结果。复核结论不会自动生成，需要医师根据质量原因、动作指标和患者状态手动填写。
+          </p>
+        </div>
+        <Chip tone={reviewSessions.length ? "warning" : "success"}>
+          {reviewSessions.length ? `${reviewSessions.length} 条待复核` : "暂无待复核"}
+        </Chip>
+      </div>
+
+      {reviewSessions.length ? (
+        <div className="mt-5 grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
+          <div className="overflow-hidden rounded-3xl border border-[#c9e3e7]">
+            {reviewSessions.map((session) => {
+              const result = session.result;
+              const isSelected = result?.id === form.resultId;
+              return (
+                <button
+                  key={session.id}
+                  type="button"
+                  onClick={() => onChange("resultId", result?.id ?? "")}
+                  className={cn(
+                    "block w-full border-b border-[#e1edf0] bg-white/70 p-5 text-left last:border-b-0 transition hover:bg-[#e9f8f6]",
+                    isSelected && "bg-[#e9f8f6] ring-2 ring-inset ring-[#1f7a8c]/30",
+                  )}
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="text-lg font-black text-[#16333d]">
+                        {session.gameContent.name}
+                      </p>
+                      <p className="mt-1 text-sm font-bold text-[#6a8088]">
+                        {formatDateTime(session.startedAt)} · 会话 {shortId(session.id)}
+                      </p>
+                    </div>
+                    <Chip tone={result?.abnormalFlag ? "danger" : "warning"}>
+                      {qualityLabel(result?.qualityFlag)}
+                    </Chip>
+                  </div>
+                  <div className="mt-4 grid gap-3 md:grid-cols-4">
+                    <FormBlock label="得分" value={formatNullableNumber(result?.score, "分")} />
+                    <FormBlock
+                      label="完成率"
+                      value={formatNullablePercent(result?.completionRate)}
+                    />
+                    <FormBlock
+                      label="反应时间"
+                      value={formatNullableNumber(result?.reactionTimeMs, "ms")}
+                    />
+                    <FormBlock
+                      label="动作准确率"
+                      value={formatNullablePercent(result?.motionAccuracy)}
+                    />
+                  </div>
+                  <p className="mt-4 rounded-2xl bg-amber-50 px-4 py-3 text-sm font-bold leading-6 text-amber-800">
+                    {result?.qualityReasons?.length
+                      ? result.qualityReasons.join("；")
+                      : "系统未返回质量原因，请查看动作指标后再复核。"}
+                  </p>
+                </button>
+              );
+            })}
+          </div>
+
+          <form onSubmit={submit} className="rounded-3xl border border-[#c9e3e7] bg-white/70 p-5">
+            <h4 className="text-xl font-black">录入复核结论</h4>
+            <p className="mt-2 text-sm font-bold leading-6 text-[#6a8088]">
+              {selectedSession
+                ? `当前复核：${selectedSession.gameContent.name} · ${shortId(selectedSession.result?.id ?? selectedSession.id)}`
+                : "请先从左侧选择一条待复核训练结果。"}
+            </p>
+            <SelectField
+              label="复核结论"
+              value={form.reviewConclusion}
+              disabled={!form.resultId || isBusy}
+              onChange={(value) =>
+                onChange("reviewConclusion", value as TrainingReviewFormState["reviewConclusion"])
+              }
+              options={[
+                ["", "请选择人工结论"],
+                ["confirmed_abnormal", "确认异常"],
+                ["accepted_valid", "人工采纳为有效"],
+                ["excluded_from_analysis", "排除统计分析"],
+                ["needs_retrain", "建议重新训练"],
+              ]}
+            />
+            <TextAreaField
+              label="复核说明"
+              value={form.reviewNote}
+              onChange={(value) => onChange("reviewNote", value)}
+              readOnly={!form.resultId || isBusy}
+            />
+            <PrimaryButton
+              type="submit"
+              disabled={!canSubmit || isBusy}
+              className="mt-5 w-full"
+            >
+              {isBusy ? "正在保存复核" : "保存复核结论"}
+            </PrimaryButton>
+          </form>
+        </div>
+      ) : (
+        <div className="mt-5 rounded-3xl border border-dashed border-[#c9e3e7] bg-white/60 p-6 font-bold leading-7 text-[#6a8088]">
+          当前患者没有待复核训练。只有系统标记为异常或可疑、且尚未人工复核的真实训练结果会进入这里。
+        </div>
+      )}
     </GlassCard>
   );
 }
@@ -7344,10 +7559,10 @@ function HistoryPanel({
         items={
           sessions.length
             ? sessions.slice(0, 3).map((session) => [
-                session.gameContent.name,
-                session.result
-                  ? `${formatDateTime(session.startedAt)} · 得分 ${session.result.score}`
-                  : `${formatDateTime(session.startedAt)} · 待回传结果`,
+	                session.gameContent.name,
+	                session.result
+	                  ? `${formatDateTime(session.startedAt)} · 得分 ${session.result.score} · ${trainingReviewConclusionLabel(session.result.reviewConclusion)}`
+	                  : `${formatDateTime(session.startedAt)} · 待回传结果`,
                 session.result?.abnormalFlag
                   ? "warning"
                   : session.result
@@ -7543,6 +7758,21 @@ function buildTrainingResultPayload(
     exerciseIntensity,
     metricsSummary,
     motionMetrics,
+  };
+}
+
+function buildTrainingReviewPayload(
+  form: TrainingReviewFormState,
+): SubmitTrainingReviewRequest {
+  const reviewConclusion = parseTrainingReviewConclusion(form.reviewConclusion);
+  const reviewNote = form.reviewNote.trim();
+  if (!reviewNote) {
+    throw new Error("训练复核说明不能为空。");
+  }
+
+  return {
+    reviewConclusion,
+    reviewNote,
   };
 }
 
@@ -7804,6 +8034,20 @@ function parseExerciseIntensity(
     return value;
   }
   throw new Error("请选择本次训练采集到的运动强度。");
+}
+
+function parseTrainingReviewConclusion(
+  value: TrainingReviewFormState["reviewConclusion"],
+): TrainingReviewConclusion {
+  if (
+    value === "confirmed_abnormal" ||
+    value === "accepted_valid" ||
+    value === "excluded_from_analysis" ||
+    value === "needs_retrain"
+  ) {
+    return value;
+  }
+  throw new Error("请选择训练复核结论。");
 }
 
 function parseJsonObject(value: string, message: string): Record<string, unknown> {
@@ -8176,6 +8420,26 @@ function summarizeTrainingContentReadiness(plan?: RehabPlan | null): {
 
 function latestTrainingSession(patient?: PatientProfile) {
   return patient?.trainingSessions?.[0];
+}
+
+function findTrainingSessionsRequiringReview(
+  trainingRecords?: TrainingRecordsResponse,
+): TrainingRecordSession[] {
+  return (trainingRecords?.sessions ?? []).filter(
+    (session): session is TrainingRecordSession =>
+      Boolean(session.result) &&
+      (session.result?.abnormalFlag === true ||
+        session.result?.qualityFlag !== "valid") &&
+      session.result?.reviewStatus !== "reviewed",
+  );
+}
+
+function isTrainingReviewFormComplete(form: TrainingReviewFormState) {
+  return Boolean(
+    form.resultId.trim() &&
+      form.reviewConclusion &&
+      form.reviewNote.trim(),
+  );
 }
 
 function buildPatientAlertItems(
@@ -8578,6 +8842,7 @@ const auditActionLabels: Record<string, string> = {
   "rehab_plan.confirm": "确认康复方案",
   "training_session.start": "开始训练",
   "training_result.submit": "提交训练结果",
+  "training_result.review": "复核训练结果",
   "game_content.create": "创建训练内容",
   "game_content.enable": "启用训练内容",
   "game_content.disable": "下架训练内容",
@@ -8757,6 +9022,14 @@ function qualityLabel(value?: string) {
   return value ?? "等待训练结果";
 }
 
+function trainingReviewConclusionLabel(value?: string | null) {
+  if (value === "confirmed_abnormal") return "确认异常";
+  if (value === "accepted_valid") return "人工采纳为有效";
+  if (value === "excluded_from_analysis") return "排除统计分析";
+  if (value === "needs_retrain") return "建议重新训练";
+  return "未复核";
+}
+
 function targetTypeLabel(value: string) {
   const labels: Record<string, string> = {
     user: "用户",
@@ -8765,6 +9038,7 @@ function targetTypeLabel(value: string) {
     assessment_record: "评估记录",
     rehab_plan: "康复方案",
     training_session: "训练会话",
+    training_result: "训练结果",
     game_content: "训练内容",
     audit_log: "审计日志",
     data_export: "数据导出",
