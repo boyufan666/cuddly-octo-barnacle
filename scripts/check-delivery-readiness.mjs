@@ -26,6 +26,7 @@ const requiredDeliveryDocumentRefs = [
   "docs/customer-final-input-request.md",
   "docs/customer-input-to-launch-gate-runbook.md",
   "docs/ai-speech-provider-selection-free-first.md",
+  "docs/customer-delivery-progress-and-input-summary.md",
   "docs/templates/customer-production-input.template.json",
   "docs/browser-pose-field-acceptance-runbook.md",
 ];
