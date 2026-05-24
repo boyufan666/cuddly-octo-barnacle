@@ -68,11 +68,14 @@
 - PostgreSQL/Redis 密码和访问策略
 - HTTPS 证书和反向代理配置
 - 日志、备份、监控和告警配置
-- AI/语音生产配置：供应商、正式 HTTPS endpoint、`secret-manager://...` 密钥引用、模型/语音调用日志留存和医师人工复核证据
+- AI/语音上线范围：`AI_REQUIRED_FOR_LAUNCH`、`SPEECH_REQUIRED_FOR_LAUNCH` 必须与客户资料包一致
+- 若客户确认本次上线真实 AI/语音能力，还必须替换 AI/语音生产配置：供应商、正式 HTTPS endpoint、`secret-manager://...` 密钥引用、模型/语音调用日志留存和医师人工复核证据
+
+若 AI/语音对应 scope 为 `false`，只能表示该真实能力不在本次上线范围；不得保留半配置，不得宣传真实 AI/语音能力，也不得作为失败后的兜底。
 
 ## 当前阻塞交付事项
 
-1. 真实 AI/语音服务接入：必须同时具备生产供应商配置、正式 HTTPS endpoint、`secret-manager://...` 密钥引用、模型/语音调用日志留存和医师人工复核证据；任一项缺失均为上线硬阻断，不能以 mock/demo/local、本地录入或脚本兜底替代。
+1. 若客户要求本次上线真实 AI/语音服务接入，必须同时具备生产供应商配置、正式 HTTPS endpoint、`secret-manager://...` 密钥引用、模型/语音调用日志留存和医师人工复核证据；任一项缺失均为上线硬阻断，不能以 mock/demo/local、本地录入或脚本兜底替代。
 2. 至少 1 个正式训练内容实机验收：发布浏览器体感或 Unity 内容，完成摄像头授权、姿态识别、结果生成、入库和审计。
 3. Unity WebGL 正式构建接入：`manifest.json`、Build 文件和 Bridge 回传验收。
 4. 隐私权限专项验收：撤回授权阻断、家属摘要脱敏、医师患者归属、导出脱敏审计。
@@ -126,10 +129,10 @@ pnpm verify:browser-pose-field-acceptance -- \
 试点或生产环境准备前，还必须在目标环境变量已显式配置后执行：
 
 ```bash
-pnpm delivery:check:production
+pnpm delivery:check:production -- --customer-input customer-production-input.json
 ```
 
-该检查会拒绝占位符、本地地址、开发 JWT 密钥、固定本地密码和非 HTTPS 正式地址；失败时应由客户或运维提供正式配置，不允许脚本自动替换为默认值。
+该检查会拒绝占位符、本地地址、开发 JWT 密钥、固定本地密码和非 HTTPS 正式地址，并校验环境变量中的 AI/语音上线范围与客户资料包一致；失败时应由客户或运维提供正式配置，不允许脚本自动替换为默认值。
 
 此外，应使用真实浏览器逐角色验证：
 

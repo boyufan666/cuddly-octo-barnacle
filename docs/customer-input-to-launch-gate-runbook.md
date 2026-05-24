@@ -77,10 +77,10 @@ No-Go 时，只能交付结构化评估录入和 AI/语音接口边界，不能�
 客户资料包通过后，由客户或运维在目标环境显式配置正式环境变量，再执行：
 
 ```bash
-pnpm delivery:check:production
+pnpm delivery:check:production -- --customer-input customer-production-input.json
 ```
 
-必须显式配置：
+必须显式配置基础项和上线范围项：
 
 - `DATABASE_URL`
 - `REDIS_URL`
@@ -88,6 +88,13 @@ pnpm delivery:check:production
 - `WEB_ORIGIN`
 - `NEXT_PUBLIC_API_BASE_URL`
 - `DEFAULT_PATIENT_PASSWORD`
+- `AI_REQUIRED_FOR_LAUNCH`
+- `SPEECH_REQUIRED_FOR_LAUNCH`
+
+`AI_REQUIRED_FOR_LAUNCH` 和 `SPEECH_REQUIRED_FOR_LAUNCH` 必须与客户资料包中的 `ai.requiredForLaunch`、`speech.requiredForLaunch` 保持一致，只接受精确的 `true` 或 `false`。`false` 只表示该真实能力不在本次上线范围，不是失败后的兜底，也不能包装为真实 AI/语音结果。
+
+当 `AI_REQUIRED_FOR_LAUNCH=true` 时，还必须配置：
+
 - `AI_PROVIDER`
 - `AI_MODEL_VERSION`
 - `AI_MODEL_ENDPOINT`
@@ -95,10 +102,15 @@ pnpm delivery:check:production
 - `AI_PROMPT_VERSION`
 - `AI_CALL_LOG_RETENTION_DAYS`
 - `AI_HUMAN_REVIEW_REQUIRED`
+
+当 `SPEECH_REQUIRED_FOR_LAUNCH=true` 时，还必须配置：
+
 - `SPEECH_PROVIDER`
 - `SPEECH_TO_TEXT_ENDPOINT`
 - `SPEECH_API_KEY_REF`
 - `SPEECH_MODEL_VERSION`
+
+当对应 scope 为 `false` 时，不得残留该能力的半配置，例如 `AI_PROVIDER`、`AI_MODEL_ENDPOINT`、`SPEECH_PROVIDER` 或 `SPEECH_TO_TEXT_ENDPOINT`。否则应判定为阻断，避免把非上线范围配置误当作生产能力。
 
 失败处理：
 
@@ -169,7 +181,7 @@ pnpm verify:trial-empty-loop
 最终交付前至少保留：
 
 - `customer-production-input.json` 及校验通过记录。
-- `pnpm delivery:check:production` 通过记录。
+- `pnpm delivery:check:production -- --customer-input customer-production-input.json` 通过记录。
 - 空库闭环验收记录。
 - 浏览器体感 evidence JSON、截图、录屏和只读实机验真记录。
 - 如接入 AI/语音：供应商控制台截图、调用日志、模型版本、提示词版本、人工复核记录和授权记录。

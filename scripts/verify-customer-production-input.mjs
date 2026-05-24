@@ -135,6 +135,7 @@ function validateDataCollection(failures, dataCollection) {
 function validateAi(failures, ai) {
   requireObject(failures, ai, "ai 必须是对象。");
   if (!isObject(ai)) return;
+  requireBoolean(failures, ai.requiredForLaunch, "ai.requiredForLaunch");
   if (!isServiceRequiredForLaunch(ai)) return;
   validateExternalService(failures, ai, "ai", {
     requirePrompt: true,
@@ -155,6 +156,7 @@ function validateAi(failures, ai) {
 function validateSpeech(failures, speech) {
   requireObject(failures, speech, "speech 必须是对象。");
   if (!isObject(speech)) return;
+  requireBoolean(failures, speech.requiredForLaunch, "speech.requiredForLaunch");
   if (!isServiceRequiredForLaunch(speech)) return;
   validateExternalService(failures, speech, "speech", {
     requirePrompt: false,
@@ -280,6 +282,12 @@ function requireStringArray(failures, value, field) {
 function requireTrue(failures, value, message) {
   if (value !== true) {
     failures.push(message);
+  }
+}
+
+function requireBoolean(failures, value, field) {
+  if (typeof value !== "boolean") {
+    failures.push(`${field} 必须是布尔值 true 或 false。`);
   }
 }
 

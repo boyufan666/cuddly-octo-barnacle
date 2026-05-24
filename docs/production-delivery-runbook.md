@@ -8,7 +8,7 @@
 
 - 客户确认正式域名、服务器、数据库、Redis、对象存储或静态资源部署方式。
 - 客户确认隐私协议、知情同意文本、授权版本号和数据留存要求。
-- 客户确认 AI/语音服务供应商、调用方式、密钥、额度、部署区域和日志要求。
+- 若客户要求本次上线真实 AI/语音能力，客户确认 AI/语音服务供应商、调用方式、密钥、额度、部署区域和日志要求。
 - 客户确认至少一个正式训练内容的验收标准。
 - 客户确认运维责任：备份、监控、故障处理、账号开通和数据导出审批。
 
@@ -31,18 +31,9 @@
 - `DEFAULT_PATIENT_PASSWORD`
 - PostgreSQL 密码
 - Redis 密码或访问策略
-- AI/语音服务密钥
-- `AI_PROVIDER`
-- `AI_MODEL_VERSION`
-- `AI_MODEL_ENDPOINT`
-- `AI_API_KEY_REF`
-- `AI_PROMPT_VERSION`
-- `AI_CALL_LOG_RETENTION_DAYS`
-- `AI_HUMAN_REVIEW_REQUIRED`
-- `SPEECH_PROVIDER`
-- `SPEECH_TO_TEXT_ENDPOINT`
-- `SPEECH_API_KEY_REF`
-- `SPEECH_MODEL_VERSION`
+- AI/语音上线范围：`AI_REQUIRED_FOR_LAUNCH`、`SPEECH_REQUIRED_FOR_LAUNCH`
+- 若 `AI_REQUIRED_FOR_LAUNCH=true`，必须替换 `AI_PROVIDER`、`AI_MODEL_VERSION`、`AI_MODEL_ENDPOINT`、`AI_API_KEY_REF`、`AI_PROMPT_VERSION`、`AI_CALL_LOG_RETENTION_DAYS`、`AI_HUMAN_REVIEW_REQUIRED`
+- 若 `SPEECH_REQUIRED_FOR_LAUNCH=true`，必须替换 `SPEECH_PROVIDER`、`SPEECH_TO_TEXT_ENDPOINT`、`SPEECH_API_KEY_REF`、`SPEECH_MODEL_VERSION`
 - 对象存储或静态资源访问密钥
 
 不得使用本地 `.env`、固定通用密码、开发数据库或开发 JWT 密钥上线。
@@ -57,19 +48,21 @@
 
 试点或生产环境不得使用 `pnpm db:seed` 生成患者、评估、训练计划或训练记录。
 
+若对应上线范围为 `false`，不得保留该能力的半配置，也不得宣传真实 AI/语音能力已完成。
+
 ## AI/语音接入
 
-正式接入前必须确认：
+仅当客户确认本次上线真实 AI/语音能力时，正式接入前必须确认：
 
 - 语音转文字服务提供商、接口、密钥、费用和部署区域。
-- 大模型服务提供商、模型版本、提示词版本、输入输出字段和失败策略。
+- 大模型服务提供商、模型版本、提示词版本、输入输出字段和失败阻断与人工复核处理策略。
 - 是否允许上传健康数据、语音转写和评估摘要到第三方服务。
 - 模型调用日志保存内容、脱敏策略和审计要求。
 - 医师是否必须人工确认 AI 生成结果。
 
 如客户希望优先使用免费额度或已有账号，供应商候选和资料确认口径见 `docs/ai-speech-provider-selection-free-first.md`。选型说明只用于降低试点成本和沟通范围，不代表生产能力已经可用；正式上线仍以本节配置、调用日志、合规授权和人工复核证据为准。
 
-生产配置必须显式提供 `AI_PROVIDER`、`AI_MODEL_VERSION`、`AI_MODEL_ENDPOINT`、`AI_API_KEY_REF`、`AI_PROMPT_VERSION`、`AI_CALL_LOG_RETENTION_DAYS`、`AI_HUMAN_REVIEW_REQUIRED`、`SPEECH_PROVIDER`、`SPEECH_TO_TEXT_ENDPOINT`、`SPEECH_API_KEY_REF` 和 `SPEECH_MODEL_VERSION`。`AI_MODEL_ENDPOINT` 与 `SPEECH_TO_TEXT_ENDPOINT` 必须使用正式 HTTPS 地址；供应商、模型、提示词、密钥引用不能包含 `mock`、`demo` 或 `local` 标记；`AI_API_KEY_REF` 与 `SPEECH_API_KEY_REF` 必须使用 `secret-manager://...` 形式的密钥引用，不能把真实密钥值直接写入环境变量；`AI_HUMAN_REVIEW_REQUIRED` 必须为 `true`；调用日志留存天数必须为 30 到 3650 的整数。
+生产配置必须显式提供 `AI_REQUIRED_FOR_LAUNCH` 与 `SPEECH_REQUIRED_FOR_LAUNCH`，并与客户资料包中的 `requiredForLaunch` 保持一致。对应值为 `true` 时，必须提供该能力的正式配置：AI 需要 `AI_PROVIDER`、`AI_MODEL_VERSION`、`AI_MODEL_ENDPOINT`、`AI_API_KEY_REF`、`AI_PROMPT_VERSION`、`AI_CALL_LOG_RETENTION_DAYS` 和 `AI_HUMAN_REVIEW_REQUIRED`；语音需要 `SPEECH_PROVIDER`、`SPEECH_TO_TEXT_ENDPOINT`、`SPEECH_API_KEY_REF` 和 `SPEECH_MODEL_VERSION`。对应值为 `false` 时，不得保留该能力的半配置，也不能宣传真实能力上线。`AI_MODEL_ENDPOINT` 与 `SPEECH_TO_TEXT_ENDPOINT` 必须使用正式 HTTPS 地址；供应商、模型、提示词、密钥引用不能包含 `mock`、`demo` 或 `local` 标记；`AI_API_KEY_REF` 与 `SPEECH_API_KEY_REF` 必须使用 `secret-manager://...` 形式的密钥引用，不能把真实密钥值直接写入环境变量；`AI_HUMAN_REVIEW_REQUIRED` 必须为 `true`；调用日志留存天数必须为 30 到 3650 的整数。
 
 正式评估入库还必须保存调用证据：`production_ai_assessment` 必须带供应商、模型、模型版本、调用 ID、正式 HTTPS endpoint、提示词版本、调用时间和人工复核记录；`speech_ai_assessment` 还必须带语音识别供应商、语音模型版本、语音调用 ID、正式 HTTPS endpoint，并要求患者已签署 `microphone_capture`。证据缺失、非 HTTPS、本地/演示 endpoint、含 `mock`/`demo`/`local`/`manual`/`fallback` 标记时，必须阻断创建评估记录，不允许降级为手工来源。
 
@@ -117,13 +110,13 @@ Unity WebGL 上线要求：
 ```bash
 pnpm test:delivery
 pnpm delivery:check
-pnpm delivery:check:production
+pnpm delivery:check:production -- --customer-input customer-production-input.json
 pnpm lint
 pnpm build
 pnpm --filter @rehab-platform/api exec jest --runInBand
 ```
 
-`pnpm delivery:check:production` 必须在正式 `DATABASE_URL`、`REDIS_URL`、`JWT_SECRET`、`WEB_ORIGIN`、`NEXT_PUBLIC_API_BASE_URL`、`DEFAULT_PATIENT_PASSWORD`、AI 服务配置和语音转写服务配置已由客户或运维显式配置后运行。缺少正式值、仍指向 localhost、使用开发密钥、固定密码、HTTP 地址、mock/demo/local 标记或未要求人工复核时应失败，不允许脚本自行兜底。
+`pnpm delivery:check:production -- --customer-input customer-production-input.json` 必须在正式 `DATABASE_URL`、`REDIS_URL`、`JWT_SECRET`、`WEB_ORIGIN`、`NEXT_PUBLIC_API_BASE_URL`、`DEFAULT_PATIENT_PASSWORD`、`AI_REQUIRED_FOR_LAUNCH` 和 `SPEECH_REQUIRED_FOR_LAUNCH` 已由客户或运维显式配置后运行。传入 `--customer-input` 后，脚本还会校验环境变量中的 AI/语音上线范围与客户资料包一致。对应上线范围为 `true` 时，还必须提供完整 AI 服务配置或语音转写服务配置；对应上线范围为 `false` 时，对应半配置必须留空。缺少正式值、仍指向 localhost、使用开发密钥、固定密码、HTTP 地址、mock/demo/local 标记或未要求人工复核时应失败，不允许脚本自行兜底。
 
 真实闭环验收：
 

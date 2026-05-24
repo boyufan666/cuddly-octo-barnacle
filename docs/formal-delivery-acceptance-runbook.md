@@ -34,6 +34,7 @@ pnpm verify:customer-production-input -- customer-production-input.json
 - 数据库、Redis、AI、语音密钥均为 `secret-manager://...` 引用。
 - 隐私协议、授权责任人、数据留存、脱敏导出责任人已填写。
 - AI/语音若声明上线，已填写供应商、账号负责人、免费额度或费用确认、模型版本、endpoint、调用日志、人工复核。
+- AI/语音若不在本次上线范围，`requiredForLaunch` 必须由客户或验收负责人确认后设为 `false`，且不能宣传真实 AI/语音能力。
 - 浏览器体感已提供实机 evidence 路径、目标浏览器和摄像头型号。
 
 失败处理：
@@ -47,14 +48,17 @@ pnpm verify:customer-production-input -- customer-production-input.json
 在目标环境变量已由客户或运维显式配置后执行：
 
 ```bash
-pnpm delivery:check:production
+pnpm delivery:check:production -- --customer-input customer-production-input.json
 ```
 
 通过条件：
 
 - `DATABASE_URL`、`REDIS_URL`、`JWT_SECRET`、`WEB_ORIGIN`、`NEXT_PUBLIC_API_BASE_URL`、`DEFAULT_PATIENT_PASSWORD` 均为正式配置。
-- AI/语音生产配置齐全：`AI_PROVIDER`、`AI_MODEL_VERSION`、`AI_MODEL_ENDPOINT`、`AI_API_KEY_REF`、`AI_PROMPT_VERSION`、`AI_CALL_LOG_RETENTION_DAYS`、`AI_HUMAN_REVIEW_REQUIRED`、`SPEECH_PROVIDER`、`SPEECH_TO_TEXT_ENDPOINT`、`SPEECH_API_KEY_REF`、`SPEECH_MODEL_VERSION`。
-- endpoint 必须为 HTTPS；密钥必须为引用；日志留存 30 到 3650 天；人工复核必须为 `true`。
+- 必须显式声明 `AI_REQUIRED_FOR_LAUNCH` 和 `SPEECH_REQUIRED_FOR_LAUNCH`，且与客户资料包的 `requiredForLaunch` 一致。
+- 当 `AI_REQUIRED_FOR_LAUNCH=true` 时，AI 生产配置齐全：`AI_PROVIDER`、`AI_MODEL_VERSION`、`AI_MODEL_ENDPOINT`、`AI_API_KEY_REF`、`AI_PROMPT_VERSION`、`AI_CALL_LOG_RETENTION_DAYS`、`AI_HUMAN_REVIEW_REQUIRED`。
+- 当 `SPEECH_REQUIRED_FOR_LAUNCH=true` 时，语音生产配置齐全：`SPEECH_PROVIDER`、`SPEECH_TO_TEXT_ENDPOINT`、`SPEECH_API_KEY_REF`、`SPEECH_MODEL_VERSION`。
+- 对应 scope 为 `false` 时，不得保留半配置，也不能把结构化录入和接口边界包装为真实 AI/语音能力。
+- endpoint 必须为 HTTPS；密钥必须为引用；日志留存 30 到 3650 天；AI 人工复核必须为 `true`。
 
 失败处理：
 
@@ -194,10 +198,10 @@ pnpm verify:contracts
 - 隐私协议正文、版本、生效日期、授权撤回规则和数据留存周期。
 - 超级管理员、运营、审计、医师账号清单。
 - 真实患者数据采集范围、试点患者来源、脱敏和导出审批规则。
-- 大模型供应商账号；优先客户已有星火，或确认可用免费额度的通义千问、智谱、DeepSeek、Moonshot、OpenAI 等供应商。
-- 语音识别供应商账号；优先客户已有星火/讯飞语音能力或可用免费额度。
-- AI/语音费用、免费额度、QPS、并发、有效期、生产使用授权和超额计费确认。
+- 若客户确认本次上线真实 AI/语音能力，需提供大模型供应商账号；优先客户已有星火，或确认可用免费额度的通义千问、智谱、DeepSeek、Moonshot、OpenAI 等供应商。
+- 若客户确认本次上线真实语音能力，需提供语音识别供应商账号；优先客户已有星火/讯飞语音能力或可用免费额度。
+- 若客户确认本次上线真实 AI/语音能力，需提供 AI/语音费用、免费额度、QPS、并发、有效期、生产使用授权和超额计费确认。
 - AI/语音免费优先选型依据：可参考 `docs/ai-speech-provider-selection-free-first.md` 填写，但最终仍以客户账号控制台、正式合同或供应商官网当前页面为准。
-- AI/语音正式 HTTPS endpoint、密钥托管引用、模型版本、提示词版本、调用日志留存和医师人工复核责任人。
+- 若客户确认本次上线真实 AI/语音能力，需提供正式 HTTPS endpoint、密钥托管引用、模型版本、提示词版本、调用日志留存和医师人工复核责任人。
 - 浏览器体感验收设备、摄像头型号、目标浏览器、训练场地和现场验收负责人。
 - 如客户已有 Unity 游戏：WebGL Build、`manifest.json`、素材/插件授权证明和 Bridge 适配确认。

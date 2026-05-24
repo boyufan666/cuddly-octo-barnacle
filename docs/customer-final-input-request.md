@@ -6,7 +6,7 @@
 
 ```bash
 pnpm verify:customer-production-input -- customer-production-input.json
-pnpm delivery:check:production
+pnpm delivery:check:production -- --customer-input customer-production-input.json
 ```
 
 以上命令只做资料和配置门禁校验，不能替代真实 AI/语音调用验收、浏览器体感实机验收、医师人工复核和最终客户验收。

@@ -66,6 +66,6 @@ pnpm verify:customer-production-input -- <customer-production-input.json>
 
 - 正式域名、HTTPS、生产数据库/Redis 或备份策略缺失。
 - 隐私协议版本未冻结，或授权签署/撤回流程未验收。
-- 真实 AI/语音接入缺供应商、HTTPS endpoint、密钥引用、调用日志或人工复核证据。
+- 客户要求本期上线真实 AI/语音能力时，缺供应商、HTTPS endpoint、密钥引用、调用日志或人工复核证据。
 - 体感游戏缺实机摄像头验收、动作指标入库或审计日志。
 - 客户没有确认真实患者数据采集范围、保留周期和导出脱敏规则。

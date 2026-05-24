@@ -135,6 +135,25 @@ test("customer production input accepts launch materials when AI and speech are 
   assert.deepEqual(result.failures, []);
 });
 
+test("customer production input requires explicit boolean AI and speech launch scope", () => {
+  const input = validInput({
+    ai: {
+      requiredForLaunch: "false",
+      freeTierPreferred: true,
+    },
+    speech: {
+      freeTierPreferred: true,
+      microphoneConsentRequired: false,
+    },
+  });
+
+  const result = validateCustomerProductionInput(input);
+  const failures = result.failures.join("\n");
+
+  assert.match(failures, /ai\.requiredForLaunch.*布尔值/);
+  assert.match(failures, /speech\.requiredForLaunch.*布尔值/);
+});
+
 test("customer production input accepts AI launch without speech launch materials", () => {
   const input = validInput({
     speech: {

@@ -112,9 +112,9 @@ TRIAL_DOCTOR_MOBILE_PHONE
 - 生产部署配置：HTTPS、域名、CORS、强密钥、备份、监控、日志留存
 - 试点后续正式数据进入流程：患者、训练内容、隐私协议版本与真实业务数据采集
 
-`pnpm delivery:check:production` 已将 AI/语音供应商、模型版本、正式 HTTPS 接口、密钥引用、提示词版本、调用日志留存和人工复核策略纳入上线门禁。客户或运维未显式提供这些正式配置前，项目只能按“支持结构化录入和 AI/语音接口边界”交付，不能宣传真实 AI 自动评估已完成。
+`pnpm delivery:check:production` 已将 `AI_REQUIRED_FOR_LAUNCH` 和 `SPEECH_REQUIRED_FOR_LAUNCH` 纳入上线范围门禁。客户或运维必须先显式声明真实 AI/语音能力是否属于本次上线范围；设为 `true` 时，必须同步提供供应商、模型版本、正式 HTTPS 接口、`secret-manager://...` 密钥引用、提示词版本、调用日志留存和人工复核策略；设为 `false` 时，对应正式配置必须留空，只能按“结构化评估录入和 AI/语音接口边界”交付，不能宣传真实 AI/语音能力已完成。
 
-真实 AI/语音验收还必须提供供应商配置清单、HTTPS endpoint、`secret-manager://...` 密钥引用、模型调用日志样例和医师人工复核记录；任一项缺失时，生产检查和客户验收均应硬阻断。
+真实 AI/语音若被声明为本次上线范围，还必须提供供应商配置清单、HTTPS endpoint、`secret-manager://...` 密钥引用、模型调用日志样例和医师人工复核记录；任一项缺失时，生产检查和客户验收均应硬阻断。`false` 只表示范围未纳入，不是失败后的兜底或替代能力。
 
 客户资料包可从模板 `docs/templates/customer-production-input.template.json` 复制后填写。模板文件只展示字段结构，原样不会通过正式资料校验；必须替换为客户确认后的正式资料，并执行：
 

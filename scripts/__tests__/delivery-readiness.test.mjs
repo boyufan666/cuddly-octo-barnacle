@@ -1,11 +1,58 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import {
   checkGitignoreExclusions,
   checkDeliveryDocumentReferences,
   checkPackageScripts,
+  checkProductionLaunchScopeConsistency,
   checkProductionEnvironment,
 } from "../check-delivery-readiness.mjs";
+
+function productionBaseEnv() {
+  return {
+    DATABASE_URL:
+      "postgresql://rehab_prod:strong-password@db.prod.internal:5432/rehab_platform?schema=public",
+    REDIS_URL: "rediss://redis.prod.internal:6379",
+    JWT_SECRET:
+      "prod_secret_7u9v8w3x6y5z4a2b1c0d9e8f7g6h5j4k3l2m1n0p",
+    WEB_ORIGIN: "https://rehab.example.com",
+    NEXT_PUBLIC_API_BASE_URL: "https://api.rehab.example.com",
+    DEFAULT_PATIENT_PASSWORD: "initial-password-managed-by-ops",
+  };
+}
+
+function productionAiEnv() {
+  return {
+    AI_PROVIDER: "iflytek-spark",
+    AI_MODEL_VERSION: "spark-x1-2026-05",
+    AI_MODEL_ENDPOINT: "https://spark-api.customer-health.cn/v1/chat/completions",
+    AI_API_KEY_REF: "secret-manager://rehab-prod/iflytek-spark-api-key",
+    AI_PROMPT_VERSION: "cognitive-assessment-2026-05",
+    AI_CALL_LOG_RETENTION_DAYS: "180",
+    AI_HUMAN_REVIEW_REQUIRED: "true",
+  };
+}
+
+function productionSpeechEnv() {
+  return {
+    SPEECH_PROVIDER: "iflytek-iat",
+    SPEECH_TO_TEXT_ENDPOINT: "https://speech.customer-health.cn/v2/iat",
+    SPEECH_API_KEY_REF: "secret-manager://rehab-prod/iflytek-iat-api-key",
+    SPEECH_MODEL_VERSION: "iat-medical-2026-05",
+  };
+}
+
+function customerInputScope({ aiRequiredForLaunch, speechRequiredForLaunch }) {
+  return {
+    ai: {
+      requiredForLaunch: aiRequiredForLaunch,
+    },
+    speech: {
+      requiredForLaunch: speechRequiredForLaunch,
+    },
+  };
+}
 
 test("package scripts expose non-mutating delivery checks", () => {
   const result = checkPackageScripts({
@@ -253,18 +300,37 @@ test("production environment check rejects placeholders and local origins", () =
   assert.match(result.failures.join("\n"), /DEFAULT_PATIENT_PASSWORD.*固定/);
 });
 
-test("production environment check requires explicit AI and speech integration config", () => {
+test("production environment check requires explicit AI and speech launch scope", () => {
   const result = checkProductionEnvironment({
-    DATABASE_URL:
-      "postgresql://rehab_prod:strong-password@db.prod.internal:5432/rehab_platform?schema=public",
-    REDIS_URL: "rediss://redis.prod.internal:6379",
-    JWT_SECRET:
-      "prod_secret_7u9v8w3x6y5z4a2b1c0d9e8f7g6h5j4k3l2m1n0p",
-    WEB_ORIGIN: "https://rehab.example.com",
-    NEXT_PUBLIC_API_BASE_URL: "https://api.rehab.example.com",
-    DEFAULT_PATIENT_PASSWORD: "initial-password-managed-by-ops",
+    ...productionBaseEnv(),
   });
 
+  const failures = result.failures.join("\n");
+  assert.match(failures, /缺少生产环境变量 AI_REQUIRED_FOR_LAUNCH/);
+  assert.match(failures, /缺少生产环境变量 SPEECH_REQUIRED_FOR_LAUNCH/);
+  assert.doesNotMatch(failures, /AI_PROVIDER/);
+  assert.doesNotMatch(failures, /SPEECH_PROVIDER/);
+});
+
+test("production environment check rejects invalid AI and speech launch scope values", () => {
+  const result = checkProductionEnvironment({
+    ...productionBaseEnv(),
+    AI_REQUIRED_FOR_LAUNCH: "TRUE",
+    SPEECH_REQUIRED_FOR_LAUNCH: "0",
+  });
+
+  assert.match(result.failures.join("\n"), /AI_REQUIRED_FOR_LAUNCH.*true 或 false/);
+  assert.match(result.failures.join("\n"), /SPEECH_REQUIRED_FOR_LAUNCH.*true 或 false/);
+});
+
+test("production environment check requires AI config only when AI is launch scope", () => {
+  const result = checkProductionEnvironment({
+    ...productionBaseEnv(),
+    AI_REQUIRED_FOR_LAUNCH: "true",
+    SPEECH_REQUIRED_FOR_LAUNCH: "false",
+  });
+
+  const failures = result.failures.join("\n");
   assert.match(result.failures.join("\n"), /AI_PROVIDER/);
   assert.match(result.failures.join("\n"), /AI_MODEL_VERSION/);
   assert.match(result.failures.join("\n"), /AI_MODEL_ENDPOINT/);
@@ -272,10 +338,88 @@ test("production environment check requires explicit AI and speech integration c
   assert.match(result.failures.join("\n"), /AI_PROMPT_VERSION/);
   assert.match(result.failures.join("\n"), /AI_CALL_LOG_RETENTION_DAYS/);
   assert.match(result.failures.join("\n"), /AI_HUMAN_REVIEW_REQUIRED/);
+  assert.doesNotMatch(failures, /SPEECH_PROVIDER/);
+  assert.doesNotMatch(failures, /SPEECH_TO_TEXT_ENDPOINT/);
+  assert.doesNotMatch(failures, /SPEECH_API_KEY_REF/);
+  assert.doesNotMatch(failures, /SPEECH_MODEL_VERSION/);
+});
+
+test("production environment check requires speech config only when speech is launch scope", () => {
+  const result = checkProductionEnvironment({
+    ...productionBaseEnv(),
+    AI_REQUIRED_FOR_LAUNCH: "false",
+    SPEECH_REQUIRED_FOR_LAUNCH: "true",
+  });
+
+  const failures = result.failures.join("\n");
+  assert.doesNotMatch(failures, /AI_PROVIDER/);
+  assert.doesNotMatch(failures, /AI_MODEL_VERSION/);
+  assert.doesNotMatch(failures, /AI_MODEL_ENDPOINT/);
+  assert.doesNotMatch(failures, /AI_API_KEY_REF/);
+  assert.doesNotMatch(failures, /AI_PROMPT_VERSION/);
+  assert.doesNotMatch(failures, /AI_CALL_LOG_RETENTION_DAYS/);
+  assert.doesNotMatch(failures, /AI_HUMAN_REVIEW_REQUIRED/);
   assert.match(result.failures.join("\n"), /SPEECH_PROVIDER/);
   assert.match(result.failures.join("\n"), /SPEECH_TO_TEXT_ENDPOINT/);
   assert.match(result.failures.join("\n"), /SPEECH_API_KEY_REF/);
   assert.match(result.failures.join("\n"), /SPEECH_MODEL_VERSION/);
+});
+
+test("production environment check accepts explicit non-launch AI and speech scope", () => {
+  const result = checkProductionEnvironment({
+    ...productionBaseEnv(),
+    AI_REQUIRED_FOR_LAUNCH: "false",
+    SPEECH_REQUIRED_FOR_LAUNCH: "false",
+  });
+
+  assert.deepEqual(result.failures, []);
+});
+
+test("production environment check rejects partial AI config when AI is not launch scope", () => {
+  const result = checkProductionEnvironment({
+    ...productionBaseEnv(),
+    AI_REQUIRED_FOR_LAUNCH: "false",
+    AI_PROVIDER: "iflytek-spark",
+    SPEECH_REQUIRED_FOR_LAUNCH: "false",
+  });
+
+  assert.match(result.failures.join("\n"), /AI_PROVIDER.*AI_REQUIRED_FOR_LAUNCH=false/);
+});
+
+test("production environment check rejects partial speech config when speech is not launch scope", () => {
+  const result = checkProductionEnvironment({
+    ...productionBaseEnv(),
+    AI_REQUIRED_FOR_LAUNCH: "false",
+    SPEECH_REQUIRED_FOR_LAUNCH: "false",
+    SPEECH_TO_TEXT_ENDPOINT: "https://speech.customer-health.cn/v2/iat",
+  });
+
+  assert.match(
+    result.failures.join("\n"),
+    /SPEECH_TO_TEXT_ENDPOINT.*SPEECH_REQUIRED_FOR_LAUNCH=false/,
+  );
+});
+
+test("production environment check accepts scoped AI-only launch config", () => {
+  const result = checkProductionEnvironment({
+    ...productionBaseEnv(),
+    AI_REQUIRED_FOR_LAUNCH: "true",
+    ...productionAiEnv(),
+    SPEECH_REQUIRED_FOR_LAUNCH: "false",
+  });
+
+  assert.deepEqual(result.failures, []);
+});
+
+test("production environment check accepts scoped speech-only launch config", () => {
+  const result = checkProductionEnvironment({
+    ...productionBaseEnv(),
+    AI_REQUIRED_FOR_LAUNCH: "false",
+    SPEECH_REQUIRED_FOR_LAUNCH: "true",
+    ...productionSpeechEnv(),
+  });
+
+  assert.deepEqual(result.failures, []);
 });
 
 test("production environment check rejects demo AI and local speech config", () => {
@@ -288,6 +432,7 @@ test("production environment check rejects demo AI and local speech config", () 
     WEB_ORIGIN: "https://rehab.example.com",
     NEXT_PUBLIC_API_BASE_URL: "https://api.rehab.example.com",
     DEFAULT_PATIENT_PASSWORD: "initial-password-managed-by-ops",
+    AI_REQUIRED_FOR_LAUNCH: "true",
     AI_PROVIDER: "mock",
     AI_MODEL_VERSION: "demo-v1",
     AI_MODEL_ENDPOINT: "http://localhost:8317/v1/chat/completions",
@@ -295,6 +440,7 @@ test("production environment check rejects demo AI and local speech config", () 
     AI_PROMPT_VERSION: "local-prompt",
     AI_CALL_LOG_RETENTION_DAYS: "0",
     AI_HUMAN_REVIEW_REQUIRED: "false",
+    SPEECH_REQUIRED_FOR_LAUNCH: "true",
     SPEECH_PROVIDER: "local-stt",
     SPEECH_TO_TEXT_ENDPOINT: "http://127.0.0.1:9000/stt",
     SPEECH_API_KEY_REF: "mock-speech-key",
@@ -327,6 +473,7 @@ test("production environment check rejects raw AI and speech key values", () => 
     WEB_ORIGIN: "https://rehab.example.com",
     NEXT_PUBLIC_API_BASE_URL: "https://api.rehab.example.com",
     DEFAULT_PATIENT_PASSWORD: "initial-password-managed-by-ops",
+    AI_REQUIRED_FOR_LAUNCH: "true",
     AI_PROVIDER: "iflytek-spark",
     AI_MODEL_VERSION: "spark-x1-2026-05",
     AI_MODEL_ENDPOINT: "https://spark-api.customer-health.cn/v1/chat/completions",
@@ -334,6 +481,7 @@ test("production environment check rejects raw AI and speech key values", () => 
     AI_PROMPT_VERSION: "cognitive-assessment-2026-05",
     AI_CALL_LOG_RETENTION_DAYS: "180",
     AI_HUMAN_REVIEW_REQUIRED: "true",
+    SPEECH_REQUIRED_FOR_LAUNCH: "true",
     SPEECH_PROVIDER: "iflytek-iat",
     SPEECH_TO_TEXT_ENDPOINT: "https://speech.customer-health.cn/v2/iat",
     SPEECH_API_KEY_REF: "abc123-real-speech-key",
@@ -354,6 +502,7 @@ test("production environment check accepts explicit production-shaped values", (
     WEB_ORIGIN: "https://rehab.example.com",
     NEXT_PUBLIC_API_BASE_URL: "https://api.rehab.example.com",
     DEFAULT_PATIENT_PASSWORD: "initial-password-managed-by-ops",
+    AI_REQUIRED_FOR_LAUNCH: "true",
     AI_PROVIDER: "iflytek-spark",
     AI_MODEL_VERSION: "spark-x1-2026-05",
     AI_MODEL_ENDPOINT: "https://spark-api.customer-health.cn/v1/chat/completions",
@@ -361,6 +510,7 @@ test("production environment check accepts explicit production-shaped values", (
     AI_PROMPT_VERSION: "cognitive-assessment-2026-05",
     AI_CALL_LOG_RETENTION_DAYS: "180",
     AI_HUMAN_REVIEW_REQUIRED: "true",
+    SPEECH_REQUIRED_FOR_LAUNCH: "true",
     SPEECH_PROVIDER: "iflytek-iat",
     SPEECH_TO_TEXT_ENDPOINT: "https://speech.customer-health.cn/v2/iat",
     SPEECH_API_KEY_REF: "secret-manager://rehab-prod/iflytek-iat-api-key",
@@ -368,4 +518,76 @@ test("production environment check accepts explicit production-shaped values", (
   });
 
   assert.deepEqual(result.failures, []);
+});
+
+test("production launch scope consistency accepts matching customer input package", () => {
+  const result = checkProductionLaunchScopeConsistency({
+    env: {
+      AI_REQUIRED_FOR_LAUNCH: "true",
+      SPEECH_REQUIRED_FOR_LAUNCH: "false",
+    },
+    customerInput: customerInputScope({
+      aiRequiredForLaunch: true,
+      speechRequiredForLaunch: false,
+    }),
+  });
+
+  assert.deepEqual(result.failures, []);
+});
+
+test("production launch scope consistency rejects env that contradicts customer input package", () => {
+  const result = checkProductionLaunchScopeConsistency({
+    env: {
+      AI_REQUIRED_FOR_LAUNCH: "false",
+      SPEECH_REQUIRED_FOR_LAUNCH: "true",
+    },
+    customerInput: customerInputScope({
+      aiRequiredForLaunch: true,
+      speechRequiredForLaunch: false,
+    }),
+  });
+
+  const failures = result.failures.join("\n");
+  assert.match(failures, /AI_REQUIRED_FOR_LAUNCH.*ai\.requiredForLaunch/);
+  assert.match(failures, /SPEECH_REQUIRED_FOR_LAUNCH.*speech\.requiredForLaunch/);
+});
+
+test("production environment CLI rejects missing customer input path after flag", () => {
+  const result = spawnSync(
+    process.execPath,
+    ["scripts/check-delivery-readiness.mjs", "--production-env", "--customer-input"],
+    {
+      cwd: process.cwd(),
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        ...productionBaseEnv(),
+        AI_REQUIRED_FOR_LAUNCH: "false",
+        SPEECH_REQUIRED_FOR_LAUNCH: "false",
+      },
+    },
+  );
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /--customer-input/);
+});
+
+test("production environment CLI requires customer input package for production checks", () => {
+  const result = spawnSync(
+    process.execPath,
+    ["scripts/check-delivery-readiness.mjs", "--production-env"],
+    {
+      cwd: process.cwd(),
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        ...productionBaseEnv(),
+        AI_REQUIRED_FOR_LAUNCH: "false",
+        SPEECH_REQUIRED_FOR_LAUNCH: "false",
+      },
+    },
+  );
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /--customer-input/);
 });
