@@ -116,7 +116,7 @@ TRIAL_DOCTOR_MOBILE_PHONE
 
 真实 AI/语音验收还必须提供供应商配置清单、HTTPS endpoint、`secret-manager://...` 密钥引用、模型调用日志样例和医师人工复核记录；任一项缺失时，生产检查和客户验收均应硬阻断。
 
-客户资料包可按模板 `docs/templates/customer-production-input.template.json` 填写，并执行：
+客户资料包可从模板 `docs/templates/customer-production-input.template.json` 复制后填写。模板文件只展示字段结构，原样不会通过正式资料校验；必须替换为客户确认后的正式资料，并执行：
 
 ```bash
 pnpm verify:customer-production-input -- <customer-production-input.json>

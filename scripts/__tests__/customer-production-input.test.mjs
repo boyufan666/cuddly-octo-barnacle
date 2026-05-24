@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { validateCustomerProductionInput } from "../verify-customer-production-input.mjs";
@@ -48,7 +48,8 @@ function validInput(overrides = {}) {
       provider: "iflytek-spark",
       accountOwner: "customer-ai-admin",
       freeQuotaConfirmed: true,
-      freeQuotaDescription: "星火企业账号试用额度，已确认可用于试点",
+      freeQuotaDescription:
+        "星火企业账号试用额度 100 万 tokens，有效期至 2026-08-31，QPS 2，并发 2，超额计费按客户合同，用完即停，已确认可用于试点",
       endpoint: "https://spark-api.customer-health.cn/v1/chat/completions",
       apiKeyRef: "secret-manager://rehab-prod/iflytek-spark-api-key",
       modelName: "spark-x1",
@@ -64,7 +65,8 @@ function validInput(overrides = {}) {
       provider: "iflytek-iat",
       accountOwner: "customer-ai-admin",
       freeQuotaConfirmed: true,
-      freeQuotaDescription: "讯飞语音试用额度，已确认可用于试点",
+      freeQuotaDescription:
+        "讯飞语音试用额度 500 分钟，有效期至 2026-08-31，QPS 2，并发 2，超额计费按客户合同，用完即停，已确认可用于试点",
       endpoint: "https://speech.customer-health.cn/v2/iat",
       apiKeyRef: "secret-manager://rehab-prod/iflytek-iat-api-key",
       modelVersion: "iat-medical-2026-06",
@@ -183,6 +185,55 @@ test("customer production input rejects placeholders and demo markers anywhere",
 
   assert.match(result.failures.join("\n"), /占位符/);
   assert.match(result.failures.join("\n"), /mock\/demo\/local/);
+});
+
+test("customer production input rejects the unfilled template values", () => {
+  const template = JSON.parse(
+    readFileSync("docs/templates/customer-production-input.template.json", "utf8"),
+  );
+
+  const result = validateCustomerProductionInput(template);
+
+  assert.match(result.failures.join("\n"), /模板|示例|example/);
+});
+
+test("customer production input rejects template deployment mode enum hints", () => {
+  const input = validInput({
+    project: {
+      ...validInput().project,
+      deploymentMode: "public_cloud | private_cloud | intranet",
+    },
+  });
+
+  const result = validateCustomerProductionInput(input);
+
+  assert.match(result.failures.join("\n"), /project\.deploymentMode/);
+});
+
+test("customer production input rejects unsupported deployment mode values", () => {
+  const input = validInput({
+    project: {
+      ...validInput().project,
+      deploymentMode: "hybrid_cloud",
+    },
+  });
+
+  const result = validateCustomerProductionInput(input);
+
+  assert.match(result.failures.join("\n"), /project\.deploymentMode/);
+});
+
+test("customer production input rejects generic free quota confirmation text", () => {
+  const input = validInput({
+    ai: {
+      ...validInput().ai,
+      freeQuotaDescription: "免费额度、有效期、QPS、并发和超额计费确认说明",
+    },
+  });
+
+  const result = validateCustomerProductionInput(input);
+
+  assert.match(result.failures.join("\n"), /ai\.freeQuotaDescription/);
 });
 
 test("customer production input CLI accepts pnpm separator before the JSON path", () => {

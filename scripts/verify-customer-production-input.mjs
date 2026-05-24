@@ -6,6 +6,23 @@ import { pathToFileURL } from "node:url";
 
 const expectedDocumentVersion = "customer-production-input/v1";
 const secretRefPrefix = "secret-manager://";
+const allowedDeploymentModes = new Set(["public_cloud", "private_cloud", "intranet"]);
+const templateTextMarkers = [
+  "客户正式名称",
+  "客户验收负责人姓名",
+  "正式服务器规格",
+  "运维责任说明",
+  "备份频率",
+  "恢复责任人",
+  "隐私协议确认负责人",
+  "数据保留周期和删除规则",
+  "已签署授权的试点患者来源说明",
+  "脱敏负责人",
+  "导出审批负责人",
+  "客户 AI 供应商账号负责人",
+  "免费额度、有效期",
+  "客户语音供应商账号负责人",
+];
 
 export function validateCustomerProductionInput(input) {
   const failures = [];
@@ -32,6 +49,7 @@ export function validateCustomerProductionInput(input) {
   validateAcceptanceEvidence(failures, input.acceptanceEvidence);
   validateNoPlaceholders(failures, input);
   validateNoDemoMockLocalManual(failures, input);
+  validateNoTemplateExampleValues(failures, input);
 
   return { failures };
 }
@@ -42,7 +60,12 @@ function validateProject(failures, project) {
   requireString(failures, project.customerName, "project.customerName");
   requireString(failures, project.acceptanceOwner, "project.acceptanceOwner");
   requireIsoDate(failures, project.targetLaunchDate, "project.targetLaunchDate");
-  requireString(failures, project.deploymentMode, "project.deploymentMode");
+  requireEnum(
+    failures,
+    project.deploymentMode,
+    allowedDeploymentModes,
+    "project.deploymentMode",
+  );
 }
 
 function validateInfrastructure(failures, infrastructure) {
@@ -161,6 +184,11 @@ function validateExternalService(failures, service, prefix, options) {
       service.freeQuotaDescription,
       `${prefix}.freeQuotaDescription`,
     );
+    requireFreeQuotaEvidence(
+      failures,
+      service.freeQuotaDescription,
+      `${prefix}.freeQuotaDescription`,
+    );
   }
   if (options.requireHumanReview) {
     requireTrue(
@@ -253,6 +281,13 @@ function requireEqual(failures, actual, expected, message) {
   }
 }
 
+function requireEnum(failures, value, allowedValues, field) {
+  requireString(failures, value, field);
+  if (typeof value === "string" && value.trim() && !allowedValues.has(value.trim())) {
+    failures.push(`${field} 必须是 ${Array.from(allowedValues).join("、")} 之一。`);
+  }
+}
+
 function requireSecretRef(failures, value, field) {
   requireString(failures, value, field);
   if (typeof value === "string" && value.trim() && !value.startsWith(secretRefPrefix)) {
@@ -292,6 +327,27 @@ function requireIntegerRange(failures, value, min, max, field) {
   }
 }
 
+function requireFreeQuotaEvidence(failures, value, field) {
+  if (typeof value !== "string" || !value.trim()) return;
+
+  const evidenceGroups = [
+    ["额度", "quota", "tokens", "分钟", "minutes", "次"],
+    ["有效期", "到期", "expiry", "expires"],
+    ["QPS", "并发", "concurrency", "rate limit"],
+    ["超额", "计费", "billing", "用完即停"],
+    ["试点", "生产", "production", "pilot"],
+  ];
+  const missingGroup = evidenceGroups.find(
+    (keywords) => !keywords.some((keyword) => value.toLowerCase().includes(keyword.toLowerCase())),
+  );
+
+  if (missingGroup) {
+    failures.push(
+      `${field} 必须写明免费额度、有效期、QPS/并发、超额计费和试点或生产授权。`,
+    );
+  }
+}
+
 function validateNoPlaceholders(failures, value, path = "root") {
   if (typeof value === "string") {
     if (/[<>]/.test(value)) {
@@ -326,6 +382,37 @@ function validateNoDemoMockLocalManual(failures, value, path = "root") {
   if (isObject(value)) {
     for (const [key, nestedValue] of Object.entries(value)) {
       validateNoDemoMockLocalManual(failures, nestedValue, `${path}.${key}`);
+    }
+  }
+}
+
+function validateNoTemplateExampleValues(failures, value, path = "root") {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return;
+
+    if (/\bexample\.(com|cn|org|net)\b/i.test(trimmed)) {
+      failures.push(`${path} 使用 example 示例域名，必须替换为客户确认后的正式资料。`);
+    }
+
+    if (trimmed.includes(" | ")) {
+      failures.push(`${path} 使用模板枚举提示，必须选择客户确认后的单一正式值。`);
+    }
+
+    if (templateTextMarkers.some((marker) => trimmed.includes(marker))) {
+      failures.push(`${path} 使用模板说明文字，必须替换为客户确认后的正式资料。`);
+    }
+    return;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((item, index) =>
+      validateNoTemplateExampleValues(failures, item, `${path}[${index}]`),
+    );
+    return;
+  }
+  if (isObject(value)) {
+    for (const [key, nestedValue] of Object.entries(value)) {
+      validateNoTemplateExampleValues(failures, nestedValue, `${path}.${key}`);
     }
   }
 }

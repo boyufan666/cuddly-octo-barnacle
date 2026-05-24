@@ -12,6 +12,8 @@
 cp docs/templates/customer-production-input.template.json customer-production-input.json
 ```
 
+模板文件只展示字段结构，原样必须校验失败。不得把模板中的示例域名、说明文字、枚举提示或示例账号当成客户正式资料。
+
 逐项把客户回复填入 `customer-production-input.json`：
 
 - `project`：客户名称、验收负责人、目标日期、部署模式。

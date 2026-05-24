@@ -4,7 +4,7 @@
 
 如果需要先给客户发送短版资料索取口径，可直接使用 `docs/customer-final-input-request.md`。客户回复后，按 `docs/customer-input-to-launch-gate-runbook.md` 整理为本文件对应的结构化资料包并执行门禁。
 
-客户可按 `docs/templates/customer-production-input.template.json` 填写结构化资料包，然后执行：
+客户可从 `docs/templates/customer-production-input.template.json` 复制后填写结构化资料包。模板文件只展示字段结构，原样会被校验脚本拒绝；必须替换为客户确认后的正式资料，然后执行：
 
 ```bash
 pnpm verify:customer-production-input -- <customer-production-input.json>

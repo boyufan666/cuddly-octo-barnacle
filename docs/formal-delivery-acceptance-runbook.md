@@ -20,6 +20,8 @@
 cp docs/templates/customer-production-input.template.json customer-production-input.json
 ```
 
+模板文件只展示字段结构，原样必须校验失败。执行校验前，应替换为客户确认后的正式资料。
+
 填写后执行：
 
 ```bash
