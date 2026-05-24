@@ -53,7 +53,7 @@ NEXT_PUBLIC_API_BASE_URL=http://localhost:4000
 - 运营管理端展示脱敏数据、训练内容配置和审计日志。
 - 训练结果必须由真实采集或合法训练资源回传生成，不使用固定成绩。
 - 浏览器体感训练完成后，应将 evidence JSON、截图、录屏与真实 API 训练记录和审计日志一起通过 `pnpm verify:browser-pose-field-acceptance` 只读验真；仅有前端截图不能作为正式验收依据。
-- 患者端训练结果页可导出浏览器体感 evidence JSON，管理后台审计日志列表会展示完整日志 ID，便于填写 `training_session.start` 与 `training_result.submit` 的 `auditLogIds`。
+- 患者端训练结果页可导出浏览器体感 evidence JSON，管理后台审计日志列表会展示并支持复制完整日志 ID/目标 ID，便于填写 `training_session.start` 与 `training_result.submit` 的 `auditLogIds`。
 
 ## 构建与检查
 

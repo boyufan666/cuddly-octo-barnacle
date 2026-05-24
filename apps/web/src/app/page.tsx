@@ -32,6 +32,7 @@ import {
   buildBrowserPoseEvidenceInputFromRecord,
   browserPoseFieldAcceptanceCommand,
 } from "@/lib/browser-pose-evidence";
+import { copyTextToClipboard } from "@/lib/clipboard";
 import {
   checkPoseReadiness,
   createPoseTrainingRuntime,
@@ -6697,6 +6698,7 @@ function SecurityScreen({
   canReadAuditLogs: boolean;
   canExportData: boolean;
 }) {
+  const [copyMessage, setCopyMessage] = useState<string | null>(null);
   const logs = auditLogs ?? [];
   const successCount = logs.filter((log) => log.result === "success").length;
   const deniedCount = logs.filter((log) => log.result === "denied").length;
@@ -6712,6 +6714,16 @@ function SecurityScreen({
     event.preventDefault();
     if (isExporting || !canExportData) return;
     void onExportData(exportForm);
+  }
+
+  async function copyAuditValue(label: string, value?: string | null) {
+    const result = await copyTextToClipboard({
+      text: value ?? "",
+      clipboard: navigator.clipboard,
+    });
+    setCopyMessage(
+      result.ok ? `${label} 已复制。` : `${label} 复制失败：${result.error}`,
+    );
   }
 
   return (
@@ -6974,6 +6986,11 @@ function SecurityScreen({
             {deniedCount + failedCount} 条需关注
           </Chip>
         </div>
+        {copyMessage ? (
+          <p className="mt-4 rounded-2xl border border-[#c9e3e7] bg-[#eefaf7] p-3 text-sm font-bold text-[#1f7a8c]">
+            {copyMessage}
+          </p>
+        ) : null}
         <div className="mt-4 overflow-x-auto rounded-2xl border border-[#c9e3e7]">
           <div className="min-w-[1080px]">
             <div className="grid grid-cols-[1.25fr_1.15fr_1.05fr_1.35fr_1.15fr_0.75fr] gap-3 border-b border-[#d7e8ec] bg-[#e8f8f8]/80 p-4 text-xs font-black uppercase tracking-[0.18em] text-[#25859a]">
@@ -6994,6 +7011,13 @@ function SecurityScreen({
                   <span className="block truncate" title={log.id}>
                     {log.id}
                   </span>
+                  <button
+                    className="mt-2 rounded-full border border-[#c9e3e7] bg-white/80 px-3 py-1 text-[11px] font-black text-[#25859a] transition hover:border-[#1f7a8c] hover:text-[#173945]"
+                    onClick={() => void copyAuditValue("审计日志 ID", log.id)}
+                    type="button"
+                  >
+                    复制日志 ID
+                  </button>
                 </span>
                 <span className="min-w-0">
                   <span className="block truncate">
@@ -7014,12 +7038,21 @@ function SecurityScreen({
                     {log.targetId ? ` · ${shortId(log.targetId)}` : ""}
                   </span>
                   {log.targetId ? (
-                    <span
-                      className="mt-1 block truncate font-mono text-xs text-[#6a8088]"
-                      title={log.targetId}
-                    >
-                      {log.targetId}
-                    </span>
+                    <>
+                      <span
+                        className="mt-1 block truncate font-mono text-xs text-[#6a8088]"
+                        title={log.targetId}
+                      >
+                        {log.targetId}
+                      </span>
+                      <button
+                        className="mt-2 rounded-full border border-[#c9e3e7] bg-white/80 px-3 py-1 text-[11px] font-black text-[#25859a] transition hover:border-[#1f7a8c] hover:text-[#173945]"
+                        onClick={() => void copyAuditValue("目标 ID", log.targetId)}
+                        type="button"
+                      >
+                        复制目标 ID
+                      </button>
+                    </>
                   ) : null}
                 </span>
                 <span>
