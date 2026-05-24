@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 
 import { existsSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
-const rootDir = resolve(import.meta.dirname, "..");
+const scriptDir = dirname(fileURLToPath(import.meta.url));
+const rootDir = resolve(scriptDir, "..");
 
 const requiredGitignoreEntries = [
   "node_modules",
@@ -63,6 +64,15 @@ export function checkPackageScripts({ rootPackage, apiPackage }) {
 
   if (rootScripts["test:delivery"] !== "node --test scripts/__tests__/*.test.mjs") {
     failures.push("root package 缺少 test:delivery 交付检查测试脚本。");
+  }
+
+  if (
+    rootScripts["verify:browser-pose-field-acceptance"] !==
+    "node scripts/verify-browser-pose-field-acceptance.mjs"
+  ) {
+    failures.push(
+      "root package 缺少 verify:browser-pose-field-acceptance 浏览器体感只读实机验真脚本。",
+    );
   }
 
   if (/\s--fix(?:\s|$)/.test(apiScripts.lint ?? "")) {

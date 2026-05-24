@@ -49,6 +49,18 @@ pnpm verify:contracts
 
 该脚本会使用本地 API 和数据库验证真实写入、运行时约束、训练结果入库、动作指标入库和审计日志，并在结束后清理本次验收数据。脚本不进行摄像头实采，也不生成姿态帧。
 
+浏览器体感实机验收需要额外执行：
+
+```bash
+pnpm verify:browser-pose-field-acceptance -- \
+  <evidence-json-path> \
+  --api-base-url https://api.rehab.example.com \
+  --patient-token <training-record-read-token> \
+  --audit-token <audit-read-token>
+```
+
+该命令只读调用训练记录和审计日志接口，缺 token、权限、真实训练记录或审计日志时必须失败；`pnpm verify:contracts` 不能替代摄像头实采验收。
+
 ## 生产注意事项
 
 - 不得使用本地初始化账号和固定密码作为试点/生产账号。

@@ -102,6 +102,7 @@ TRIAL_DOCTOR_MOBILE_PHONE
 - 浏览器体感训练壳、结构化训练结果提交、动作指标入库
 - 家属摘要查看、脱敏数据导出、审计日志查询
 - 训练结果幂等、异常数据标记、授权阻断、医师患者归属校验
+- 浏览器体感 evidence JSON 自检与只读实机验真脚本，支持核对附件文件、训练记录 API 和审计日志 API
 
 ## 仍需补齐的交付项
 
@@ -122,6 +123,19 @@ TRIAL_DOCTOR_MOBILE_PHONE
 - 客户已有 Unity 游戏时，按平台 Bridge 协议接入。
 - 我方自研 Unity 游戏时，需提供真实 WebGL 构建产物和版本清单。
 - 所有训练内容都必须回传真实结构化训练结果，不接受固定成绩或缺失动作指标。
+
+浏览器体感训练现场验收时，先执行 JSON 自检，再执行只读实机验真：
+
+```bash
+pnpm verify:browser-pose-evidence -- <evidence-json-path>
+pnpm verify:browser-pose-field-acceptance -- \
+  <evidence-json-path> \
+  --api-base-url https://api.rehab.example.com \
+  --patient-token <training-record-read-token> \
+  --audit-token <audit-read-token>
+```
+
+只读实机验真不会创建或补写数据；缺 API、缺 token、缺截图/录屏文件、缺训练记录或缺审计日志时必须失败。`pnpm verify:trial-empty-loop` 和 `pnpm verify:contracts` 不能替代摄像头实采验收。
 
 桥接协议和 Unity 调用模板见：
 

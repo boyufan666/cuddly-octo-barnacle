@@ -111,6 +111,23 @@ bridgeProtocolVersion=1.0.0
 
 浏览器体感内容还必须包含 `camera_pose` 和四项正式动作指标。Unity 内容还必须具备正式 `manifestUrl`。
 
+## 发布后实机验真
+
+浏览器体感训练内容发布后，必须用真实患者或验收患者完成一次完整训练，并按 `docs/browser-pose-field-acceptance-runbook.md` 准备 evidence JSON、现场截图和训练过程录屏。
+
+验真顺序：
+
+```bash
+pnpm verify:browser-pose-evidence -- <evidence-json-path>
+pnpm verify:browser-pose-field-acceptance -- \
+  <evidence-json-path> \
+  --api-base-url https://api.rehab.example.com \
+  --patient-token <training-record-read-token> \
+  --audit-token <audit-read-token>
+```
+
+只读实机验真必须能从 API 反查到训练 session、训练结果、四项动作指标和两类审计日志，并确认本地截图/录屏文件存在且非空。该步骤不会补造数据；缺 token、缺 API、缺附件、缺训练记录或缺审计日志时不得把训练内容标记为已完成客户验收。
+
 ## 禁止事项
 
 - 禁止使用本地 seed 训练内容作为试点或生产训练资源。

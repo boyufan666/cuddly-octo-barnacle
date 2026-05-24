@@ -14,6 +14,8 @@ test("package scripts expose non-mutating delivery checks", () => {
         "delivery:check:production":
           "node scripts/check-delivery-readiness.mjs --production-env",
         "test:delivery": "node --test scripts/__tests__/*.test.mjs",
+        "verify:browser-pose-field-acceptance":
+          "node scripts/verify-browser-pose-field-acceptance.mjs",
       },
     },
     apiPackage: {
@@ -34,6 +36,8 @@ test("package script check rejects mutating api lint", () => {
         "delivery:check:production":
           "node scripts/check-delivery-readiness.mjs --production-env",
         "test:delivery": "node --test scripts/__tests__/*.test.mjs",
+        "verify:browser-pose-field-acceptance":
+          "node scripts/verify-browser-pose-field-acceptance.mjs",
       },
     },
     apiPackage: {
@@ -44,6 +48,29 @@ test("package script check rejects mutating api lint", () => {
   });
 
   assert.match(result.failures.join("\n"), /api lint.*--fix/);
+});
+
+test("package script check requires browser pose field acceptance verifier", () => {
+  const result = checkPackageScripts({
+    rootPackage: {
+      scripts: {
+        "delivery:check": "node scripts/check-delivery-readiness.mjs",
+        "delivery:check:production":
+          "node scripts/check-delivery-readiness.mjs --production-env",
+        "test:delivery": "node --test scripts/__tests__/*.test.mjs",
+      },
+    },
+    apiPackage: {
+      scripts: {
+        lint: 'eslint "{src,apps,libs,test}/**/*.ts"',
+      },
+    },
+  });
+
+  assert.match(
+    result.failures.join("\n"),
+    /verify:browser-pose-field-acceptance/,
+  );
 });
 
 test("gitignore check requires local and historical directories to be excluded", () => {

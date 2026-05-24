@@ -52,6 +52,7 @@ NEXT_PUBLIC_API_BASE_URL=http://localhost:4000
 - 医师端只查看负责患者的完整业务数据。
 - 运营管理端展示脱敏数据、训练内容配置和审计日志。
 - 训练结果必须由真实采集或合法训练资源回传生成，不使用固定成绩。
+- 浏览器体感训练完成后，应将 evidence JSON、截图、录屏与真实 API 训练记录和审计日志一起通过 `pnpm verify:browser-pose-field-acceptance` 只读验真；仅有前端截图不能作为正式验收依据。
 
 ## 构建与检查
 

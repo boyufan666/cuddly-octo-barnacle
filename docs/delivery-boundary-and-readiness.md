@@ -20,7 +20,8 @@
 - `apps/web/public/unity/rehab-unity-bridge.js`：Unity 训练结果回传桥接脚本
 - `scripts/verify-local-contracts.mjs`：本地接口契约验收脚本
 - `scripts/verify-trial-empty-loop.mjs`：试点空库闭环验收脚本
-- `scripts/verify-browser-pose-evidence.mjs`：浏览器体感实机证据校验脚本
+- `scripts/verify-browser-pose-evidence.mjs`：浏览器体感 evidence JSON 静态自检脚本
+- `scripts/verify-browser-pose-field-acceptance.mjs`：浏览器体感实机只读验真脚本，核对附件文件、训练记录 API 和审计日志 API
 
 ## 不纳入运行源码包
 
@@ -92,11 +93,23 @@ pnpm --filter @rehab-platform/web build
 pnpm verify:contracts
 ```
 
-完成浏览器体感训练现场验收后，还应校验证据 JSON：
+完成浏览器体感训练现场验收后，应先校验证据 JSON：
 
 ```bash
 pnpm verify:browser-pose-evidence -- <evidence-json-path>
 ```
+
+正式通过还必须执行只读实机验真：
+
+```bash
+pnpm verify:browser-pose-field-acceptance -- \
+  <evidence-json-path> \
+  --api-base-url https://api.rehab.example.com \
+  --patient-token <training-record-read-token> \
+  --audit-token <audit-read-token>
+```
+
+只读实机验真必须能证明截图/录屏文件存在且非空、训练记录 API 与 evidence 一致、`training_session.start` 和 `training_result.submit` 审计日志 ID 与 evidence 一致。缺 API、缺 token、缺附件、缺训练记录或缺审计日志时，浏览器体感训练不能计为正式可交付。
 
 试点或生产环境准备前，还必须在目标环境变量已显式配置后执行：
 

@@ -117,8 +117,8 @@
   ],
   "auditEvidence": {
     "auditLogIds": [
-      "training_session.start 对应审计日志 ID",
-      "training_result.submit 对应审计日志 ID"
+      "training_session.start 对应 API 审计日志 ID",
+      "training_result.submit 对应 API 审计日志 ID"
     ],
     "requiredActions": [
       "training_session.start",

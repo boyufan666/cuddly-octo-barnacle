@@ -44,7 +44,7 @@
 - 训练过程生成 `gameRunId`、版本、协议、payload hash、训练窗口和动作指标。
 - 结果提交到 `training_session`、`training_result`、`motion_metric`，并能被患者、医师和后台查看。
 - 后台创建训练内容时必须是 `active + released + production + bridgeProtocolVersion=1.0.0`。
-- 现场验收时按 `docs/browser-pose-field-acceptance-runbook.md` 生成证据 JSON，并通过 `pnpm verify:browser-pose-evidence` 校验。
+- 现场验收时按 `docs/browser-pose-field-acceptance-runbook.md` 生成证据 JSON，先通过 `pnpm verify:browser-pose-evidence` 自检，再通过 `pnpm verify:browser-pose-field-acceptance` 只读核对附件文件、训练记录 API 和审计日志 API。
 
 ## Unity 接入路线
 
@@ -80,6 +80,7 @@
 
 - 至少一个正式 `browser_pose_game` 可在真实浏览器中完成训练。
 - 训练结果包含四项正式动作指标且质量标记为真实计算结果。
+- 浏览器体感 evidence 必须通过只读实机验真；只通过 JSON 静态校验不能算正式可交付。
 - 医师端能查看训练历史和趋势，后台能查到审计日志。
 - 低质量姿态、训练过短、异常反应时间会被标记或阻断。
 - Unity 只在真实 Build 和 Bridge 验收完成后进入推荐候选池。

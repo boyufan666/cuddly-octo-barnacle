@@ -66,7 +66,7 @@
 - 一条从建档到训练结果入库的完整业务数据记录。
 - 一份后台审计日志截图或导出样例。
 - 一份脱敏导出样例。
-- 一份浏览器体感游戏实机训练记录，并通过 `pnpm verify:browser-pose-evidence -- <evidence-json-path>` 校验。
+- 一份浏览器体感游戏实机训练记录，先通过 `pnpm verify:browser-pose-evidence -- <evidence-json-path>` 完成 JSON 自检，再通过 `pnpm verify:browser-pose-field-acceptance -- <evidence-json-path> --api-base-url <正式 API> --patient-token <训练记录读取 token> --audit-token <审计读取 token>` 完成只读实机验真。
 - 如果接入 Unity，则需要 Unity Build 文件清单、manifest、Bridge 回传日志和训练结果记录。
 
-浏览器体感实机训练记录必须按 `docs/templates/browser-pose-evidence.template.json` 保存证据 JSON，并包含现场截图、训练过程录屏或录像、`training_session.start` 和 `training_result.submit` 审计日志关联。
+浏览器体感实机训练记录必须按 `docs/templates/browser-pose-evidence.template.json` 保存证据 JSON，并包含现场截图、训练过程录屏或录像、`training_session.start` 和 `training_result.submit` 审计日志关联。只读实机验真必须同时证明附件文件存在且非空、训练记录 API 中 session/result/gameContent/motionMetrics 与 evidence 一致、审计日志 API 中审计 ID/动作/目标/结果与 evidence 一致；缺任一项不得通过客户验收。

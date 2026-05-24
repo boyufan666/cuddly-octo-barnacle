@@ -78,6 +78,7 @@
 - 现场完成摄像头授权、姿态识别、训练结果入库和审计验收。
 - 记录浏览器版本、摄像头型号、网络环境和训练数据样例。
 - 按 `docs/browser-pose-field-acceptance-runbook.md` 保存实机证据 JSON、截图、录屏和审计关联。
+- 使用正式 API 地址、训练记录读取 token 和审计读取 token 执行只读实机验真，证明 evidence 与真实 API 数据一致。
 
 Unity WebGL 上线要求：
 
@@ -130,6 +131,11 @@ pnpm verify:trial-empty-loop
 
 ```bash
 pnpm verify:browser-pose-evidence -- <evidence-json-path>
+pnpm verify:browser-pose-field-acceptance -- \
+  <evidence-json-path> \
+  --api-base-url https://api.rehab.example.com \
+  --patient-token <training-record-read-token> \
+  --audit-token <audit-read-token>
 ```
 
-该命令只校验现场实机训练后保存的证据 JSON，不会创建训练数据、不会生成动作指标，也不会替代摄像头和姿态识别采集。
+第一个命令只校验现场实机训练后保存的证据 JSON。第二个命令会只读核对截图/录屏文件、训练记录 API 和审计日志 API，不会创建训练数据、不会生成动作指标，也不会替代摄像头和姿态识别采集。缺少正式 HTTPS API、读取 token、附件、训练记录或审计日志时必须失败，不允许改用 seed、本地演示账号或手工构造响应作为通过依据。

@@ -19,6 +19,7 @@
     "verify:contracts": "node scripts/verify-local-contracts.mjs",
     "verify:trial-empty-loop": "node scripts/verify-trial-empty-loop.mjs",
     "verify:browser-pose-evidence": "node scripts/verify-browser-pose-evidence.mjs",
+    "verify:browser-pose-field-acceptance": "node scripts/verify-browser-pose-field-acceptance.mjs",
     "infra:up": "docker compose -f infra/docker-compose.yml up -d",
     "infra:down": "docker compose -f infra/docker-compose.yml down"
   },
