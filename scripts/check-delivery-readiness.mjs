@@ -20,6 +20,12 @@ const requiredGitignoreEntries = [
   ".playwright-cli/",
   ".playwright-mcp/",
 ];
+const requiredDeliveryDocumentRefs = [
+  "docs/formal-delivery-acceptance-runbook.md",
+  "docs/customer-production-input-checklist.md",
+  "docs/templates/customer-production-input.template.json",
+  "docs/browser-pose-field-acceptance-runbook.md",
+];
 
 const requiredProductionEnv = [
   "DATABASE_URL",
@@ -105,6 +111,24 @@ export function checkGitignoreExclusions(content) {
   return { failures };
 }
 
+export function checkDeliveryDocumentReferences({ readme, deliveryBoundary }) {
+  const failures = [];
+
+  for (const ref of requiredDeliveryDocumentRefs) {
+    if (!readme.includes(ref)) {
+      failures.push(`README.md 缺少 ${ref} 交付文档索引。`);
+    }
+    if (
+      ref !== "docs/templates/customer-production-input.template.json" &&
+      !deliveryBoundary.includes(ref)
+    ) {
+      failures.push(`delivery-boundary-and-readiness.md 缺少 ${ref} 交付文档索引。`);
+    }
+  }
+
+  return { failures };
+}
+
 export function checkProductionEnvironment(env) {
   const failures = [];
 
@@ -180,11 +204,17 @@ export function runDeliveryReadinessChecks({
   rootPackage,
   apiPackage,
   gitignore,
+  readme,
+  deliveryBoundary,
   productionEnv,
 }) {
   const sections = [
     ["package scripts", checkPackageScripts({ rootPackage, apiPackage })],
     ["source package exclusions", checkGitignoreExclusions(gitignore)],
+    [
+      "delivery documents",
+      checkDeliveryDocumentReferences({ readme, deliveryBoundary }),
+    ],
   ];
 
   if (productionEnv) {
@@ -230,6 +260,11 @@ function cli() {
     rootPackage: readJson(resolve(rootDir, "package.json")),
     apiPackage: readJson(resolve(rootDir, "apps/api/package.json")),
     gitignore: readFileSync(resolve(rootDir, ".gitignore"), "utf8"),
+    readme: readFileSync(resolve(rootDir, "README.md"), "utf8"),
+    deliveryBoundary: readFileSync(
+      resolve(rootDir, "docs/delivery-boundary-and-readiness.md"),
+      "utf8",
+    ),
     productionEnv,
   });
 

@@ -12,6 +12,7 @@
 - `infra/docker-compose.yml`：本地开发 PostgreSQL 与 Redis
 - `docs/unity`：Unity WebGL Bridge 协议
 - `docs/formal-training-content-runbook.md`：正式训练内容发布手册
+- `docs/formal-delivery-acceptance-runbook.md`：正式交付总验收 Runbook
 - `docs/formal-delivery-gap-analysis.md`：正式可交付差距总结
 - `docs/game-module-delivery-strategy.md`：游戏模块正式交付策略
 - `docs/customer-acceptance-criteria.md`：客户验收标准
@@ -23,6 +24,7 @@
 - `scripts/verify-trial-empty-loop.mjs`：试点空库闭环验收脚本
 - `scripts/verify-browser-pose-evidence.mjs`：浏览器体感 evidence JSON 静态自检脚本
 - `scripts/verify-browser-pose-field-acceptance.mjs`：浏览器体感实机只读验真脚本，核对附件文件、训练记录 API 和审计日志 API
+- `scripts/verify-customer-production-input.mjs`：客户生产资料包校验脚本
 
 ## 不纳入运行源码包
 
@@ -77,6 +79,7 @@
 详细缺口、游戏路线、客户验收口径和生产上线准备见：
 
 - `docs/formal-delivery-gap-analysis.md`
+- `docs/formal-delivery-acceptance-runbook.md`
 - `docs/game-module-delivery-strategy.md`
 - `docs/customer-acceptance-criteria.md`
 - `docs/customer-production-input-checklist.md`

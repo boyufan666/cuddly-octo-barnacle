@@ -168,6 +168,7 @@ apps/web/public/unity/<gameCode>/<version>/
 - `docs/delivery-boundary-and-readiness.md`
 - `docs/trial-initialization-runbook.md`
 - `docs/formal-training-content-runbook.md`
+- `docs/formal-delivery-acceptance-runbook.md`
 - `docs/formal-delivery-gap-analysis.md`
 - `docs/game-module-delivery-strategy.md`
 - `docs/customer-acceptance-criteria.md`

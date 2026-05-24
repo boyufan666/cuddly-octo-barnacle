@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   checkGitignoreExclusions,
+  checkDeliveryDocumentReferences,
   checkPackageScripts,
   checkProductionEnvironment,
 } from "../check-delivery-readiness.mjs";
@@ -120,6 +121,43 @@ test("gitignore check requires local and historical directories to be excluded",
   ].join("\n"));
 
   assert.deepEqual(result.failures, []);
+});
+
+test("delivery document check requires formal acceptance runbook and production input references", () => {
+  const result = checkDeliveryDocumentReferences({
+    readme: [
+      "docs/formal-delivery-acceptance-runbook.md",
+      "docs/customer-production-input-checklist.md",
+      "docs/templates/customer-production-input.template.json",
+      "docs/browser-pose-field-acceptance-runbook.md",
+    ].join("\n"),
+    deliveryBoundary: [
+      "docs/formal-delivery-acceptance-runbook.md",
+      "docs/customer-production-input-checklist.md",
+      "docs/browser-pose-field-acceptance-runbook.md",
+    ].join("\n"),
+  });
+
+  assert.deepEqual(result.failures, []);
+});
+
+test("delivery document check rejects missing formal acceptance runbook reference", () => {
+  const result = checkDeliveryDocumentReferences({
+    readme: [
+      "docs/customer-production-input-checklist.md",
+      "docs/templates/customer-production-input.template.json",
+      "docs/browser-pose-field-acceptance-runbook.md",
+    ].join("\n"),
+    deliveryBoundary: [
+      "docs/customer-production-input-checklist.md",
+      "docs/browser-pose-field-acceptance-runbook.md",
+    ].join("\n"),
+  });
+
+  assert.match(
+    result.failures.join("\n"),
+    /formal-delivery-acceptance-runbook/,
+  );
 });
 
 test("production environment check rejects placeholders and local origins", () => {
