@@ -17,6 +17,7 @@
 - `docs/game-module-delivery-strategy.md`：游戏模块正式交付策略
 - `docs/customer-acceptance-criteria.md`：客户验收标准
 - `docs/customer-production-input-checklist.md`：客户上线资料准备清单
+- `docs/ai-speech-provider-selection-free-first.md`：AI/语音供应商免费优先选型说明
 - `docs/production-delivery-runbook.md`：生产交付 Runbook
 - `docs/browser-pose-field-acceptance-runbook.md`：浏览器体感实机验收 Runbook
 - `apps/web/public/unity/rehab-unity-bridge.js`：Unity 训练结果回传桥接脚本
@@ -83,6 +84,7 @@
 - `docs/game-module-delivery-strategy.md`
 - `docs/customer-acceptance-criteria.md`
 - `docs/customer-production-input-checklist.md`
+- `docs/ai-speech-provider-selection-free-first.md`
 - `docs/production-delivery-runbook.md`
 - `docs/browser-pose-field-acceptance-runbook.md`
 

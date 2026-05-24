@@ -129,11 +129,13 @@ test("delivery document check requires formal acceptance runbook and production 
       "docs/formal-delivery-acceptance-runbook.md",
       "docs/customer-production-input-checklist.md",
       "docs/templates/customer-production-input.template.json",
+      "docs/ai-speech-provider-selection-free-first.md",
       "docs/browser-pose-field-acceptance-runbook.md",
     ].join("\n"),
     deliveryBoundary: [
       "docs/formal-delivery-acceptance-runbook.md",
       "docs/customer-production-input-checklist.md",
+      "docs/ai-speech-provider-selection-free-first.md",
       "docs/browser-pose-field-acceptance-runbook.md",
     ].join("\n"),
   });
@@ -157,6 +159,27 @@ test("delivery document check rejects missing formal acceptance runbook referenc
   assert.match(
     result.failures.join("\n"),
     /formal-delivery-acceptance-runbook/,
+  );
+});
+
+test("delivery document check rejects missing free-first AI speech provider guide", () => {
+  const result = checkDeliveryDocumentReferences({
+    readme: [
+      "docs/formal-delivery-acceptance-runbook.md",
+      "docs/customer-production-input-checklist.md",
+      "docs/templates/customer-production-input.template.json",
+      "docs/browser-pose-field-acceptance-runbook.md",
+    ].join("\n"),
+    deliveryBoundary: [
+      "docs/formal-delivery-acceptance-runbook.md",
+      "docs/customer-production-input-checklist.md",
+      "docs/browser-pose-field-acceptance-runbook.md",
+    ].join("\n"),
+  });
+
+  assert.match(
+    result.failures.join("\n"),
+    /ai-speech-provider-selection-free-first/,
   );
 });
 

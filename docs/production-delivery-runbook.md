@@ -65,6 +65,8 @@
 - 模型调用日志保存内容、脱敏策略和审计要求。
 - 医师是否必须人工确认 AI 生成结果。
 
+如客户希望优先使用免费额度或已有账号，供应商候选和资料确认口径见 `docs/ai-speech-provider-selection-free-first.md`。选型说明只用于降低试点成本和沟通范围，不代表生产能力已经可用；正式上线仍以本节配置、调用日志、合规授权和人工复核证据为准。
+
 生产配置必须显式提供 `AI_PROVIDER`、`AI_MODEL_VERSION`、`AI_MODEL_ENDPOINT`、`AI_API_KEY_REF`、`AI_PROMPT_VERSION`、`AI_CALL_LOG_RETENTION_DAYS`、`AI_HUMAN_REVIEW_REQUIRED`、`SPEECH_PROVIDER`、`SPEECH_TO_TEXT_ENDPOINT`、`SPEECH_API_KEY_REF` 和 `SPEECH_MODEL_VERSION`。`AI_MODEL_ENDPOINT` 与 `SPEECH_TO_TEXT_ENDPOINT` 必须使用正式 HTTPS 地址；供应商、模型、提示词、密钥引用不能包含 `mock`、`demo` 或 `local` 标记；`AI_API_KEY_REF` 与 `SPEECH_API_KEY_REF` 必须使用 `secret-manager://...` 形式的密钥引用，不能把真实密钥值直接写入环境变量；`AI_HUMAN_REVIEW_REQUIRED` 必须为 `true`；调用日志留存天数必须为 30 到 3650 的整数。
 
 正式评估入库还必须保存调用证据：`production_ai_assessment` 必须带供应商、模型、模型版本、调用 ID、正式 HTTPS endpoint、提示词版本、调用时间和人工复核记录；`speech_ai_assessment` 还必须带语音识别供应商、语音模型版本、语音调用 ID、正式 HTTPS endpoint，并要求患者已签署 `microphone_capture`。证据缺失、非 HTTPS、本地/演示 endpoint、含 `mock`/`demo`/`local`/`manual`/`fallback` 标记时，必须阻断创建评估记录，不允许降级为手工来源。

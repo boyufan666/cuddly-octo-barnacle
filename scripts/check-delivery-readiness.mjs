@@ -23,6 +23,7 @@ const requiredGitignoreEntries = [
 const requiredDeliveryDocumentRefs = [
   "docs/formal-delivery-acceptance-runbook.md",
   "docs/customer-production-input-checklist.md",
+  "docs/ai-speech-provider-selection-free-first.md",
   "docs/templates/customer-production-input.template.json",
   "docs/browser-pose-field-acceptance-runbook.md",
 ];

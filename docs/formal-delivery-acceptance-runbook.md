@@ -87,6 +87,8 @@ pnpm verify:trial-empty-loop
 
 仅当客户声明一期需要真实 AI/语音能力时执行本节。
 
+如客户要求优先免费方案，供应商选型和免费额度核验口径见 `docs/ai-speech-provider-selection-free-first.md`。该文档不能替代本节验收证据，选型完成也不等于真实 AI/语音上线通过。
+
 后端入库要求：
 
 - 大模型评估必须使用 `production_ai_assessment` 来源。
@@ -187,6 +189,7 @@ pnpm verify:contracts
 - 大模型供应商账号；优先客户已有星火，或确认可用免费额度的通义千问、智谱、DeepSeek、Moonshot、OpenAI 等供应商。
 - 语音识别供应商账号；优先客户已有星火/讯飞语音能力或可用免费额度。
 - AI/语音费用、免费额度、QPS、并发、有效期、生产使用授权和超额计费确认。
+- AI/语音免费优先选型依据：可参考 `docs/ai-speech-provider-selection-free-first.md` 填写，但最终仍以客户账号控制台、正式合同或供应商官网当前页面为准。
 - AI/语音正式 HTTPS endpoint、密钥托管引用、模型版本、提示词版本、调用日志留存和医师人工复核责任人。
 - 浏览器体感验收设备、摄像头型号、目标浏览器、训练场地和现场验收负责人。
 - 如客户已有 Unity 游戏：WebGL Build、`manifest.json`、素材/插件授权证明和 Bridge 适配确认。

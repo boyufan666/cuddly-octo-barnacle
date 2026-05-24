@@ -173,6 +173,7 @@ apps/web/public/unity/<gameCode>/<version>/
 - `docs/game-module-delivery-strategy.md`
 - `docs/customer-acceptance-criteria.md`
 - `docs/customer-production-input-checklist.md`
+- `docs/ai-speech-provider-selection-free-first.md`
 - `docs/templates/customer-production-input.template.json`
 - `docs/production-delivery-runbook.md`
 - `docs/browser-pose-field-acceptance-runbook.md`
