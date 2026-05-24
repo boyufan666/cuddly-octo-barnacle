@@ -39,13 +39,14 @@ pnpm verify:customer-production-input -- customer-production-input.json
 - 所有正式域名和 AI/语音 endpoint 均为 HTTPS。
 - 数据库、Redis、AI、语音密钥均为 `secret-manager://...` 引用。
 - AI/语音若 `requiredForLaunch=true`，必须具备供应商、账号负责人、模型版本、免费额度或费用确认、调用日志留存和医师人工复核。
+- AI/语音若 `requiredForLaunch=false`，资料包可不填写供应商、endpoint、密钥和第三方 AI 授权，但交付范围只能写“结构化评估录入和接口边界”，不能宣称真实 AI/语音能力。
 - 浏览器体感必须提供实机 evidence 路径、目标浏览器和摄像头型号。
 - 资料包中不得出现占位符、mock、demo、local、manual、fallback、明文密钥或本地地址。
 
 失败处理：
 
 - 退回客户补资料或改为“不声明该能力上线”。
-- 不允许把 `requiredForLaunch` 改成 `false` 来绕过客户明确要求上线的真实能力。
+- 不允许把 `requiredForLaunch` 改成 `false` 来绕过客户明确要求上线的真实能力；范围变更必须由客户或验收负责人确认，开发方不得为了通过门禁自行修改。
 - 不允许把供应商临时试用、个人 token 或代理地址写成生产能力。
 
 ## 3. AI/语音 Go/No-Go

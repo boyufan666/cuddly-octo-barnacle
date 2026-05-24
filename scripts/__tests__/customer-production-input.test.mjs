@@ -113,6 +113,55 @@ test("customer production input rejects missing free quota confirmation when fre
   assert.match(result.failures.join("\n"), /AI 免费额度/);
 });
 
+test("customer production input accepts launch materials when AI and speech are not launch scope", () => {
+  const input = validInput({
+    legal: {
+      ...validInput().legal,
+      thirdPartyAiDataProcessingApproved: false,
+    },
+    ai: {
+      requiredForLaunch: false,
+      freeTierPreferred: true,
+    },
+    speech: {
+      requiredForLaunch: false,
+      freeTierPreferred: true,
+      microphoneConsentRequired: false,
+    },
+  });
+
+  const result = validateCustomerProductionInput(input);
+
+  assert.deepEqual(result.failures, []);
+});
+
+test("customer production input accepts AI launch without speech launch materials", () => {
+  const input = validInput({
+    speech: {
+      requiredForLaunch: false,
+      freeTierPreferred: true,
+      microphoneConsentRequired: false,
+    },
+  });
+
+  const result = validateCustomerProductionInput(input);
+
+  assert.deepEqual(result.failures, []);
+});
+
+test("customer production input accepts speech launch without AI launch materials", () => {
+  const input = validInput({
+    ai: {
+      requiredForLaunch: false,
+      freeTierPreferred: true,
+    },
+  });
+
+  const result = validateCustomerProductionInput(input);
+
+  assert.deepEqual(result.failures, []);
+});
+
 test("customer production input rejects raw keys and non-HTTPS AI endpoints", () => {
   const input = validInput({
     ai: {

@@ -27,6 +27,8 @@ pnpm verify:customer-production-input -- <customer-production-input.json>
 
 正式 AI/语音评估不是必填演示项，但如果客户要求上线真实大模型或语音能力，必须提供以下资料：
 
+如果客户明确一期不要求真实 AI/语音上线，资料包中可将 `ai.requiredForLaunch` 和 `speech.requiredForLaunch` 设为 `false`；此时只能交付结构化评估录入和接口边界，不能宣传真实 AI/语音评估已完成。
+
 免费优先供应商选型、试用额度评估维度和生产可用性判断见 `docs/ai-speech-provider-selection-free-first.md`。该文档仅用于选型沟通，不替代客户资料包校验、生产环境变量检查、真实调用日志或医师人工复核证据。
 
 - 大模型供应商账号：优先使用客户已有星火账号；也可评估通义千问、智谱、DeepSeek、Moonshot、OpenAI 等供应商当期免费额度或试用额度。

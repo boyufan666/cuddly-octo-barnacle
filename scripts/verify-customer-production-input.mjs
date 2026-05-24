@@ -40,7 +40,10 @@ export function validateCustomerProductionInput(input) {
 
   validateProject(failures, input.project);
   validateInfrastructure(failures, input.infrastructure);
-  validateLegal(failures, input.legal);
+  validateLegal(failures, input.legal, {
+    aiOrSpeechRequiredForLaunch:
+      isServiceRequiredForLaunch(input.ai) || isServiceRequiredForLaunch(input.speech),
+  });
   validateAccounts(failures, input.accounts);
   validateDataCollection(failures, input.dataCollection);
   validateAi(failures, input.ai);
@@ -84,17 +87,19 @@ function validateInfrastructure(failures, infrastructure) {
   requireString(failures, infrastructure.monitoringOwner, "infrastructure.monitoringOwner");
 }
 
-function validateLegal(failures, legal) {
+function validateLegal(failures, legal, options) {
   requireObject(failures, legal, "legal 必须是对象。");
   if (!isObject(legal)) return;
   requireString(failures, legal.privacyAgreementVersion, "legal.privacyAgreementVersion");
   requireString(failures, legal.consentOwner, "legal.consentOwner");
   requireString(failures, legal.retentionPolicy, "legal.retentionPolicy");
-  requireTrue(
-    failures,
-    legal.thirdPartyAiDataProcessingApproved,
-    "legal.thirdPartyAiDataProcessingApproved 必须为 true，才能接入真实 AI/语音。",
-  );
+  if (options.aiOrSpeechRequiredForLaunch) {
+    requireTrue(
+      failures,
+      legal.thirdPartyAiDataProcessingApproved,
+      "legal.thirdPartyAiDataProcessingApproved 必须为 true，才能接入真实 AI/语音。",
+    );
+  }
 }
 
 function validateAccounts(failures, accounts) {
@@ -130,6 +135,7 @@ function validateDataCollection(failures, dataCollection) {
 function validateAi(failures, ai) {
   requireObject(failures, ai, "ai 必须是对象。");
   if (!isObject(ai)) return;
+  if (!isServiceRequiredForLaunch(ai)) return;
   validateExternalService(failures, ai, "ai", {
     requirePrompt: true,
     requireHumanReview: true,
@@ -149,6 +155,7 @@ function validateAi(failures, ai) {
 function validateSpeech(failures, speech) {
   requireObject(failures, speech, "speech 必须是对象。");
   if (!isObject(speech)) return;
+  if (!isServiceRequiredForLaunch(speech)) return;
   validateExternalService(failures, speech, "speech", {
     requirePrompt: false,
     requireHumanReview: false,
@@ -163,9 +170,6 @@ function validateSpeech(failures, speech) {
 }
 
 function validateExternalService(failures, service, prefix, options) {
-  const requiredForLaunch = service.requiredForLaunch === true;
-  if (!requiredForLaunch) return;
-
   requireString(failures, service.provider, `${prefix}.provider`);
   requireString(failures, service.accountOwner, `${prefix}.accountOwner`);
   requireHttpsUrl(failures, service.endpoint, `${prefix}.endpoint`);
@@ -198,6 +202,10 @@ function validateExternalService(failures, service, prefix, options) {
     );
     requireString(failures, service.humanReviewOwner, `${prefix}.humanReviewOwner`);
   }
+}
+
+function isServiceRequiredForLaunch(service) {
+  return isObject(service) && service.requiredForLaunch === true;
 }
 
 function validateTrainingContent(failures, trainingContent) {
