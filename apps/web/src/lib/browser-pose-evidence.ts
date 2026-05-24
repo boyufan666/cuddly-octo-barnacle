@@ -133,6 +133,17 @@ export type BuildBrowserPoseEvidenceResult =
   | { ok: true; evidence: BrowserPoseEvidence }
   | { ok: false; error: string; failures: string[] };
 
+export function browserPoseFieldAcceptanceCommand(evidencePath: string) {
+  return [
+    `pnpm verify:browser-pose-evidence -- ${evidencePath}`,
+    "pnpm verify:browser-pose-field-acceptance -- \\",
+    `  ${evidencePath} \\`,
+    "  --api-base-url <正式 API 地址> \\",
+    "  --patient-token <训练记录读取 token> \\",
+    "  --audit-token <审计读取 token>",
+  ].join("\n");
+}
+
 export function buildBrowserPoseEvidence(
   input: BrowserPoseEvidenceInput,
 ): BuildBrowserPoseEvidenceResult {

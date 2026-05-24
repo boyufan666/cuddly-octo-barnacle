@@ -30,6 +30,7 @@ import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, api } from "@/lib/api";
 import {
   buildBrowserPoseEvidenceInputFromRecord,
+  browserPoseFieldAcceptanceCommand,
 } from "@/lib/browser-pose-evidence";
 import {
   checkPoseReadiness,
@@ -4847,7 +4848,14 @@ function BrowserPoseEvidencePanel({
       evidenceResult.evidence,
       `browser-pose-evidence-${session.id}.json`,
     );
-    setMessage("浏览器体感实机证据 JSON 已生成，请使用 pnpm verify:browser-pose-evidence 校验。");
+    setMessage(
+      [
+        "浏览器体感实机证据 JSON 已生成。请将 JSON、截图和录屏放入同一证据目录后，依次执行：",
+        browserPoseFieldAcceptanceCommand(
+          `browser-pose-evidence-${session.id}.json`,
+        ),
+      ].join("\n"),
+    );
   }
 
   return (
@@ -4859,7 +4867,7 @@ function BrowserPoseEvidencePanel({
             导出浏览器体感验收 JSON
           </h4>
           <p className="mt-2 max-w-3xl font-bold leading-7 text-[#526b74]">
-            仅在训练结果已入库后生成证据。现场验收人、审计日志和截图录屏必须显式填写，系统不会自动补造缺失证据。
+            仅在训练结果已入库后生成证据。现场验收人、审计日志和截图录屏必须显式填写，系统不会自动补造缺失证据；正式通过还需要只读 API 验真。
           </p>
         </div>
         <Chip tone={browserRuntimeReady ? "success" : "warning"}>
@@ -4964,7 +4972,7 @@ function BrowserPoseEvidencePanel({
 
       <div className="mt-5 flex flex-wrap items-center justify-between gap-4">
         <p className="font-bold leading-7 text-[#526b74]">
-          导出后请把 JSON、截图、录屏和审计截图一起归档；模板占位符或空字段会被校验脚本拒绝。
+          导出后请把 JSON、截图、录屏放入同一证据目录，并归档审计截图；模板占位符、空字段、缺少附件或 API 审计不一致都会被验真脚本拒绝。
         </p>
         <PrimaryButton
           className="bg-[#173945] hover:bg-[#1f7a8c]"
@@ -6959,7 +6967,7 @@ function SecurityScreen({
           <div>
             <h3 className="text-2xl font-black">审计日志列表</h3>
             <p className="mt-2 font-bold text-[#6a8088]">
-              展示本次查询返回的审计记录，包含操作者、动作、目标、结果和时间。
+              展示本次查询返回的审计记录，包含完整日志 ID、操作者、动作、目标、结果和时间，便于填写体感验收 evidence。
             </p>
           </div>
           <Chip tone={deniedCount || failedCount ? "warning" : "success"}>
@@ -6967,9 +6975,10 @@ function SecurityScreen({
           </Chip>
         </div>
         <div className="mt-4 overflow-x-auto rounded-2xl border border-[#c9e3e7]">
-          <div className="min-w-[920px]">
-            <div className="grid grid-cols-[1.1fr_1.1fr_1.4fr_1.1fr_0.8fr] gap-3 border-b border-[#d7e8ec] bg-[#e8f8f8]/80 p-4 text-xs font-black uppercase tracking-[0.18em] text-[#25859a]">
+          <div className="min-w-[1080px]">
+            <div className="grid grid-cols-[1.25fr_1.15fr_1.05fr_1.35fr_1.15fr_0.75fr] gap-3 border-b border-[#d7e8ec] bg-[#e8f8f8]/80 p-4 text-xs font-black uppercase tracking-[0.18em] text-[#25859a]">
               <span>时间</span>
+              <span>日志 ID</span>
               <span>操作者</span>
               <span>动作</span>
               <span>目标</span>
@@ -6978,9 +6987,14 @@ function SecurityScreen({
             {logs.map((log) => (
               <div
                 key={log.id}
-                className="grid grid-cols-[1.1fr_1.1fr_1.4fr_1.1fr_0.8fr] gap-3 border-b border-[#e1edf0] bg-white/70 p-4 text-sm font-bold last:border-b-0"
+                className="grid grid-cols-[1.25fr_1.15fr_1.05fr_1.35fr_1.15fr_0.75fr] gap-3 border-b border-[#e1edf0] bg-white/70 p-4 text-sm font-bold last:border-b-0"
               >
                 <span>{formatDateTime(log.createdAt)}</span>
+                <span className="min-w-0 font-mono text-xs text-[#526b74]">
+                  <span className="block truncate" title={log.id}>
+                    {log.id}
+                  </span>
+                </span>
                 <span className="min-w-0">
                   <span className="block truncate">
                     {log.actor?.displayName ??
@@ -6994,9 +7008,19 @@ function SecurityScreen({
                   )}
                 </span>
                 <span>{auditActionLabel(log.action)}</span>
-                <span>
-                  {targetTypeLabel(log.targetType)}
-                  {log.targetId ? ` · ${shortId(log.targetId)}` : ""}
+                <span className="min-w-0">
+                  <span className="block truncate">
+                    {targetTypeLabel(log.targetType)}
+                    {log.targetId ? ` · ${shortId(log.targetId)}` : ""}
+                  </span>
+                  {log.targetId ? (
+                    <span
+                      className="mt-1 block truncate font-mono text-xs text-[#6a8088]"
+                      title={log.targetId}
+                    >
+                      {log.targetId}
+                    </span>
+                  ) : null}
                 </span>
                 <span>
                   <Chip tone={auditTone(log.result)}>

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   buildBrowserPoseEvidence,
+  browserPoseFieldAcceptanceCommand,
   type BrowserPoseEvidenceInput,
 } from "./browser-pose-evidence.ts";
 
@@ -206,4 +207,14 @@ test("buildBrowserPoseEvidence rejects session and result run mismatch", () => {
   assert.equal(result.ok, false);
   if (result.ok) return;
   assert.match(result.error, /gameRunId/);
+});
+
+test("browser pose field acceptance command includes JSON self-check and read-only API verification", () => {
+  const command = browserPoseFieldAcceptanceCommand("<evidence-json-path>");
+
+  assert.match(command, /pnpm verify:browser-pose-evidence/);
+  assert.match(command, /pnpm verify:browser-pose-field-acceptance/);
+  assert.match(command, /--api-base-url <正式 API 地址>/);
+  assert.match(command, /--patient-token <训练记录读取 token>/);
+  assert.match(command, /--audit-token <审计读取 token>/);
 });

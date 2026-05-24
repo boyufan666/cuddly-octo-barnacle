@@ -28,6 +28,7 @@
 5. 后台查询审计日志，确认存在 `training_session.start` 和 `training_result.submit`。
 6. 保存训练完成页截图、训练过程录屏或录像、审计日志截图。
 7. 按 `docs/templates/browser-pose-evidence.template.json` 填写证据 JSON。
+8. 也可在患者端训练结果页使用“导出浏览器体感验收 JSON”面板生成 evidence。该面板只负责组装已入库训练记录和人工填写的验收信息，不会采集或补造截图、录屏、审计日志 ID。
 
 ## JSON 自检命令
 
@@ -93,6 +94,7 @@ pnpm verify:browser-pose-field-acceptance
 - `motionMetrics` 必须包含四项正式动作指标，且每项的值、单位、置信度、采样数、窗口时间、质量标记、来源和 `gameRunId` 与 evidence 一致。
 - 审计日志 API 必须能按 `training_session.start` 和 `training_result.submit` 查到 `targetType=training_session`、`targetId=sessionId`、`result=success` 的日志。
 - evidence 中的 `auditEvidence.auditLogIds` 必须与 API 查到的审计日志 ID、动作、目标和结果一致。
+- 管理后台审计日志列表会展示完整日志 ID；现场验收时应筛选 `training_session.start`、`training_result.submit`、`targetType=training_session` 和对应 `sessionId` 后，将两条成功审计日志 ID 填入 evidence。
 
 ## 失败判定
 
