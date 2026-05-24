@@ -12,6 +12,8 @@
 
 ## 1. 客户资料包验收
 
+给客户发送资料索取时，可先使用 `docs/customer-final-input-request.md` 作为短版清单；客户回复后再整理为结构化资料包。
+
 客户先按模板填写资料包：
 
 ```bash
@@ -165,6 +167,7 @@ pnpm verify:contracts
 交付包至少包含：
 
 - 当前 monorepo 源码、迁移、脚本和文档。
+- 客户最终资料索取单 `docs/customer-final-input-request.md` 及客户回复记录。
 - 客户资料包 `customer-production-input.json` 及校验通过记录。
 - 生产配置门禁执行记录。
 - 空库真实闭环验收记录。
@@ -181,6 +184,8 @@ pnpm verify:contracts
 - 真实密钥明文、真实患者未脱敏附件、未经授权的第三方素材或 Unity 资源。
 
 ## 8. 客户最终需提供清单
+
+可直接转发给客户的短版清单见 `docs/customer-final-input-request.md`，本节作为验收 runbook 内的完整核对口径。
 
 - 服务器、域名、HTTPS、数据库、Redis、备份和监控负责人。
 - 隐私协议正文、版本、生效日期、授权撤回规则和数据留存周期。
