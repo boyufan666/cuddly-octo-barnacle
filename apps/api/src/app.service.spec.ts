@@ -2228,6 +2228,325 @@ describe('AppService assessment consent requirements', () => {
       }),
     });
   });
+
+  it('rejects production AI assessment when provider call evidence is missing', async () => {
+    const { prisma, service } = createService();
+    prisma.patientProfile.findUnique.mockResolvedValue({
+      id: 'patient-profile-id',
+      responsibleDoctorId: 'doctor-profile-id',
+    });
+    prisma.consentRecord.findFirst
+      .mockResolvedValueOnce({
+        id: 'privacy-consent-id',
+        patientId: 'patient-profile-id',
+        consentType: 'privacy_policy',
+        consentVersion: 'v1.2',
+        status: 'granted',
+        revokedAt: null,
+      })
+      .mockResolvedValueOnce({
+        id: 'ai-consent-id',
+        patientId: 'patient-profile-id',
+        consentType: 'ai_processing',
+        consentVersion: 'v1.2',
+        status: 'granted',
+        revokedAt: null,
+      });
+
+    await expect(
+      service.createAssessment(doctorUser, {
+        ...assessmentDto,
+        rawInputSummary: {
+          ...assessmentDto.rawInputSummary,
+          source: 'production_ai_assessment',
+        },
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(prisma.assessmentRecord.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects assessment when source is not an allowed production or clinician source', async () => {
+    const { prisma, service } = createService();
+    prisma.patientProfile.findUnique.mockResolvedValue({
+      id: 'patient-profile-id',
+      responsibleDoctorId: 'doctor-profile-id',
+    });
+    prisma.consentRecord.findFirst
+      .mockResolvedValueOnce({
+        id: 'privacy-consent-id',
+        patientId: 'patient-profile-id',
+        consentType: 'privacy_policy',
+        consentVersion: 'v1.2',
+        status: 'granted',
+        revokedAt: null,
+      })
+      .mockResolvedValueOnce({
+        id: 'ai-consent-id',
+        patientId: 'patient-profile-id',
+        consentType: 'ai_processing',
+        consentVersion: 'v1.2',
+        status: 'granted',
+        revokedAt: null,
+      });
+
+    await expect(
+      service.createAssessment(doctorUser, {
+        ...assessmentDto,
+        rawInputSummary: {
+          ...assessmentDto.rawInputSummary,
+          source: 'temporary_ai_import',
+        },
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(prisma.assessmentRecord.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects production AI assessment when evidence endpoint is not a production HTTPS reference', async () => {
+    const { prisma, service } = createService();
+    prisma.patientProfile.findUnique.mockResolvedValue({
+      id: 'patient-profile-id',
+      responsibleDoctorId: 'doctor-profile-id',
+    });
+    prisma.consentRecord.findFirst
+      .mockResolvedValueOnce({
+        id: 'privacy-consent-id',
+        patientId: 'patient-profile-id',
+        consentType: 'privacy_policy',
+        consentVersion: 'v1.2',
+        status: 'granted',
+        revokedAt: null,
+      })
+      .mockResolvedValueOnce({
+        id: 'ai-consent-id',
+        patientId: 'patient-profile-id',
+        consentType: 'ai_processing',
+        consentVersion: 'v1.2',
+        status: 'granted',
+        revokedAt: null,
+      });
+
+    await expect(
+      service.createAssessment(doctorUser, {
+        ...assessmentDto,
+        rawInputSummary: {
+          ...assessmentDto.rawInputSummary,
+          source: 'production_ai_assessment',
+          evidence: {
+            provider: 'iflytek-spark',
+            model: 'spark-x1',
+            modelVersion: 'spark-x1-2026-05',
+            callId: 'ai-call-20260524-001',
+            endpointRef: 'http://localhost:3000/mock/chat',
+            promptVersion: 'cognitive-assessment-2026-05',
+            calledAt: '2026-05-24T10:00:00.000Z',
+            humanReview: {
+              required: true,
+              reviewerUserId: doctorUser.id,
+              reviewedAt: '2026-05-24T10:03:00.000Z',
+              conclusion: 'approved',
+            },
+          },
+        },
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(prisma.assessmentRecord.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects production AI assessment until human review approves the model output', async () => {
+    const { prisma, service } = createService();
+    prisma.patientProfile.findUnique.mockResolvedValue({
+      id: 'patient-profile-id',
+      responsibleDoctorId: 'doctor-profile-id',
+    });
+    prisma.consentRecord.findFirst
+      .mockResolvedValueOnce({
+        id: 'privacy-consent-id',
+        patientId: 'patient-profile-id',
+        consentType: 'privacy_policy',
+        consentVersion: 'v1.2',
+        status: 'granted',
+        revokedAt: null,
+      })
+      .mockResolvedValueOnce({
+        id: 'ai-consent-id',
+        patientId: 'patient-profile-id',
+        consentType: 'ai_processing',
+        consentVersion: 'v1.2',
+        status: 'granted',
+        revokedAt: null,
+      });
+
+    await expect(
+      service.createAssessment(doctorUser, {
+        ...assessmentDto,
+        rawInputSummary: {
+          ...assessmentDto.rawInputSummary,
+          source: 'production_ai_assessment',
+          evidence: {
+            provider: 'iflytek-spark',
+            model: 'spark-x1',
+            modelVersion: 'spark-x1-2026-05',
+            callId: 'ai-call-20260524-001',
+            endpointRef: 'https://spark-api.customer-health.cn/v1/chat/completions',
+            promptVersion: 'cognitive-assessment-2026-05',
+            calledAt: '2026-05-24T10:00:00.000Z',
+            humanReview: {
+              required: true,
+              reviewerUserId: doctorUser.id,
+              reviewedAt: '2026-05-24T10:03:00.000Z',
+              conclusion: 'needs_revision',
+            },
+          },
+        },
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(prisma.assessmentRecord.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects speech AI assessment when microphone consent is missing', async () => {
+    const { prisma, service } = createService();
+    prisma.patientProfile.findUnique.mockResolvedValue({
+      id: 'patient-profile-id',
+      responsibleDoctorId: 'doctor-profile-id',
+    });
+    prisma.consentRecord.findFirst
+      .mockResolvedValueOnce({
+        id: 'privacy-consent-id',
+        patientId: 'patient-profile-id',
+        consentType: 'privacy_policy',
+        consentVersion: 'v1.2',
+        status: 'granted',
+        revokedAt: null,
+      })
+      .mockResolvedValueOnce({
+        id: 'ai-consent-id',
+        patientId: 'patient-profile-id',
+        consentType: 'ai_processing',
+        consentVersion: 'v1.2',
+        status: 'granted',
+        revokedAt: null,
+      })
+      .mockResolvedValueOnce(null);
+
+    await expect(
+      service.createAssessment(doctorUser, {
+        ...assessmentDto,
+        rawInputSummary: {
+          ...assessmentDto.rawInputSummary,
+          source: 'speech_ai_assessment',
+          evidence: {
+            provider: 'iflytek-spark',
+            model: 'spark-x1',
+            modelVersion: 'spark-x1-2026-05',
+            callId: 'ai-call-20260524-001',
+            endpointRef: 'https://spark-api.customer-health.cn/v1/chat/completions',
+            promptVersion: 'cognitive-assessment-2026-05',
+            calledAt: '2026-05-24T10:00:00.000Z',
+            humanReview: {
+              required: true,
+              reviewerUserId: doctorUser.id,
+              reviewedAt: '2026-05-24T10:03:00.000Z',
+              conclusion: 'approved',
+            },
+            speech: {
+              provider: 'iflytek-iat',
+              modelVersion: 'iat-medical-2026-05',
+              callId: 'speech-call-20260524-001',
+              endpointRef: 'https://speech.customer-health.cn/v2/iat',
+            },
+          },
+        },
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+
+    expect(prisma.consentRecord.findFirst).toHaveBeenLastCalledWith({
+      where: {
+        patientId: 'patient-profile-id',
+        consentType: 'microphone_capture',
+        consentVersion: 'v1.2',
+        status: 'granted',
+        revokedAt: null,
+      },
+      orderBy: { grantedAt: 'desc' },
+    });
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(prisma.assessmentRecord.create).not.toHaveBeenCalled();
+  });
+
+  it('creates production AI assessment only with explicit provider, call, and review evidence', async () => {
+    const { prisma, service } = createService();
+    prisma.patientProfile.findUnique.mockResolvedValue({
+      id: 'patient-profile-id',
+      responsibleDoctorId: 'doctor-profile-id',
+    });
+    prisma.consentRecord.findFirst
+      .mockResolvedValueOnce({
+        id: 'privacy-consent-id',
+        patientId: 'patient-profile-id',
+        consentType: 'privacy_policy',
+        consentVersion: 'v1.2',
+        status: 'granted',
+        revokedAt: null,
+      })
+      .mockResolvedValueOnce({
+        id: 'ai-consent-id',
+        patientId: 'patient-profile-id',
+        consentType: 'ai_processing',
+        consentVersion: 'v1.2',
+        status: 'granted',
+        revokedAt: null,
+      });
+    prisma.assessmentRecord.create.mockResolvedValue({
+      id: 'assessment-id',
+      patientId: 'patient-profile-id',
+      assessmentType: 'MMSE/CDR',
+    });
+
+    const productionRawInputSummary = {
+      ...assessmentDto.rawInputSummary,
+      source: 'production_ai_assessment',
+      evidence: {
+        provider: 'iflytek-spark',
+        model: 'spark-x1',
+        modelVersion: 'spark-x1-2026-05',
+        callId: 'ai-call-20260524-001',
+        endpointRef: 'https://spark-api.customer-health.cn/v1/chat/completions',
+        promptVersion: 'cognitive-assessment-2026-05',
+        calledAt: '2026-05-24T10:00:00.000Z',
+        humanReview: {
+          required: true,
+          reviewerUserId: doctorUser.id,
+          reviewedAt: '2026-05-24T10:03:00.000Z',
+          conclusion: 'approved',
+        },
+      },
+    };
+
+    await expect(
+      service.createAssessment(doctorUser, {
+        ...assessmentDto,
+        rawInputSummary: productionRawInputSummary,
+      }),
+    ).resolves.toMatchObject({
+      id: 'assessment-id',
+      patientId: 'patient-profile-id',
+    });
+
+    expect(prisma.assessmentRecord.create).toHaveBeenCalledWith({
+      data: objectContaining({
+        source: 'production_ai_assessment',
+        rawInputSummary: productionRawInputSummary,
+      }),
+    });
+  });
 });
 
 describe('AppService game content Unity build management', () => {

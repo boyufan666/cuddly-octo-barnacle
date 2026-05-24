@@ -37,9 +37,29 @@ const trainingReviewConclusions = [
   'excluded_from_analysis',
   'needs_retrain',
 ] as const;
+const clinicianAssessmentSources = [
+  'clinician_input',
+  'clinician_recorded_trial_assessment',
+] as const;
+const productionAiAssessmentSources = [
+  'production_ai_assessment',
+  'speech_ai_assessment',
+] as const;
+const allowedAssessmentSources = [
+  ...clinicianAssessmentSources,
+  ...productionAiAssessmentSources,
+] as const;
+const speechAiAssessmentSources = ['speech_ai_assessment'] as const;
+const humanReviewConclusions = [
+  'approved',
+  'rejected',
+  'needs_revision',
+] as const;
 
 type FormalRuntimeType = (typeof supportedFormalRuntimeTypes)[number];
 type TrainingReviewConclusion = (typeof trainingReviewConclusions)[number];
+type ProductionAiAssessmentSource =
+  (typeof productionAiAssessmentSources)[number];
 
 type LoginDto = {
   account: string;
@@ -882,12 +902,12 @@ export class AppService {
     );
     const scoreSummary = this.requiredJsonObject(
       dto.scoreSummary,
-      '缺少有效评估数据，请先完成 MMSE/CDR 量表或上传 AI 评估结果。',
+      '缺少有效评估数据，请先完成 MMSE/CDR 量表或上传已批准的生产 AI 评估结果。',
     );
     this.validateAssessmentScoreSummary(scoreSummary);
     const rawInputSummary = this.requiredJsonObject(
       dto.rawInputSummary,
-      '缺少 AI 分析结果，不能创建风险评级记录。',
+      '缺少评估分析结果，不能创建风险评级记录。',
     );
     const source = this.requiredString(
       rawInputSummary.source,
@@ -910,6 +930,11 @@ export class AppService {
       '缺少 AI 分析置信度。',
     );
     this.assertRange(confidence, 0, 1, 'AI 分析置信度必须在 0 到 1 之间。');
+    this.assertAllowedAssessmentSource(source);
+    this.assertProductionAssessmentEvidence(rawInputSummary, source);
+    if (this.isSpeechAiAssessmentSource(source)) {
+      await this.assertCurrentConsent(dto.patientId, 'microphone_capture');
+    }
 
     const riskLevel = this.calculateRiskLevel(scoreSummary);
     const reasonSummary = this.riskReason(riskLevel, scoreSummary);
@@ -3402,6 +3427,134 @@ export class AppService {
         0,
         100,
         '评估分项分数必须在 0 到 100 之间。',
+      );
+    }
+  }
+
+  private assertAllowedAssessmentSource(source: string) {
+    if (!allowedAssessmentSources.includes(source as never)) {
+      throw new BadRequestException(
+        '评估来源必须为已确认的结构化录入或已接入生产 AI/语音来源。',
+      );
+    }
+  }
+
+  private assertProductionAssessmentEvidence(
+    rawInputSummary: Prisma.JsonObject,
+    source: string,
+  ) {
+    if (!this.isProductionAiAssessmentSource(source)) {
+      return;
+    }
+
+    const evidence = this.requiredJsonObject(
+      rawInputSummary.evidence,
+      '生产 AI/语音评估必须提供供应商调用证据。',
+    );
+    this.requiredProductionEvidenceText(evidence.provider, 'AI 供应商');
+    this.requiredProductionEvidenceText(evidence.model, 'AI 模型');
+    this.requiredProductionEvidenceText(evidence.modelVersion, 'AI 模型版本');
+    this.requiredProductionEvidenceText(evidence.callId, 'AI 调用 ID');
+    this.assertProductionEvidenceHttpsRef(evidence.endpointRef, 'AI endpoint');
+    this.requiredProductionEvidenceText(evidence.promptVersion, '提示词版本');
+    this.requiredIsoDate(evidence.calledAt, 'AI 调用时间');
+
+    const humanReview = this.requiredJsonObject(
+      evidence.humanReview,
+      '生产 AI/语音评估必须提供人工复核记录。',
+    );
+    const reviewRequired = this.requiredBoolean(
+      humanReview.required,
+      '生产 AI/语音评估必须明确人工复核 required=true。',
+    );
+    if (!reviewRequired) {
+      throw new BadRequestException('生产 AI/语音评估必须经过人工复核。');
+    }
+    this.requiredProductionEvidenceText(
+      humanReview.reviewerUserId,
+      '人工复核人',
+    );
+    this.requiredIsoDate(humanReview.reviewedAt, '人工复核时间');
+    const conclusion = this.requiredProductionEvidenceText(
+      humanReview.conclusion,
+      '人工复核结论',
+    );
+    if (!humanReviewConclusions.includes(conclusion as never)) {
+      throw new BadRequestException(
+        '人工复核结论必须为 approved、rejected 或 needs_revision。',
+      );
+    }
+    if (conclusion !== 'approved') {
+      throw new BadRequestException(
+        '生产 AI/语音评估必须经人工复核批准后才能入库。',
+      );
+    }
+
+    if (this.isSpeechAiAssessmentSource(source)) {
+      const speech = this.requiredJsonObject(
+        evidence.speech,
+        '语音 AI 评估必须提供语音转写供应商调用证据。',
+      );
+      this.requiredProductionEvidenceText(speech.provider, '语音识别供应商');
+      this.requiredProductionEvidenceText(speech.modelVersion, '语音模型版本');
+      this.requiredProductionEvidenceText(speech.callId, '语音调用 ID');
+      this.assertProductionEvidenceHttpsRef(
+        speech.endpointRef,
+        '语音识别 endpoint',
+      );
+    }
+  }
+
+  private isProductionAiAssessmentSource(
+    source: string,
+  ): source is ProductionAiAssessmentSource {
+    return productionAiAssessmentSources.includes(source as never);
+  }
+
+  private isSpeechAiAssessmentSource(source: string) {
+    return speechAiAssessmentSources.includes(source as never);
+  }
+
+  private requiredProductionEvidenceText(value: unknown, label: string) {
+    const text = this.requiredString(value, `${label}不能为空。`);
+    this.assertNoDemoMockLocalManual(text, label);
+    return text;
+  }
+
+  private assertProductionEvidenceHttpsRef(value: unknown, label: string) {
+    const endpointRef = this.requiredProductionEvidenceText(value, label);
+    let url: URL;
+    try {
+      url = new URL(endpointRef);
+    } catch {
+      throw new BadRequestException(`${label} 必须是有效的 HTTPS 地址。`);
+    }
+    if (url.protocol !== 'https:') {
+      throw new BadRequestException(`${label} 必须使用 HTTPS。`);
+    }
+    this.assertNoDemoMockLocalManual(url.hostname, label);
+    if (
+      ['localhost', '127.0.0.1', '0.0.0.0'].includes(url.hostname) ||
+      url.hostname.endsWith('.local')
+    ) {
+      throw new BadRequestException(`${label} 不能指向本地或测试地址。`);
+    }
+    return endpointRef;
+  }
+
+  private requiredIsoDate(value: unknown, label: string) {
+    const text = this.requiredString(value, `${label}不能为空。`);
+    const timestamp = Date.parse(text);
+    if (!Number.isFinite(timestamp)) {
+      throw new BadRequestException(`${label}必须为有效 ISO 时间。`);
+    }
+    return text;
+  }
+
+  private assertNoDemoMockLocalManual(value: string, label: string) {
+    if (/\b(mock|demo|local|manual|fallback)\b/i.test(value)) {
+      throw new BadRequestException(
+        `${label} 不能包含 mock、demo、local、manual 或 fallback。`,
       );
     }
   }

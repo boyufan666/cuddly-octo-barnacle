@@ -99,8 +99,8 @@ const screens: Array<{ id: ScreenId; label: string; icon: typeof Brain }> = [
   { id: "login", label: "账号登录", icon: KeyRound },
   { id: "profile", label: "建档授权", icon: ShieldCheck },
   { id: "device", label: "设备权限", icon: Video },
-  { id: "assessment", label: "AI评估", icon: Brain },
-  { id: "match", label: "智能匹配", icon: WandSparkles },
+  { id: "assessment", label: "评估录入", icon: Brain },
+  { id: "match", label: "方案匹配", icon: WandSparkles },
   { id: "today", label: "今日训练", icon: HeartPulse },
   { id: "prep", label: "训练准备", icon: Camera },
   { id: "game", label: "实时采集", icon: Gamepad2 },
@@ -145,7 +145,7 @@ const auditActionOptions: Array<[string, string]> = [
   ["patient.view", "查看患者"],
   ["consent.grant", "授权留痕"],
   ["consent.revoke", "撤回授权"],
-  ["assessment.create", "创建 AI 评估"],
+  ["assessment.create", "创建评估记录"],
   ["rehab_plan.recommend", "生成推荐方案"],
   ["rehab_plan.confirm", "确认康复方案"],
   ["training_session.start", "开始训练"],
@@ -194,7 +194,7 @@ const trainingInputModeOptions: Array<[string, string]> = [
 const planPrerequisiteLabels = {
   patientProfile: "患者已建档",
   privacyConsent: "隐私授权已签署",
-  aiConsent: "AI 授权已签署",
+  aiConsent: "评估数据授权已签署",
   currentRisk: "当前风险评级",
   releasedTraining: "已发布正式训练内容",
   planState: "方案状态",
@@ -244,8 +244,9 @@ const consentDefinitions: Array<{
   },
   {
     type: "ai_processing",
-    title: "AI 数据处理",
-    description: "允许平台处理语音转写、量表分数和 AI 分析摘要。",
+    title: "评估数据处理",
+    description:
+      "允许平台保存量表分数、问答转写文本和评估摘要；真实 AI/语音接入需另有供应商证据。",
   },
   {
     type: "camera_capture",
@@ -255,7 +256,8 @@ const consentDefinitions: Array<{
   {
     type: "microphone_capture",
     title: "麦克风语音采集",
-    description: "允许评估时采集语音并转写为结构化文本。",
+    description:
+      "预留正式语音评估授权；未接入生产语音服务前，本页面不进行自动采集或转写。",
   },
   {
     type: "caregiver_sharing",
@@ -1112,7 +1114,7 @@ export default function Home() {
 
     setBusyAction("assessment");
     setDataError(null);
-    setActionStatus("正在写入 AI 评估记录");
+    setActionStatus("正在写入结构化评估记录");
 
     try {
       const scoreSummary = {
@@ -1127,7 +1129,7 @@ export default function Home() {
       const analysisSummary = form.analysisSummary.trim();
       const modelVersion = form.modelVersion.trim();
       if (!transcript || !analysisSummary || !modelVersion) {
-        throw new Error("请填写语音转写、AI 分析摘要和模型版本。");
+        throw new Error("请填写问答转写/评估摘要、分析摘要和来源版本。");
       }
 
       await api.createAssessment(session.accessToken, {
@@ -1139,7 +1141,7 @@ export default function Home() {
           transcript,
           analysisSummary,
           modelVersion,
-          confidence: parseRequiredNumber(form.confidence, "AI 置信度"),
+          confidence: parseRequiredNumber(form.confidence, "分析置信度"),
           reactionDelaySeconds: parseRequiredNumber(
             form.reactionDelaySeconds,
             "反应延迟",
@@ -1149,10 +1151,10 @@ export default function Home() {
       });
       setAssessmentForm(emptyAssessmentForm);
       await reloadRoleData(session, data.patient.id);
-      setActionStatus("AI 评估已保存，风险评级与分析摘要已刷新。");
+      setActionStatus("结构化评估已保存，风险评级与分析摘要已刷新。");
       setActive("match");
     } catch (error) {
-      handleRequestError(error, "AI 评估写入失败");
+      handleRequestError(error, "结构化评估写入失败");
     } finally {
       setBusyAction(null);
     }
@@ -1975,7 +1977,7 @@ function LoginScreen({
       <GlassCard className="mt-4">
         <h3 className="text-2xl font-black">登录与数据访问说明</h3>
         <p className="mt-3 text-lg leading-8 text-[#4f6670]">
-          平台仅展示当前账号被授权访问的数据范围。涉及智能评估分析、摄像头采集、家属共享和数据导出的操作会校验授权状态，并写入审计日志。
+          平台仅展示当前账号被授权访问的数据范围。涉及评估记录处理、摄像头采集、家属共享和数据导出的操作会校验授权状态，并写入审计日志。
         </p>
       </GlassCard>
     </ScreenGrid>
@@ -2096,7 +2098,7 @@ function ProfileScreen({
     <ScreenGrid
       eyebrow="建档与授权"
       title="患者建档与知情同意"
-      subtitle="训练和评估前请先完成隐私协议、AI 数据处理、摄像头和麦克风授权。"
+      subtitle="训练和评估前请先完成隐私协议、评估数据处理、摄像头和麦克风授权。"
       aside={
         <AuthorizationPanel
           patient={patient}
@@ -2192,7 +2194,7 @@ function AuthorizationPanel({
             consentState.privacy_policy ? "已签署" : "待签署",
           ],
           [
-            "AI处理授权",
+            "评估数据授权",
             consentState.ai_processing ? "已签署" : "待签署",
           ],
           [
@@ -2223,7 +2225,7 @@ function AuthorizationPanel({
           disabled={isConsentBusy}
           onClick={() => void onGrantConsent("ai_processing")}
         >
-          {isConsentBusy ? "正在签署授权" : "先签署 AI 数据处理授权"}
+          {isConsentBusy ? "正在签署授权" : "先签署评估数据处理授权"}
         </PrimaryButton>
       )}
       <PrimaryButton
@@ -2234,8 +2236,8 @@ function AuthorizationPanel({
         {isBusy
           ? "正在写入评估"
           : canStartAssessment
-            ? "进入 AI 评估录入"
-            : "签署 AI 授权后可评估"}
+            ? "进入结构化评估录入"
+            : "签署评估数据授权后可评估"}
       </PrimaryButton>
       <PrimaryButton
         className="mt-3 w-full bg-[#173945] hover:bg-[#1f7a8c]"
@@ -2557,7 +2559,7 @@ function DevicePermissionCenterScreen({
           />
           <DeviceConsentCard
             title="麦克风语音采集"
-            description="用于后续语音评估、语音输入和训练鼓励反馈。"
+            description="预留正式语音评估、语音输入和训练鼓励反馈授权；生产语音供应商接入并验收前不会自动采集或转写。"
             record={microphoneConsent}
             consentType="microphone_capture"
             onGrantConsent={onGrantConsent}
@@ -2776,14 +2778,14 @@ function AssessmentScreen({
   const scoreSummary = assessment?.scoreSummary ?? {};
   const transcript = readString(
     assessment?.rawInputSummary?.transcript,
-    "等待 AI 评估转写结果",
+    "等待评估人员录入问答转写或摘要",
   );
 
   return (
     <ScreenGrid
-      eyebrow="AI 认知评估"
-      title="AI 语音认知评估"
-      subtitle="语音转文字、MMSE/CDR 进度、识别置信度和 AI 对话留存。"
+      eyebrow="认知评估录入"
+      title="结构化认知评估"
+      subtitle="录入 MMSE/CDR、问答转写文本、评估摘要和分析置信度；真实 AI/语音接入需通过生产证据门禁。"
       aside={<RecognitionPanel assessment={assessment} />}
     >
       <GlassCard>
@@ -2797,7 +2799,7 @@ function AssessmentScreen({
           <p className="mt-3 font-bold leading-7 text-[#526b74]">
             {assessment
               ? `最近一次评估完成于 ${formatDateTime(assessment.createdAt)}。`
-              : "请根据本轮问答录入 MMSE/CDR、语音转写和 AI 分析摘要，提交后系统生成风险评级。"}
+              : "请根据本轮问答录入 MMSE/CDR、问答转写文本和评估分析摘要，提交后系统生成风险评级。"}
           </p>
         </div>
         <Badge label="当前题目：时间定向力" icon={Brain} className="mt-6" />
@@ -2805,14 +2807,14 @@ function AssessmentScreen({
           请告诉我，今天是星期几？
         </h3>
         <p className="mt-4 text-xl font-bold text-[#526b74]">
-          您可以直接说出来，系统会自动转成文字。
+          请由评估人员根据问答记录录入文本；自动语音转写需完成生产服务接入后启用。
         </p>
         <div className="mt-10 grid gap-5 rounded-3xl border border-[#c9e3e7] bg-white/75 p-6 md:grid-cols-[220px_1fr]">
           <Waveform />
           <div>
-            <h4 className="text-2xl font-black">正在听您回答</h4>
+            <h4 className="text-2xl font-black">问答记录录入</h4>
             <p className="mt-3 text-lg font-bold text-[#526b74]">
-              语音转文字：{transcript}
+              问答转写/摘要：{transcript}
             </p>
             <p className="mt-2 font-mono text-sm font-bold text-[#6a8088]">
               MMSE {clinicalScoreLabel(scoreSummary.mmse, "/30")} · CDR{" "}
@@ -2848,28 +2850,28 @@ function RecognitionPanel({
   const analysis = assessment?.aiAnalyses?.[0];
   return (
     <GlassCard>
-      <Badge label="实时识别状态" icon={AudioWaveform} />
+      <Badge label="评估记录状态" icon={AudioWaveform} />
       <StatusList
         items={[
           ["评估类型", assessment?.assessmentType ?? "等待评估", "info"],
           [
-            "评估来源",
-            analysis?.modelVersion ?? "等待 AI 分析",
+            "来源版本",
+            analysis?.modelVersion ?? "等待评估摘要",
             analysis ? "success" : "warning",
           ],
           [
-            "AI 置信度",
+            "分析置信度",
             analysis ? `${Math.round(analysis.confidence * 100)}%` : "待生成",
             analysis ? "success" : "warning",
           ],
         ]}
       />
       <div className="mt-5 rounded-3xl border border-[#c9e3e7] bg-white/75 p-5">
-        <h4 className="font-black">AI 对话记录</h4>
+        <h4 className="font-black">问答转写/评估摘要</h4>
         <p className="mt-3 text-sm font-bold leading-7 text-[#526b74]">
           {readString(
             assessment?.rawInputSummary?.transcript,
-            "登录并完成评估后，系统会在这里展示结构化转写摘要。",
+            "登录并完成评估后，系统会在这里展示结构化转写或摘要。",
           )}
         </p>
       </div>
@@ -2888,7 +2890,7 @@ function AssessmentInputPanel({
     <GlassCard className="mt-5">
         <Badge label="评估结果录入" icon={ClipboardCheck} />
       <p className="mt-3 font-bold leading-7 text-[#526b74]">
-        这里录入实际 MMSE/CDR、语音转写和 AI 分析摘要。未填写完整时不会写入评估记录。
+        这里录入实际 MMSE/CDR、问答转写文本和评估分析摘要。未填写完整时不会写入评估记录。
       </p>
       <div className="mt-5 grid gap-4 md:grid-cols-3">
         <FieldLine
@@ -2904,7 +2906,7 @@ function AssessmentInputPanel({
           type="number"
         />
         <FieldLine
-          label="AI置信度（0-1）"
+          label="分析置信度（0-1）"
           value={form.confidence}
           onChange={(value) => onChange("confidence", value)}
           type="number"
@@ -2940,19 +2942,19 @@ function AssessmentInputPanel({
           type="number"
         />
         <FieldLine
-          label="模型版本"
+          label="来源/模型版本"
           value={form.modelVersion}
           onChange={(value) => onChange("modelVersion", value)}
         />
       </div>
       <div className="mt-5 grid gap-4 md:grid-cols-2">
         <TextAreaField
-          label="语音转写/评估摘要"
+          label="问答转写/评估摘要"
           value={form.transcript}
           onChange={(value) => onChange("transcript", value)}
         />
         <TextAreaField
-          label="AI 分析摘要"
+          label="评估分析摘要"
           value={form.analysisSummary}
           onChange={(value) => onChange("analysisSummary", value)}
         />
@@ -2982,9 +2984,9 @@ function MatchScreen({
 
   return (
     <ScreenGrid
-      eyebrow="智能方案匹配"
-      title="评估结果与智能方案匹配"
-      subtitle="系统根据评估结果、训练目标和内容标签生成推荐方案，医师确认后下发给患者。"
+      eyebrow="方案匹配"
+      title="评估结果与康复方案匹配"
+      subtitle="系统根据评估结果、训练目标和内容标签生成可解释候选方案，医师确认后下发给患者。"
       aside={
         <PlanRecommendation
           plan={displayPlan}
@@ -2996,12 +2998,12 @@ function MatchScreen({
       }
     >
       <GlassCard>
-        <Badge label={aiAnalysis?.modelVersion ?? "AI 分析待生成"} icon={Sparkles} />
+        <Badge label={aiAnalysis?.modelVersion ?? "评估摘要待生成"} icon={Sparkles} />
         <h3 className="mt-5 text-4xl font-black text-[#9d4747]">
           当前认知评级：{riskLabel(risk?.riskLevel)}
         </h3>
         <p className="mt-4 text-lg font-bold leading-8 text-[#526b74]">
-          {risk?.reasonSummary ?? "等待 AI 评估生成风险说明。"}
+          {risk?.reasonSummary ?? "等待评估记录生成风险说明。"}
         </p>
         <div className="mt-7 grid gap-4 md:grid-cols-3">
           <MetricCard
@@ -3016,7 +3018,7 @@ function MatchScreen({
           />
           <MetricCard
             value={aiAnalysis ? `${Math.round(aiAnalysis.confidence * 100)}%` : "待生成"}
-            label="AI置信"
+            label="分析置信"
             icon={Radar}
           />
         </div>
@@ -3096,7 +3098,7 @@ function PlanRecommendation({
           ))
         ) : (
           <p className="rounded-3xl border border-[#c9e3e7] bg-white/75 p-5 font-bold text-[#526b74]">
-            暂无推荐计划，请先完成 AI 评估并生成康复方案。
+            暂无推荐计划，请先完成结构化评估并生成康复方案。
           </p>
         )}
       </div>
@@ -5315,7 +5317,7 @@ function PatientCreatePanel({
         </fieldset>
         <div className="mt-5 flex flex-wrap items-center justify-between gap-4 rounded-3xl border border-[#c9e3e7] bg-[#e9f8f6]/80 p-5">
           <p className="max-w-3xl font-bold leading-7 text-[#526b74]">
-            创建后请让患者使用录入账号登录，在“建档授权”页逐项签署当前版本授权，再继续 AI 评估和训练采集。
+            创建后请让患者使用录入账号登录，在“建档授权”页逐项签署当前版本授权，再继续结构化评估和训练采集。
           </p>
           <PrimaryButton disabled={!canSubmit || isBusy} type="submit">
             {isBusy
@@ -5623,7 +5625,7 @@ function PlanScreen({
           <Badge label="待生成方案" icon={ClipboardCheck} />
           <h3 className="mt-4 text-2xl font-black">暂无可调整康复方案</h3>
           <p className="mt-3 font-bold leading-7 text-[#526b74]">
-            请先让患者完成 AI 评估，并在“智能匹配”中生成推荐方案；系统返回待确认方案后，医师才能调整并下发。
+            请先让患者完成结构化评估，并在“方案匹配”中生成推荐方案；系统返回待确认方案后，医师才能调整并下发。
           </p>
         </GlassCard>
       )}
@@ -5719,7 +5721,7 @@ function PlanConfirmPanel({
         />
         <FormBlock
           label="推荐来源"
-          value={pending ? "AI 推荐待确认" : plan ? "当前生效方案" : "暂无方案"}
+          value={pending ? "系统候选方案待确认" : plan ? "当前生效方案" : "暂无方案"}
         />
         <FormBlock
           label="方案生成时间"
@@ -5854,7 +5856,7 @@ function AdminScreen({
             moderate: "中度风险",
             high: "高风险",
           }}
-          emptyText="完成 AI 评估后展示风险分布"
+          emptyText="完成结构化评估后展示风险分布"
         />
       </GlassCard>
       <GlassCard className="md:col-span-2">
@@ -6743,7 +6745,7 @@ function SecurityScreen({
         <StatusList
           items={[
             ["敏感字段", "姓名、联系方式、健康指标纳入保护范围", "info"],
-            ["授权留痕", "隐私协议、AI处理、摄像头、家属共享逐项记录", "info"],
+            ["授权留痕", "隐私协议、评估数据处理、摄像头、家属共享逐项记录", "info"],
             ["导出要求", "导出时按角色做身份信息脱敏", "warning"],
             ["审计追踪", "访问、修改、导出操作写入审计日志", "success"],
           ]}
@@ -6760,7 +6762,7 @@ function SecurityScreen({
             <h3 className="mt-4 text-2xl font-black">脱敏数据导出</h3>
             <p className="mt-2 max-w-3xl font-bold leading-7 text-[#526b74]">
               平台会生成脱敏 CSV 文件，姓名、联系方式、档案编号、记录编号等标识信息
-              将统一脱敏或伪匿名化。原始健康指标、AI 转写、动作原始摘要和授权证据快照不会进入文件。
+              将统一脱敏或伪匿名化。原始健康指标、问答转写/评估摘要、动作原始摘要和授权证据快照不会进入文件。
             </p>
           </div>
           <Chip tone={canExportData ? "success" : "muted"}>
@@ -6785,7 +6787,7 @@ function SecurityScreen({
               }
               options={[
                 ["patients", "患者档案"],
-                ["assessments", "AI评估记录"],
+                ["assessments", "评估记录"],
                 ["training-records", "训练记录"],
                 ["consents", "授权记录"],
                 ["audit-logs", "审计日志"],
@@ -7636,7 +7638,7 @@ function HistoryPanel({
 function LoopStrip() {
   return (
     <div className="mb-8 flex flex-wrap items-center gap-3">
-      {["AI评估", "风险分级", "方案匹配", "体感训练", "医师回看"].map((item) => (
+      {["评估录入", "风险分级", "方案匹配", "体感训练", "医师回看"].map((item) => (
         <Chip key={item}>{item}</Chip>
       ))}
     </div>
@@ -8894,7 +8896,7 @@ const auditActionLabels: Record<string, string> = {
   "patient.view": "查看患者",
   "consent.grant": "授权留痕",
   "consent.revoke": "撤回授权",
-  "assessment.create": "创建 AI 评估",
+  "assessment.create": "创建评估记录",
   "rehab_plan.recommend": "生成推荐方案",
   "rehab_plan.confirm": "确认康复方案",
   "training_session.start": "开始训练",

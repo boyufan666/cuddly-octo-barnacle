@@ -16,7 +16,7 @@ pnpm verify:trial-empty-loop
 - trial 医师账号登录。
 - 管理员按 trial 医师账号通过正式 API 创建患者，并验证后端解析到该医师绑定的 doctor profile。
 - 患者登录并签署 `privacy_policy`、`ai_processing`、`camera_capture` 当前版本授权。
-- 医师录入结构化 MMSE/CDR/AI 摘要评估。
+- 医师录入结构化 MMSE/CDR 和评估摘要。
 - 管理员创建并发布 `browser_pose_game` 正式训练内容。
 - 医师生成推荐方案并确认方案。
 - 患者创建训练 session。
@@ -24,6 +24,8 @@ pnpm verify:trial-empty-loop
 - 医师查询训练记录，确认结果和 4 条动作指标已入库。
 
 脚本不会创建演示患者、不会依赖完整 seed 示例数据、不会打印密码或 token。
+
+本脚本中的评估由医师结构化录入，用于验证空库 API 闭环；不调用真实语音转写或大模型服务，不产生生产 AI/语音调用日志，也不构成真实 AI/语音评估验收。若验收目标声明为真实 AI/语音评估，但未提供生产供应商、HTTPS endpoint、密钥引用、调用日志和人工复核证据，应判定为硬阻断，不得用本脚本结果替代。
 
 ## 前置条件
 
@@ -107,7 +109,7 @@ TRIAL_VERIFY_ASSESSMENT_EXECUTIVE=<executive-score> \
 TRIAL_VERIFY_ASSESSMENT_LANGUAGE=<language-score> \
 TRIAL_VERIFY_ASSESSMENT_TRANSCRIPT=<clinician-transcript-or-summary> \
 TRIAL_VERIFY_ASSESSMENT_ANALYSIS_SUMMARY=<clinician-analysis-summary> \
-TRIAL_VERIFY_ASSESSMENT_MODEL_VERSION=<assessment-model-version> \
+TRIAL_VERIFY_ASSESSMENT_MODEL_VERSION=<assessment-source-or-model-version> \
 TRIAL_VERIFY_ASSESSMENT_CONFIDENCE=<assessment-confidence> \
 TRIAL_VERIFY_GAME_CODE=<new-browser-pose-game-code> \
 TRIAL_VERIFY_GAME_NAME=<browser-pose-game-name> \
@@ -148,6 +150,7 @@ pnpm verify:trial-empty-loop
 - API 缺少患者创建、授权、评估、训练内容发布、推荐、确认、训练 session 或结果提交能力。
 - 没有可发布且配置完整的 `browser_pose_game` 正式训练内容。
 - 训练结果缺少结构化 `metricsSummary` 或 `motionMetrics`。
+- 验收目标声明为真实 AI/语音评估，但缺少生产供应商、HTTPS endpoint、密钥引用、调用日志或人工复核证据。
 
 ## 注意事项
 

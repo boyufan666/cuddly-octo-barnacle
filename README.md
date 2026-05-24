@@ -114,6 +114,8 @@ TRIAL_DOCTOR_MOBILE_PHONE
 
 `pnpm delivery:check:production` 已将 AI/语音供应商、模型版本、正式 HTTPS 接口、密钥引用、提示词版本、调用日志留存和人工复核策略纳入上线门禁。客户或运维未显式提供这些正式配置前，项目只能按“支持结构化录入和 AI/语音接口边界”交付，不能宣传真实 AI 自动评估已完成。
 
+真实 AI/语音验收还必须提供供应商配置清单、HTTPS endpoint、`secret-manager://...` 密钥引用、模型调用日志样例和医师人工复核记录；任一项缺失时，生产检查和客户验收均应硬阻断。
+
 ## Unity/体感训练交付策略
 
 一期优先保证至少一个训练内容真实可用，再扩展多游戏库：
@@ -161,5 +163,6 @@ apps/web/public/unity/<gameCode>/<version>/
 - `docs/formal-delivery-gap-analysis.md`
 - `docs/game-module-delivery-strategy.md`
 - `docs/customer-acceptance-criteria.md`
+- `docs/customer-production-input-checklist.md`
 - `docs/production-delivery-runbook.md`
 - `docs/browser-pose-field-acceptance-runbook.md`

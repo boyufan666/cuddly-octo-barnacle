@@ -15,6 +15,7 @@
 - `docs/formal-delivery-gap-analysis.md`：正式可交付差距总结
 - `docs/game-module-delivery-strategy.md`：游戏模块正式交付策略
 - `docs/customer-acceptance-criteria.md`：客户验收标准
+- `docs/customer-production-input-checklist.md`：客户上线资料准备清单
 - `docs/production-delivery-runbook.md`：生产交付 Runbook
 - `docs/browser-pose-field-acceptance-runbook.md`：浏览器体感实机验收 Runbook
 - `apps/web/public/unity/rehab-unity-bridge.js`：Unity 训练结果回传桥接脚本
@@ -62,10 +63,11 @@
 - PostgreSQL/Redis 密码和访问策略
 - HTTPS 证书和反向代理配置
 - 日志、备份、监控和告警配置
+- AI/语音生产配置：供应商、正式 HTTPS endpoint、`secret-manager://...` 密钥引用、模型/语音调用日志留存和医师人工复核证据
 
 ## 当前阻塞交付事项
 
-1. 真实 AI/语音服务接入：语音转文字、大模型分析、模型版本和调用记录。
+1. 真实 AI/语音服务接入：必须同时具备生产供应商配置、正式 HTTPS endpoint、`secret-manager://...` 密钥引用、模型/语音调用日志留存和医师人工复核证据；任一项缺失均为上线硬阻断，不能以 mock/demo/local、本地录入或脚本兜底替代。
 2. 至少 1 个正式训练内容实机验收：发布浏览器体感或 Unity 内容，完成摄像头授权、姿态识别、结果生成、入库和审计。
 3. Unity WebGL 正式构建接入：`manifest.json`、Build 文件和 Bridge 回传验收。
 4. 隐私权限专项验收：撤回授权阻断、家属摘要脱敏、医师患者归属、导出脱敏审计。
@@ -77,6 +79,7 @@
 - `docs/formal-delivery-gap-analysis.md`
 - `docs/game-module-delivery-strategy.md`
 - `docs/customer-acceptance-criteria.md`
+- `docs/customer-production-input-checklist.md`
 - `docs/production-delivery-runbook.md`
 - `docs/browser-pose-field-acceptance-runbook.md`
 
@@ -121,7 +124,7 @@ pnpm delivery:check:production
 
 此外，应使用真实浏览器逐角色验证：
 
-- 患者：建档授权、AI 评估、今日训练、训练结果
+- 患者：建档授权、结构化评估、今日训练、训练结果
 - 家属：授权摘要、今日提醒、隐私边界
 - 医师：负责患者、方案调整、训练结果回看
 - 运营管理：训练内容、脱敏导出、审计日志
