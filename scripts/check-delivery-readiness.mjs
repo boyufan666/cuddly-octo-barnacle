@@ -75,6 +75,15 @@ export function checkPackageScripts({ rootPackage, apiPackage }) {
     );
   }
 
+  if (
+    rootScripts["verify:customer-production-input"] !==
+    "node scripts/verify-customer-production-input.mjs"
+  ) {
+    failures.push(
+      "root package 缺少 verify:customer-production-input 客户生产资料包校验脚本。",
+    );
+  }
+
   if (/\s--fix(?:\s|$)/.test(apiScripts.lint ?? "")) {
     failures.push("api lint 包含 --fix，会修改文件，不适合作为交付前纯检查命令。");
   }

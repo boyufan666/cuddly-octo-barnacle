@@ -1,0 +1,80 @@
+{
+  "documentVersion": "customer-production-input/v1",
+  "project": {
+    "customerName": "客户正式名称",
+    "acceptanceOwner": "客户验收负责人姓名",
+    "targetLaunchDate": "2026-06-30",
+    "deploymentMode": "public_cloud | private_cloud | intranet"
+  },
+  "infrastructure": {
+    "webDomain": "https://rehab.customer.example.com",
+    "apiDomain": "https://api.rehab.customer.example.com",
+    "serverPlan": "正式服务器规格、部署区域和运维责任说明",
+    "databaseUrlRef": "secret-manager://rehab-prod/database-url",
+    "redisUrlRef": "secret-manager://rehab-prod/redis-url",
+    "backupPolicy": "备份频率、保留周期和恢复责任人",
+    "monitoringOwner": "监控告警负责人"
+  },
+  "legal": {
+    "privacyAgreementVersion": "privacy-2026-06",
+    "consentOwner": "隐私协议确认负责人",
+    "retentionPolicy": "数据保留周期和删除规则",
+    "thirdPartyAiDataProcessingApproved": true
+  },
+  "accounts": {
+    "superAdmins": ["admin.account"],
+    "operatorAdmins": ["operator.account"],
+    "auditors": ["auditor.account"],
+    "doctors": ["doctor.account"]
+  },
+  "dataCollection": {
+    "realPatientDataApproved": true,
+    "patientSource": "已签署授权的试点患者来源说明",
+    "desensitizationOwner": "脱敏负责人",
+    "exportApprovalOwner": "导出审批负责人"
+  },
+  "ai": {
+    "requiredForLaunch": true,
+    "freeTierPreferred": true,
+    "provider": "iflytek-spark",
+    "accountOwner": "客户 AI 供应商账号负责人",
+    "freeQuotaConfirmed": true,
+    "freeQuotaDescription": "免费额度、有效期、QPS、并发和超额计费确认说明",
+    "endpoint": "https://spark-api.customer.example.com/v1/chat/completions",
+    "apiKeyRef": "secret-manager://rehab-prod/iflytek-spark-api-key",
+    "modelName": "spark-x1",
+    "modelVersion": "spark-x1-2026-06",
+    "promptVersion": "cognitive-assessment-2026-06",
+    "callLogRetentionDays": 180,
+    "humanReviewRequired": true,
+    "humanReviewOwner": "医师复核负责人"
+  },
+  "speech": {
+    "requiredForLaunch": true,
+    "freeTierPreferred": true,
+    "provider": "iflytek-iat",
+    "accountOwner": "客户语音供应商账号负责人",
+    "freeQuotaConfirmed": true,
+    "freeQuotaDescription": "免费额度、有效期、QPS、并发和超额计费确认说明",
+    "endpoint": "https://speech.customer.example.com/v2/iat",
+    "apiKeyRef": "secret-manager://rehab-prod/iflytek-iat-api-key",
+    "modelVersion": "iat-medical-2026-06",
+    "microphoneConsentRequired": true
+  },
+  "trainingContent": {
+    "browserPoseAccepted": true,
+    "browserEvidencePath": "evidence/browser-pose/customer-field-evidence.json",
+    "targetBrowsers": ["Chrome 126", "Edge 126"],
+    "cameraModel": "Logitech C920",
+    "unityRequiredForLaunch": false,
+    "unityBuildManifestPath": ""
+  },
+  "acceptanceEvidence": {
+    "roleScreenshotsReady": true,
+    "assessmentEvidenceReady": true,
+    "trainingEvidenceReady": true,
+    "auditEvidenceReady": true,
+    "desensitizedExportReady": true,
+    "deploymentEvidenceReady": true
+  }
+}

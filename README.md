@@ -116,6 +116,14 @@ TRIAL_DOCTOR_MOBILE_PHONE
 
 真实 AI/语音验收还必须提供供应商配置清单、HTTPS endpoint、`secret-manager://...` 密钥引用、模型调用日志样例和医师人工复核记录；任一项缺失时，生产检查和客户验收均应硬阻断。
 
+客户资料包可按模板 `docs/templates/customer-production-input.template.json` 填写，并执行：
+
+```bash
+pnpm verify:customer-production-input -- <customer-production-input.json>
+```
+
+该命令只校验客户材料和证据完整性，不能替代 `pnpm delivery:check:production`、真实 AI/语音调用验收或浏览器体感实机验真。
+
 ## Unity/体感训练交付策略
 
 一期优先保证至少一个训练内容真实可用，再扩展多游戏库：
@@ -164,5 +172,6 @@ apps/web/public/unity/<gameCode>/<version>/
 - `docs/game-module-delivery-strategy.md`
 - `docs/customer-acceptance-criteria.md`
 - `docs/customer-production-input-checklist.md`
+- `docs/templates/customer-production-input.template.json`
 - `docs/production-delivery-runbook.md`
 - `docs/browser-pose-field-acceptance-runbook.md`

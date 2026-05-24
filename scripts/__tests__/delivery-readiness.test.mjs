@@ -16,6 +16,8 @@ test("package scripts expose non-mutating delivery checks", () => {
         "test:delivery": "node --test scripts/__tests__/*.test.mjs",
         "verify:browser-pose-field-acceptance":
           "node scripts/verify-browser-pose-field-acceptance.mjs",
+        "verify:customer-production-input":
+          "node scripts/verify-customer-production-input.mjs",
       },
     },
     apiPackage: {
@@ -38,6 +40,8 @@ test("package script check rejects mutating api lint", () => {
         "test:delivery": "node --test scripts/__tests__/*.test.mjs",
         "verify:browser-pose-field-acceptance":
           "node scripts/verify-browser-pose-field-acceptance.mjs",
+        "verify:customer-production-input":
+          "node scripts/verify-customer-production-input.mjs",
       },
     },
     apiPackage: {
@@ -70,6 +74,31 @@ test("package script check requires browser pose field acceptance verifier", () 
   assert.match(
     result.failures.join("\n"),
     /verify:browser-pose-field-acceptance/,
+  );
+});
+
+test("package script check requires customer production input verifier", () => {
+  const result = checkPackageScripts({
+    rootPackage: {
+      scripts: {
+        "delivery:check": "node scripts/check-delivery-readiness.mjs",
+        "delivery:check:production":
+          "node scripts/check-delivery-readiness.mjs --production-env",
+        "test:delivery": "node --test scripts/__tests__/*.test.mjs",
+        "verify:browser-pose-field-acceptance":
+          "node scripts/verify-browser-pose-field-acceptance.mjs",
+      },
+    },
+    apiPackage: {
+      scripts: {
+        lint: 'eslint "{src,apps,libs,test}/**/*.ts"',
+      },
+    },
+  });
+
+  assert.match(
+    result.failures.join("\n"),
+    /verify:customer-production-input/,
   );
 });
 

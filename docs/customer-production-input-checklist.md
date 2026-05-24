@@ -2,6 +2,14 @@
 
 本文用于正式交付和上线前向客户确认资料。目标是保证系统可以真实采集数据，而不是依赖演示账号、示例数据、个人免费 token 或 mock 服务。
 
+客户可按 `docs/templates/customer-production-input.template.json` 填写结构化资料包，然后执行：
+
+```bash
+pnpm verify:customer-production-input -- <customer-production-input.json>
+```
+
+该命令只校验客户材料和证据完整性，不会联网、不读取 `.env`、不替代 `pnpm delivery:check:production`，也不替代真实 AI/语音调用验收或浏览器体感实机验真。
+
 ## 基础上线资料
 
 - 正式域名：Web 域名、API 域名和是否使用内网域名。
