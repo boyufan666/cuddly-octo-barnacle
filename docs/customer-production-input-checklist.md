@@ -2,7 +2,7 @@
 
 本文用于正式交付和上线前向客户确认资料。目标是保证系统可以真实采集数据，而不是依赖演示账号、示例数据、个人免费 token 或 mock 服务。
 
-如果需要先给客户发送短版资料索取口径，可直接使用 `docs/customer-final-input-request.md`。客户回复后，再整理为本文件对应的结构化资料包。
+如果需要先给客户发送短版资料索取口径，可直接使用 `docs/customer-final-input-request.md`。客户回复后，按 `docs/customer-input-to-launch-gate-runbook.md` 整理为本文件对应的结构化资料包并执行门禁。
 
 客户可按 `docs/templates/customer-production-input.template.json` 填写结构化资料包，然后执行：
 

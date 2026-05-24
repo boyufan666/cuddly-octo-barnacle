@@ -129,6 +129,7 @@ test("delivery document check requires formal acceptance runbook and production 
       "docs/formal-delivery-acceptance-runbook.md",
       "docs/customer-production-input-checklist.md",
       "docs/customer-final-input-request.md",
+      "docs/customer-input-to-launch-gate-runbook.md",
       "docs/templates/customer-production-input.template.json",
       "docs/ai-speech-provider-selection-free-first.md",
       "docs/browser-pose-field-acceptance-runbook.md",
@@ -137,6 +138,7 @@ test("delivery document check requires formal acceptance runbook and production 
       "docs/formal-delivery-acceptance-runbook.md",
       "docs/customer-production-input-checklist.md",
       "docs/customer-final-input-request.md",
+      "docs/customer-input-to-launch-gate-runbook.md",
       "docs/ai-speech-provider-selection-free-first.md",
       "docs/browser-pose-field-acceptance-runbook.md",
     ].join("\n"),
@@ -205,6 +207,31 @@ test("delivery document check rejects missing customer final input request", () 
   assert.match(
     result.failures.join("\n"),
     /customer-final-input-request/,
+  );
+});
+
+test("delivery document check rejects missing customer input launch gate runbook", () => {
+  const result = checkDeliveryDocumentReferences({
+    readme: [
+      "docs/formal-delivery-acceptance-runbook.md",
+      "docs/customer-production-input-checklist.md",
+      "docs/customer-final-input-request.md",
+      "docs/templates/customer-production-input.template.json",
+      "docs/ai-speech-provider-selection-free-first.md",
+      "docs/browser-pose-field-acceptance-runbook.md",
+    ].join("\n"),
+    deliveryBoundary: [
+      "docs/formal-delivery-acceptance-runbook.md",
+      "docs/customer-production-input-checklist.md",
+      "docs/customer-final-input-request.md",
+      "docs/ai-speech-provider-selection-free-first.md",
+      "docs/browser-pose-field-acceptance-runbook.md",
+    ].join("\n"),
+  });
+
+  assert.match(
+    result.failures.join("\n"),
+    /customer-input-to-launch-gate-runbook/,
   );
 });
 

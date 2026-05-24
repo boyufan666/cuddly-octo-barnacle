@@ -12,7 +12,7 @@
 
 ## 1. 客户资料包验收
 
-给客户发送资料索取时，可先使用 `docs/customer-final-input-request.md` 作为短版清单；客户回复后再整理为结构化资料包。
+给客户发送资料索取时，可先使用 `docs/customer-final-input-request.md` 作为短版清单；客户回复后按 `docs/customer-input-to-launch-gate-runbook.md` 整理为结构化资料包并执行上线门禁。
 
 客户先按模板填写资料包：
 
@@ -168,6 +168,7 @@ pnpm verify:contracts
 
 - 当前 monorepo 源码、迁移、脚本和文档。
 - 客户最终资料索取单 `docs/customer-final-input-request.md` 及客户回复记录。
+- 客户资料到上线门禁执行记录，对应 `docs/customer-input-to-launch-gate-runbook.md`。
 - 客户资料包 `customer-production-input.json` 及校验通过记录。
 - 生产配置门禁执行记录。
 - 空库真实闭环验收记录。

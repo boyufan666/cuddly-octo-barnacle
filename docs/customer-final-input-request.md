@@ -11,6 +11,8 @@ pnpm delivery:check:production
 
 以上命令只做资料和配置门禁校验，不能替代真实 AI/语音调用验收、浏览器体感实机验收、医师人工复核和最终客户验收。
 
+客户回复后的落地顺序、Go/No-Go 判断和验收证据整理见 `docs/customer-input-to-launch-gate-runbook.md`。
+
 ## 1. 基础上线资料
 
 - 公司或机构正式名称、项目验收负责人、目标试点或上线日期。
