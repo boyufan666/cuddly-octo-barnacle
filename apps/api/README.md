@@ -25,7 +25,7 @@ pnpm dev:api
 健康检查：
 
 ```bash
-curl http://localhost:4000/health
+curl http://localhost:4000/health/live
 ```
 
 ## 配置
@@ -33,7 +33,6 @@ curl http://localhost:4000/health
 API 从仓库根目录 `.env` 读取配置。`.env.example` 只提供字段结构，试点/生产环境必须独立配置：
 
 - `DATABASE_URL`
-- `REDIS_URL`
 - `JWT_SECRET`
 - `WEB_ORIGIN`
 - `PORT`
@@ -52,20 +51,22 @@ pnpm verify:contracts
 浏览器体感实机验收需要额外执行：
 
 ```bash
+BROWSER_POSE_PATIENT_ACCOUNT='<browser-patient-read-account>' \
+BROWSER_POSE_PATIENT_PASSWORD='<browser-patient-read-password>' \
+BROWSER_POSE_AUDIT_ACCOUNT='<browser-audit-read-account>' \
+BROWSER_POSE_AUDIT_PASSWORD='<browser-audit-read-password>' \
 pnpm verify:browser-pose-field-acceptance -- \
   <evidence-json-path> \
-  --api-base-url https://api.rehab.example.com \
-  --patient-token <training-record-read-token> \
-  --audit-token <audit-read-token>
+  --api-base-url https://api.rehab.example.com
 ```
 
-该命令只读调用训练记录和审计日志接口，缺 token、权限、真实训练记录或审计日志时必须失败；`pnpm verify:contracts` 不能替代摄像头实采验收。
+该命令通过两套独立 `CookieSessionClient` 会话只读调用训练记录和审计日志接口；四项账号密码必须在命令中显式提供。缺账号密码、权限、真实训练记录或审计日志时必须失败；`pnpm verify:contracts` 不能替代摄像头实采验收。
 
 ## 生产注意事项
 
 - 不得使用本地初始化账号和固定密码作为试点/生产账号。
 - 必须使用强随机 `JWT_SECRET`。
 - `WEB_ORIGIN` 必须限定为正式前端域名。
-- 数据库、Redis、日志、备份和 HTTPS 应由部署环境统一管理。
+- 数据库、日志、备份和 HTTPS 应由部署环境统一管理。
 - AI/语音服务、Unity 静态资源、对象存储等外部能力应通过后端受控接入，不直接暴露敏感密钥给前端。
 - 训练内容发布流程见 `../../docs/formal-training-content-runbook.md`。

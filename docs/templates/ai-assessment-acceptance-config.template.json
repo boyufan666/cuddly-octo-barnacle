@@ -1,0 +1,17 @@
+{
+  "templateNotice": "复制本文件后填写正式现场配置；本模板含占位符，不能直接作为验收配置执行。",
+  "apiBaseUrl": "<formal-https-api-base-url>",
+  "doctorAccount": "<doctor-account>",
+  "doctorPassword": "<doctor-password>",
+  "auditAccount": "<audit-read-account>",
+  "auditPassword": "<audit-read-password>",
+  "patientId": "<real-patient-id>",
+  "assessmentType": "MMSE/CDR",
+  "transcript": "<real-assessment-transcript-or-clinical-summary>",
+  "humanReview": {
+    "reviewerUserId": "<doctor-user-id-from-get-me>",
+    "reviewedAt": "<2026-06-30T10:00:00.000Z>",
+    "conclusion": "approved",
+    "notes": "<doctor-review-notes>"
+  }
+}

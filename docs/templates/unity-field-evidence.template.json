@@ -1,0 +1,220 @@
+{
+  "evidenceVersion": "unity-field-acceptance/v1",
+  "acceptance": {
+    "acceptedAt": "<2026-05-23T10:00:00.000Z>",
+    "testerName": "<现场验收员姓名>",
+    "siteName": "<试点或正式现场名称>",
+    "environment": "<trial-or-production>"
+  },
+  "browser": {
+    "name": "<Chrome/Edge/Safari>",
+    "version": "<浏览器版本>",
+    "userAgent": "<验收浏览器 navigator.userAgent>",
+    "pageUrl": "https://<正式 Web 域名>/training/unity"
+  },
+  "device": {
+    "deviceCode": "<现场设备编号>",
+    "deviceType": "<desktop-or-tablet-or-kiosk>",
+    "inputMode": "<keyboard-pointer-touch-or-sensor>",
+    "calibrationStatus": "<checked>",
+    "resolution": "<1920x1080>"
+  },
+  "unityRuntime": {
+    "runtimeType": "unity_webgl",
+    "manifestUrl": "https://<正式 Web 域名>/unity/<game-code>/<version>/manifest.json",
+    "buildBaseUrl": "https://<正式 Web 域名>/unity/<game-code>/<version>",
+    "gameVersion": "<1.0.0>",
+    "bridgeProtocolVersion": "1.0.0",
+    "loaderLoadedAt": "<2026-05-23T09:58:30.000Z>",
+    "unityInstanceStartedAt": "<2026-05-23T09:58:45.000Z>",
+    "canvasResolution": "<1280x720>",
+    "devicePixelRatio": 2
+  },
+  "patient": {
+    "patientId": "<真实或验收患者 ID>",
+    "patientExportId": "<脱敏患者导出 ID>"
+  },
+  "gameContent": {
+    "gameContentId": "<正式 Unity 训练内容 ID>",
+    "code": "<unity-rhythm-reach>",
+    "name": "<Unity 上肢节奏触达训练>",
+    "runtimeType": "unity_webgl",
+    "gameVersion": "<1.0.0>",
+    "bridgeProtocolVersion": "1.0.0",
+    "releaseChannel": "production",
+    "buildStatus": "released",
+    "manifestUrl": "https://<正式 Web 域名>/unity/<game-code>/<version>/manifest.json",
+    "buildBaseUrl": "https://<正式 Web 域名>/unity/<game-code>/<version>"
+  },
+  "rehabPlan": {
+    "rehabPlanId": "<当前生效康复计划 ID>",
+    "planItemId": "<当前 Unity 训练项目 ID>",
+    "durationMinutes": "<医生已批准的单次处方分钟数>",
+    "confirmedByDoctorId": "<确认方案的医师 ID>",
+    "confirmedAt": "<2026-05-22T08:00:00.000Z>"
+  },
+  "trainingSession": {
+    "sessionId": "<训练 session ID>",
+    "collectionBatchId": "<开始训练响应绑定的采集批次 ID>",
+    "gameRunId": "<本次 Unity 训练 gameRunId>",
+    "deviceCode": "<现场设备编号>",
+    "sessionStatus": "completed",
+    "syncStatus": "synced",
+    "calibrationStatus": "<checked>",
+    "clientStartedAt": "<2026-05-23T09:59:00.000Z>",
+    "clientEndedAt": "<2026-05-23T10:02:00.000Z>",
+    "runtimeConfigSnapshot": {
+      "runtimeType": "unity_webgl",
+      "manifestUrl": "https://<正式 Web 域名>/unity/<game-code>/<version>/manifest.json",
+      "buildBaseUrl": "https://<正式 Web 域名>/unity/<game-code>/<version>",
+      "gameVersion": "<1.0.0>",
+      "bridgeProtocolVersion": "1.0.0",
+      "resultContractVersion": "rehab-unity-result-v2",
+      "collectionBatchId": "<开始训练响应绑定的采集批次 ID>",
+      "durationSeconds": "<durationMinutes 乘以 60>",
+      "releaseChannel": "production"
+    }
+  },
+  "bridgeEvent": {
+    "type": "training_result",
+    "action": "training_result",
+    "protocolVersion": "1.0.0",
+    "resultContractVersion": "rehab-unity-result-v2",
+    "sessionId": "<训练 session ID>",
+    "collectionBatchId": "<开始训练响应绑定的采集批次 ID>",
+    "gameRunId": "<本次 Unity 训练 gameRunId>",
+    "gameVersion": "<1.0.0>",
+    "clientGeneratedAt": "<2026-05-23T10:02:02.000Z>",
+    "rawPayloadHash": "sha256:<unity-bridge-payload-hash>",
+    "durationSeconds": "<durationMinutes 乘以 60>",
+    "metricsSummary": {
+      "source": "unity_webgl",
+      "resultContractVersion": "rehab-unity-result-v2",
+      "collectionBatchId": "<开始训练响应绑定的采集批次 ID>",
+      "gameRunId": "<本次 Unity 训练 gameRunId>",
+      "gameVersion": "<1.0.0>",
+      "protocolVersion": "1.0.0",
+      "clientGeneratedAt": "<2026-05-23T10:02:02.000Z>",
+      "rawPayloadHash": "sha256:<unity-bridge-payload-hash>",
+      "dynamicDifficultyEvidence": {
+        "schemaVersion": "1.0.0",
+        "events": [
+          {
+            "startingLevel": "<1-3 医师批准的起始难度>",
+            "startingLevelSource": "clinician_approved_plan",
+            "approvedPlanItemId": "<当前 Unity 训练项目 ID>",
+            "assessmentSourceId": "<起始难度依据的评估 ID>",
+            "triggerReason": "prior_assessment",
+            "before": {
+              "speed": "<调整前真实速度>",
+              "complexityLevel": "<1-3 调整前真实复杂度>"
+            },
+            "after": {
+              "speed": "<调整后真实速度>",
+              "complexityLevel": "<1-3 调整后真实复杂度>"
+            },
+            "adjustedAt": "<2026-05-23T10:02:02.000Z>",
+            "runtimeFrameId": "<gameRunId:frame:真实帧编号>",
+            "runtimeWindowId": "<gameRunId:runtime-window:真实窗口编号>",
+            "safetyClampReason": "<难度未变化时的真实安全钳制原因>"
+          }
+        ]
+      }
+    }
+  },
+  "trainingResult": {
+    "resultId": "<训练结果 ID>",
+    "collectionBatchId": "<开始训练响应绑定的采集批次 ID>",
+    "source": "unity_webgl",
+    "gameRunId": "<本次 Unity 训练 gameRunId>",
+    "gameVersion": "<1.0.0>",
+    "bridgeProtocolVersion": "1.0.0",
+    "clientGeneratedAt": "<2026-05-23T10:02:02.000Z>",
+    "rawPayloadHash": "sha256:<unity-bridge-payload-hash>",
+    "submittedAt": "<2026-05-23T10:02:08.000Z>",
+    "qualityFlag": "valid",
+    "abnormalFlag": false,
+    "score": "<0-100 真实分数>",
+    "completionRate": "<0-1 真实完成率>",
+    "durationSeconds": "<真实训练时长秒数>",
+    "reactionTimeMs": "<真实反应时间毫秒>",
+    "motionAccuracy": "<0-1 真实动作准确率>",
+    "exerciseIntensity": "<moderate>"
+  },
+  "motionMetrics": [
+    {
+      "metricType": "reaction_time_ms",
+      "metricValue": "<与 trainingResult.reactionTimeMs 一致的真实值>",
+      "unit": "ms",
+      "confidence": "<0-1 真实置信度>",
+      "sampleCount": "<真实采样数>",
+      "qualityFlag": "valid",
+      "windowStartedAt": "<2026-05-23T09:59:00.000Z>",
+      "windowEndedAt": "<2026-05-23T10:02:00.000Z>"
+    },
+    {
+      "metricType": "target_hit_rate",
+      "metricValue": "<与 trainingResult.completionRate 一致的真实值>",
+      "unit": "ratio",
+      "confidence": "<0-1 真实置信度>",
+      "sampleCount": "<真实采样数>",
+      "qualityFlag": "valid",
+      "windowStartedAt": "<2026-05-23T09:59:00.000Z>",
+      "windowEndedAt": "<2026-05-23T10:02:00.000Z>"
+    },
+    {
+      "metricType": "arm_raise_accuracy",
+      "metricValue": "<与 trainingResult.motionAccuracy 一致的真实值>",
+      "unit": "ratio",
+      "confidence": "<0-1 真实置信度>",
+      "sampleCount": "<真实采样数>",
+      "qualityFlag": "valid",
+      "windowStartedAt": "<2026-05-23T09:59:00.000Z>",
+      "windowEndedAt": "<2026-05-23T10:02:00.000Z>"
+    },
+    {
+      "metricType": "duration_seconds",
+      "metricValue": "<与处方分钟乘以 60 一致的真实值>",
+      "unit": "seconds",
+      "confidence": "<0-1 真实置信度>",
+      "sampleCount": "<真实采样数>",
+      "qualityFlag": "valid",
+      "windowStartedAt": "<2026-05-23T09:59:00.000Z>",
+      "windowEndedAt": "<2026-05-23T10:02:00.000Z>"
+    },
+    {
+      "metricType": "difficulty_level",
+      "metricValue": "<与最终动态难度 after.complexityLevel 一致的真实值>",
+      "unit": "level",
+      "confidence": "<0-1 真实置信度>",
+      "sampleCount": "<真实采样数>",
+      "qualityFlag": "valid",
+      "windowStartedAt": "<2026-05-23T09:59:00.000Z>",
+      "windowEndedAt": "<2026-05-23T10:02:00.000Z>"
+    }
+  ],
+  "auditEvidence": {
+    "auditLogIds": [
+      "<training_session.start 对应 API 审计日志 ID>",
+      "<training_result.submit 对应 API 审计日志 ID>"
+    ],
+    "requiredActions": ["training_session.start", "training_result.submit"],
+    "checkedAt": "<2026-05-23T10:05:00.000Z>"
+  },
+  "artifacts": {
+    "screenshots": [
+      {
+        "label": "<Unity 训练完成页>",
+        "path": "evidence/unity/session-id-complete.png",
+        "capturedAt": "<2026-05-23T10:03:00.000Z>"
+      }
+    ],
+    "recordings": [
+      {
+        "label": "<Unity 训练过程录屏>",
+        "path": "evidence/unity/session-id-recording.mp4",
+        "capturedAt": "<2026-05-23T10:03:30.000Z>"
+      }
+    ]
+  }
+}

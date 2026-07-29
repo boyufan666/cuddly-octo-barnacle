@@ -14,22 +14,19 @@ export const requiredLocalContractChecks = [
   "data_export_audit_log_persisted",
   "doctor_export_role_denied",
   "auditor_export_role_denied",
+  "caregiver_login_verified",
+  "caregiver_summary_desensitized",
+  "caregiver_summary_view_audit_log_persisted",
+  "caregiver_full_training_records_denied",
+  "caregiver_full_record_denied_audit_log_persisted",
+  "caregiver_sharing_consent_revoked",
+  "revoked_caregiver_sharing_blocks_summary",
+  "revoked_caregiver_summary_denied_audit_log_persisted",
+  "caregiver_sharing_revoke_audit_log_persisted",
 ];
 
 export function verifyCompletedContractChecks(completedChecks) {
   return requiredLocalContractChecks.filter(
     (checkName) => !completedChecks.has(checkName),
   );
-}
-
-export function buildConsentRestoreWhere(consentIds, revokedAtByConsentId) {
-  return {
-    OR: Array.from(new Set(consentIds))
-      .filter(Boolean)
-      .map((id) => ({
-        id,
-        status: "revoked",
-        revokedAt: revokedAtByConsentId[id],
-      })),
-  };
 }

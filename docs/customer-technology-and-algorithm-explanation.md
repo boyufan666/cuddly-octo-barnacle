@@ -5,7 +5,7 @@
 本项目建议采用 `Web 平台 + AI 服务 + Unity/体感训练模块 + 数据后台` 的架构。
 
 - 前端：`Next.js / React / TypeScript / Ant Design`
-- 后端：`NestJS / Prisma / PostgreSQL / Redis`
+- 后端：`NestJS / Prisma / PostgreSQL`
 - AI 服务：`Python / FastAPI`
 - 体感训练：`Unity WebGL` 或浏览器训练壳
 - 数据存储：`PostgreSQL + 对象存储`
@@ -160,14 +160,13 @@ AI 评估由三部分组成：
 
 采集链路：
 
-`患者端/Unity 游戏 -> 前端采集 SDK -> 后端采集接口 -> 队列/缓存 -> PostgreSQL 入库 -> 统计分析/推荐算法`
+`患者端/Unity 游戏 -> 前端采集 SDK -> 后端采集接口 -> PostgreSQL 入库 -> 统计分析/推荐算法`
 
 推荐技术：
 
 - 前端采集：`TypeScript SDK`，统一封装埋点、训练事件、异常事件。
 - 游戏数据回传：`Unity WebGL SendMessage / JavaScript Bridge / HTTP API`。
 - 后端接收：`NestJS API`，接收训练过程、训练结果、设备状态和异常事件。
-- 缓冲与补偿：`Redis + BullMQ`，用于失败重试、离线补偿、异步入库。
 - 主数据存储：`PostgreSQL`，存患者、评估、计划、训练记录、动作指标、审计日志。
 - 半结构化指标：`PostgreSQL JSONB`，存每次训练的动作指标摘要、AI 输出摘要、设备摘要。
 - 文件存储：`MinIO/S3`，如需保存报告、关键帧、导出文件，可走对象存储。

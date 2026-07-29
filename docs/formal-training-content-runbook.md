@@ -39,7 +39,7 @@
 
 发布结果：
 
-- `runtimeType=browser_pose_game`
+- `runtimeType=browser_pose_canvas`
 - `buildStatus=released`
 - `releaseChannel=production`
 - `bridgeProtocolVersion=1.0.0`
@@ -119,14 +119,16 @@ bridgeProtocolVersion=1.0.0
 
 ```bash
 pnpm verify:browser-pose-evidence -- <evidence-json-path>
+BROWSER_POSE_PATIENT_ACCOUNT='<browser-patient-read-account>' \
+BROWSER_POSE_PATIENT_PASSWORD='<browser-patient-read-password>' \
+BROWSER_POSE_AUDIT_ACCOUNT='<browser-audit-read-account>' \
+BROWSER_POSE_AUDIT_PASSWORD='<browser-audit-read-password>' \
 pnpm verify:browser-pose-field-acceptance -- \
   <evidence-json-path> \
-  --api-base-url https://api.rehab.example.com \
-  --patient-token <training-record-read-token> \
-  --audit-token <audit-read-token>
+  --api-base-url https://api.rehab.example.com
 ```
 
-只读实机验真必须能从 API 反查到训练 session、训练结果、四项动作指标和两类审计日志，并确认本地截图/录屏文件存在且非空。该步骤不会补造数据；缺 token、缺 API、缺附件、缺训练记录或缺审计日志时不得把训练内容标记为已完成客户验收。
+只读实机验真必须用显式提供的患者读取账号/密码与审计读取账号/密码建立两套独立 Cookie 会话，从 API 反查训练 session、训练结果、四项动作指标和两类审计日志，并确认本地截图/录屏文件存在且非空。该步骤不会补造数据；缺任一账号密码、缺 API、缺附件、缺训练记录或缺审计日志时不得把训练内容标记为已完成客户验收。
 
 ## 禁止事项
 

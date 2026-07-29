@@ -1,10 +1,51 @@
 @import "tailwindcss";
 
 :root {
-  --background: #eef7f7;
-  --foreground: #16333d;
+  --surface-page: rgb(246 248 247);
+  --surface-paper: rgb(255 255 255);
+  --surface-muted: rgb(238 244 242);
+  --surface-caution: rgb(255 248 236);
+  --surface-info: rgb(238 245 255);
+  --surface-inverse-muted: rgba(255, 255, 255, 0.1);
+  --surface-app: var(--surface-page);
+  --surface-panel: var(--surface-paper);
+  --color-surface: var(--surface-page);
+  --ink-strong: rgb(23 35 34);
+  --ink-soft: rgb(82 98 95);
+  --ink-subtle: rgb(123 136 132);
+  --ink-inverse: rgb(255 255 255);
+  --ink-inverse-soft: rgba(255, 255, 255, 0.74);
+  --ink-inverse-muted: rgba(255, 255, 255, 0.62);
+  --color-ink: var(--ink-strong);
+  --accent-strong: rgb(23 107 98);
+  --accent-stronger: rgb(15 79 73);
+  --accent-soft: rgb(220 239 235);
+  --accent-soft-strong: rgb(99 191 208);
+  --color-accent: var(--accent-strong);
+  --warning-strong: rgb(139 90 24);
+  --warning-soft: rgb(246 234 215);
+  --warning-line: rgb(221 189 131);
+  --danger-strong: rgb(143 48 48);
+  --danger-soft: rgb(244 221 221);
+  --danger-line: rgb(223 170 170);
+  --success-strong: rgb(25 114 91);
+  --success-soft: rgb(223 240 235);
+  --success-line: rgb(166 210 197);
+  --warning: var(--warning-strong);
+  --danger: rgb(170 62 62);
+  --success: var(--success-strong);
+  --line-subtle: rgb(220 229 226);
+  --line-strong: rgb(196 209 205);
+  --line-info: rgb(191 216 255);
+  --line-inverse: rgba(255, 255, 255, 0.22);
+  --radius-card: 8px;
+  --radius-control: 8px;
+  --shadow-panel: 0 8px 24px rgba(23, 35, 34, 0.07);
+  --bottom-nav-height: 76px;
+  --background: var(--surface-page);
+  --foreground: var(--ink-strong);
   --font-sans-cn: "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
-  --font-number: "DIN Alternate", "IBM Plex Sans", "SF Mono", monospace;
+  --font-number: "IBM Plex Sans", "SF Mono", monospace;
 }
 
 @theme inline {
@@ -15,8 +56,8 @@
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
+  background: var(--surface-page);
+  color: var(--ink-strong);
   font-family: var(--font-sans-cn), "Noto Sans SC", sans-serif;
 }
 
@@ -26,6 +67,7 @@ button {
 
 * {
   box-sizing: border-box;
+  letter-spacing: 0;
 }
 
 ::selection {

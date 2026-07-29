@@ -1,0 +1,117 @@
+{
+  "version": 1,
+  "migrations": [
+    {
+      "name": "20260513145601_init",
+      "sha256": "fa4dd87002fbcf67881b5f46d7870fe63b4dae52da71a6ce1927e60e6e34c3d1"
+    },
+    {
+      "name": "20260514032500_assessment_source_default",
+      "sha256": "a7735cfd90be806d32098af503ca1abea837c6b68b471cb7554014894041648c"
+    },
+    {
+      "name": "20260515135000_admin_role_levels",
+      "sha256": "e7d7d048e9a62a5a0e410c67f9bbeee82db5024b3c3b2228c4ede367d2e7b1d3"
+    },
+    {
+      "name": "20260520062000_unity_training_assets",
+      "sha256": "24d890aecffd285f1f9e13763328cd7697f9764ce45d5417e0547286a5d3e39a"
+    },
+    {
+      "name": "20260522052928_init",
+      "sha256": "186560750b0af076a0b9a84e47f117a67cd4a8981e98a71741b9b7ed699edc30"
+    },
+    {
+      "name": "20260523093000_training_result_review_fields",
+      "sha256": "753bf74a458adfaaf40b0df5a7256ef35e72e7a528821a9d5b7f23e1087b2a7c"
+    },
+    {
+      "name": "20260526095500_assessment_source_default_clinician_input",
+      "sha256": "b8eac6e14286bcd5544619cda90c290c2e16690dc9c5db2946b91b50542138a0"
+    },
+    {
+      "name": "20260531193000_collection_conditions",
+      "sha256": "67839110984b5c091f006e7d019f7546c47c617e91902c39acd9cb07eca65328"
+    },
+    {
+      "name": "20260603090000_registration_requests",
+      "sha256": "eb1371c56d346c5cdac90a8ed09307a2f23cefa7e7908382f4bb6ea07c77f925"
+    },
+    {
+      "name": "20260603110000_ai_conversations",
+      "sha256": "69889432f003a39638f42c14a1c44cbe2182c76c064c7b210860056753e7576e"
+    },
+    {
+      "name": "20260603123000_care_circle_precautions",
+      "sha256": "d4bb376a770d52c99acfee1ca0c4c7fb6d2488e6440e3e242217c2795ac34640"
+    },
+    {
+      "name": "20260603130000_rewards_achievements",
+      "sha256": "273e251b7f2caa177d6ebad1a3a7e0ab4bf24c3bee66a72b96849573eeac8700"
+    },
+    {
+      "name": "20260606120000_ai_conversation_review_turns",
+      "sha256": "3caf5232b01c44479c361867024fa0a0a4bfda37b5347da6bf4c49e200dcc5f4"
+    },
+    {
+      "name": "20260606133000_formal_game_runtime_taxonomy",
+      "sha256": "cf7d411d54c81f7248138f9073f6a7c745126b5e53bfcd40bd9d4c768c0a16b0"
+    },
+    {
+      "name": "20260713090000_credential_security",
+      "sha256": "fddccdb9c16ca8823eafabb8cca36676e62b948cd19b499ea837faf92fa4c6e6"
+    },
+    {
+      "name": "20260713100000_registration_credential_expiry",
+      "sha256": "581faec0327c5a0b6276c32be5789465307e9ede5a3818ca79fa2ed312e60ed4"
+    },
+    {
+      "name": "20260713120000_task4_authorization_integrity",
+      "sha256": "c0770f548c29dbe6e8a05db8538788dc95034d3db7c0130813d71eb3fae82ec7"
+    },
+    {
+      "name": "20260713124000_task4_authorization_followup",
+      "sha256": "99c69c93ebd4e3e6f7997dc65cbcd6cdbb6ec225076ad16a09cf310e0b27f03b"
+    },
+    {
+      "name": "20260713125000_task7_training_session_lifecycle",
+      "sha256": "c298fba50fc7cb689abee5e96208cc345cf55b1d8bdc861e4e99c02ab8dae786"
+    },
+    {
+      "name": "20260714090000_sensitive_encryption_envelopes",
+      "sha256": "aa539bd456ee8a73bc961be6bae6956ce5b26d7ff936470c9954cf59f014114e"
+    },
+    {
+      "name": "20260714100000_ai_conversation_turn_count_rollout",
+      "sha256": "e96acdc457784c92e6e1469db94a13735d0c5709abbc8bd030cc5d48e7ca086a"
+    },
+    {
+      "name": "20260714170000_sensitive_encryption_finalize",
+      "sha256": "ed3d5a2f754b37ec047091919498bbb433515815e6d637827c6402a1eb0dee3b"
+    },
+    {
+      "name": "20260721160000_provider_call_telemetry",
+      "sha256": "1787d8a7d699e18fa3fe5aa0b4a60e62a50e28ceb0479426459a0c4be78a33f5"
+    },
+    {
+      "name": "20260722090000_provider_telemetry_retention_runs",
+      "sha256": "0770628754b6102712a098d03f87371777a26439f0ba28b5c0c2e149933e6e25"
+    },
+    {
+      "name": "20260722100000_provider_telemetry_retention_retry_control",
+      "sha256": "091407f078d0151b0fdb669cc750013790bd7364a38a7b8064796aaf1bf6af7f"
+    },
+    {
+      "name": "20260722110000_provider_operation_outbox",
+      "sha256": "0220448efba36fcdc7c6a5180d0f0543ed1dc233919cb50da051e7cf0d4e2cb3"
+    },
+    {
+      "name": "20260722120000_provider_operation_intent_guard",
+      "sha256": "b926b97dc029fd5de00bd2efa0ccf0690897536b6d8bbd9896764dac86b21182"
+    },
+    {
+      "name": "20260723100000_provider_operation_state_constraints",
+      "sha256": "c30e8c153fe436c4d45cbe2c5f1627d355f5b6413ca78683fb3e6e706c09e14a"
+    }
+  ]
+}

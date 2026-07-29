@@ -1,0 +1,425 @@
+{
+  "evidenceVersion": "multi-condition-data-capture/v1",
+  "acceptance": {
+    "acceptedAt": "2026-06-01T10:00:00.000Z",
+    "testerName": "现场验收员姓名",
+    "siteName": "试点现场名称",
+    "environment": "trial"
+  },
+  "patient": {
+    "patientId": "真实或验收患者 ID",
+    "patientExportId": "脱敏患者导出 ID"
+  },
+  "expectedMetricTypes": [
+    "trajectory_summary",
+    "reaction_time_ms",
+    "target_hit_rate",
+    "pose_visibility_avg",
+    "arm_raise_accuracy",
+    "motion_intensity",
+    "duration_seconds"
+  ],
+  "physiologicalMetricsStatus": "customer-gated",
+  "conditions": [
+    {
+      "label": "标准诊室光照站姿",
+      "collectionCondition": {
+        "conditionId": "采集条件 ID",
+        "code": "clinic_light_standing_a",
+        "name": "诊室标准光照站姿采集",
+        "environment": {
+          "lighting": "standard_clinic",
+          "posture": "standing",
+          "distanceMeters": 1.5
+        },
+        "deviceRequirements": {
+          "camera": "front_rgb",
+          "minResolution": "720p"
+        },
+        "taskParameters": {
+          "bodyScope": "upper_body",
+          "expectedDurationSeconds": 180
+        },
+        "qualityRules": {
+          "minPoseVisibility": 0.8
+        }
+      },
+      "collectionProtocol": {
+        "protocolId": "采集协议 ID",
+        "code": "pose_reach_protocol_a",
+        "version": "1.0.0",
+        "runtimeType": "browser_pose_canvas",
+        "requiredInputModes": ["camera_pose"],
+        "requiredMetrics": [
+          { "metricType": "trajectory_summary", "unit": "summary" },
+          { "metricType": "reaction_time_ms", "unit": "ms" },
+          { "metricType": "target_hit_rate", "unit": "ratio" },
+          { "metricType": "pose_visibility_avg", "unit": "ratio" },
+          { "metricType": "arm_raise_accuracy", "unit": "ratio" },
+          { "metricType": "motion_intensity", "unit": "level" },
+          { "metricType": "duration_seconds", "unit": "s" }
+        ],
+        "samplingConfig": {
+          "sampleRateHz": 30,
+          "windowSeconds": 180
+        },
+        "qualityGate": {
+          "minPoseVisibility": 0.8
+        }
+      },
+      "collectionBatch": {
+        "batchId": "采集批次 ID",
+        "status": "ready",
+        "protocolVersion": "1.0.0"
+      },
+      "gameContent": {
+        "gameContentId": "正式训练内容 ID",
+        "runtimeType": "browser_pose_canvas",
+        "gameVersion": "1.0.0",
+        "bridgeProtocolVersion": "1.0.0",
+        "buildStatus": "released",
+        "releaseChannel": "production"
+      },
+      "rehabPlan": {
+        "rehabPlanId": "当前生效康复计划 ID",
+        "planItemId": "当前训练项目 ID"
+      },
+      "trainingSession": {
+        "sessionId": "训练 session ID",
+        "gameRunId": "本次训练 gameRunId",
+        "deviceCode": "trial-room-a-camera-01",
+        "sessionStatus": "completed",
+        "syncStatus": "synced",
+        "calibrationStatus": "checked",
+        "clientStartedAt": "2026-06-01T09:00:00.000Z",
+        "clientEndedAt": "2026-06-01T09:03:00.000Z"
+      },
+      "trainingResult": {
+        "resultId": "训练结果 ID",
+        "source": "browser_pose_canvas",
+        "qualityFlag": "valid",
+        "abnormalFlag": false,
+        "score": 88,
+        "completionRate": 0.9,
+        "durationSeconds": 180,
+        "reactionTimeMs": 760,
+        "motionAccuracy": 0.84,
+        "exerciseIntensity": "moderate",
+        "rawPayloadHash": "sha256:<training-payload-hash>",
+        "metricsSummary": {
+          "trajectorySummary": {
+            "pathLengthMeters": "<trajectory-path-length>",
+            "dominantPlane": "<motion-plane>",
+            "sampleCount": "<trajectory-sample-count>"
+          },
+          "dynamicDifficultyEvidence": {
+            "events": [
+              {
+                "triggerReason": "<dynamic-difficulty-trigger>",
+                "safetyClampReason": "<safety-clamp-reason>"
+              }
+            ]
+          },
+          "physiologicalMetricsStatus": "customer-gated"
+        }
+      },
+      "motionMetrics": [
+        {
+          "metricType": "trajectory_summary",
+          "metricValue": 4.2,
+          "unit": "summary",
+          "gameRunId": "本次训练 gameRunId",
+          "source": "browser_pose_canvas",
+          "confidence": 0.9,
+          "sampleCount": 120,
+          "qualityFlag": "valid",
+          "windowStartedAt": "2026-06-01T09:00:00.000Z",
+          "windowEndedAt": "2026-06-01T09:03:00.000Z"
+        },
+        {
+          "metricType": "reaction_time_ms",
+          "metricValue": 760,
+          "unit": "ms",
+          "gameRunId": "本次训练 gameRunId",
+          "source": "browser_pose_canvas",
+          "confidence": 0.9,
+          "sampleCount": 120,
+          "qualityFlag": "valid",
+          "windowStartedAt": "2026-06-01T09:00:00.000Z",
+          "windowEndedAt": "2026-06-01T09:03:00.000Z"
+        },
+        {
+          "metricType": "target_hit_rate",
+          "metricValue": 0.82,
+          "unit": "ratio",
+          "gameRunId": "本次训练 gameRunId",
+          "source": "browser_pose_canvas",
+          "confidence": 0.9,
+          "sampleCount": 120,
+          "qualityFlag": "valid",
+          "windowStartedAt": "2026-06-01T09:00:00.000Z",
+          "windowEndedAt": "2026-06-01T09:03:00.000Z"
+        },
+        {
+          "metricType": "pose_visibility_avg",
+          "metricValue": 0.88,
+          "unit": "ratio",
+          "gameRunId": "本次训练 gameRunId",
+          "source": "browser_pose_canvas",
+          "confidence": 0.92,
+          "sampleCount": 120,
+          "qualityFlag": "valid",
+          "windowStartedAt": "2026-06-01T09:00:00.000Z",
+          "windowEndedAt": "2026-06-01T09:03:00.000Z"
+        },
+        {
+          "metricType": "arm_raise_accuracy",
+          "metricValue": 0.84,
+          "unit": "ratio",
+          "gameRunId": "本次训练 gameRunId",
+          "source": "browser_pose_canvas",
+          "confidence": 0.9,
+          "sampleCount": 120,
+          "qualityFlag": "valid",
+          "windowStartedAt": "2026-06-01T09:00:00.000Z",
+          "windowEndedAt": "2026-06-01T09:03:00.000Z"
+        },
+        {
+          "metricType": "motion_intensity",
+          "metricValue": 2,
+          "unit": "level",
+          "gameRunId": "本次训练 gameRunId",
+          "source": "browser_pose_canvas",
+          "confidence": 0.9,
+          "sampleCount": 120,
+          "qualityFlag": "valid",
+          "windowStartedAt": "2026-06-01T09:00:00.000Z",
+          "windowEndedAt": "2026-06-01T09:03:00.000Z"
+        },
+        {
+          "metricType": "duration_seconds",
+          "metricValue": 180,
+          "unit": "s",
+          "gameRunId": "本次训练 gameRunId",
+          "source": "browser_pose_canvas",
+          "confidence": 0.9,
+          "sampleCount": 120,
+          "qualityFlag": "valid",
+          "windowStartedAt": "2026-06-01T09:00:00.000Z",
+          "windowEndedAt": "2026-06-01T09:03:00.000Z"
+        }
+      ],
+      "auditEvidence": {
+        "auditLogIds": [
+          "training_session.start 对应审计日志 ID",
+          "training_result.submit 对应审计日志 ID"
+        ],
+        "requiredActions": [
+          "training_session.start",
+          "training_result.submit"
+        ],
+        "checkedAt": "2026-06-01T09:05:00.000Z"
+      }
+    },
+    {
+      "label": "低光照站姿",
+      "collectionCondition": {
+        "conditionId": "另一组采集条件 ID",
+        "code": "clinic_low_light_standing_b",
+        "name": "诊室低光照站姿采集",
+        "environment": {
+          "lighting": "low_light",
+          "posture": "standing",
+          "distanceMeters": 1.8
+        },
+        "deviceRequirements": {
+          "camera": "front_rgb",
+          "minResolution": "720p"
+        },
+        "taskParameters": {
+          "bodyScope": "upper_body",
+          "expectedDurationSeconds": 180
+        },
+        "qualityRules": {
+          "minPoseVisibility": 0.8
+        }
+      },
+      "collectionProtocol": {
+        "protocolId": "另一组采集协议 ID",
+        "code": "pose_reach_protocol_b",
+        "version": "1.0.0",
+        "runtimeType": "browser_pose_canvas",
+        "requiredInputModes": ["camera_pose"],
+        "requiredMetrics": [
+          { "metricType": "trajectory_summary", "unit": "summary" },
+          { "metricType": "reaction_time_ms", "unit": "ms" },
+          { "metricType": "target_hit_rate", "unit": "ratio" },
+          { "metricType": "pose_visibility_avg", "unit": "ratio" },
+          { "metricType": "arm_raise_accuracy", "unit": "ratio" },
+          { "metricType": "motion_intensity", "unit": "level" },
+          { "metricType": "duration_seconds", "unit": "s" }
+        ],
+        "samplingConfig": {
+          "sampleRateHz": 30,
+          "windowSeconds": 180
+        },
+        "qualityGate": {
+          "minPoseVisibility": 0.8
+        }
+      },
+      "collectionBatch": {
+        "batchId": "另一组采集批次 ID",
+        "status": "ready",
+        "protocolVersion": "1.0.0"
+      },
+      "gameContent": {
+        "gameContentId": "同一正式训练内容 ID",
+        "runtimeType": "browser_pose_canvas",
+        "gameVersion": "1.0.0",
+        "bridgeProtocolVersion": "1.0.0",
+        "buildStatus": "released",
+        "releaseChannel": "production"
+      },
+      "rehabPlan": {
+        "rehabPlanId": "当前生效康复计划 ID",
+        "planItemId": "当前训练项目 ID"
+      },
+      "trainingSession": {
+        "sessionId": "另一组训练 session ID",
+        "gameRunId": "另一组训练 gameRunId",
+        "deviceCode": "trial-room-a-camera-01",
+        "sessionStatus": "completed",
+        "syncStatus": "synced",
+        "calibrationStatus": "checked",
+        "clientStartedAt": "2026-06-01T10:00:00.000Z",
+        "clientEndedAt": "2026-06-01T10:03:00.000Z"
+      },
+      "trainingResult": {
+        "resultId": "另一组训练结果 ID",
+        "source": "browser_pose_canvas",
+        "qualityFlag": "valid",
+        "abnormalFlag": false,
+        "score": 84,
+        "completionRate": 0.86,
+        "durationSeconds": 180,
+        "reactionTimeMs": 820,
+        "motionAccuracy": 0.8,
+        "exerciseIntensity": "moderate",
+        "rawPayloadHash": "sha256:<training-payload-hash>",
+        "metricsSummary": {
+          "trajectorySummary": {
+            "pathLengthMeters": "<trajectory-path-length>",
+            "dominantPlane": "<motion-plane>",
+            "sampleCount": "<trajectory-sample-count>"
+          },
+          "dynamicDifficultyEvidence": {
+            "events": [
+              {
+                "triggerReason": "<dynamic-difficulty-trigger>",
+                "safetyClampReason": "<safety-clamp-reason>"
+              }
+            ]
+          },
+          "physiologicalMetricsStatus": "customer-gated"
+        }
+      },
+      "motionMetrics": [
+        {
+          "metricType": "trajectory_summary",
+          "metricValue": 4.0,
+          "unit": "summary",
+          "gameRunId": "另一组训练 gameRunId",
+          "source": "browser_pose_canvas",
+          "confidence": 0.86,
+          "sampleCount": 120,
+          "qualityFlag": "valid",
+          "windowStartedAt": "2026-06-01T10:00:00.000Z",
+          "windowEndedAt": "2026-06-01T10:03:00.000Z"
+        },
+        {
+          "metricType": "reaction_time_ms",
+          "metricValue": 820,
+          "unit": "ms",
+          "gameRunId": "另一组训练 gameRunId",
+          "source": "browser_pose_canvas",
+          "confidence": 0.86,
+          "sampleCount": 120,
+          "qualityFlag": "valid",
+          "windowStartedAt": "2026-06-01T10:00:00.000Z",
+          "windowEndedAt": "2026-06-01T10:03:00.000Z"
+        },
+        {
+          "metricType": "target_hit_rate",
+          "metricValue": 0.78,
+          "unit": "ratio",
+          "gameRunId": "另一组训练 gameRunId",
+          "source": "browser_pose_canvas",
+          "confidence": 0.86,
+          "sampleCount": 120,
+          "qualityFlag": "valid",
+          "windowStartedAt": "2026-06-01T10:00:00.000Z",
+          "windowEndedAt": "2026-06-01T10:03:00.000Z"
+        },
+        {
+          "metricType": "pose_visibility_avg",
+          "metricValue": 0.82,
+          "unit": "ratio",
+          "gameRunId": "另一组训练 gameRunId",
+          "source": "browser_pose_canvas",
+          "confidence": 0.86,
+          "sampleCount": 120,
+          "qualityFlag": "valid",
+          "windowStartedAt": "2026-06-01T10:00:00.000Z",
+          "windowEndedAt": "2026-06-01T10:03:00.000Z"
+        },
+        {
+          "metricType": "arm_raise_accuracy",
+          "metricValue": 0.8,
+          "unit": "ratio",
+          "gameRunId": "另一组训练 gameRunId",
+          "source": "browser_pose_canvas",
+          "confidence": 0.86,
+          "sampleCount": 120,
+          "qualityFlag": "valid",
+          "windowStartedAt": "2026-06-01T10:00:00.000Z",
+          "windowEndedAt": "2026-06-01T10:03:00.000Z"
+        },
+        {
+          "metricType": "motion_intensity",
+          "metricValue": 2,
+          "unit": "level",
+          "gameRunId": "另一组训练 gameRunId",
+          "source": "browser_pose_canvas",
+          "confidence": 0.86,
+          "sampleCount": 120,
+          "qualityFlag": "valid",
+          "windowStartedAt": "2026-06-01T10:00:00.000Z",
+          "windowEndedAt": "2026-06-01T10:03:00.000Z"
+        },
+        {
+          "metricType": "duration_seconds",
+          "metricValue": 180,
+          "unit": "s",
+          "gameRunId": "另一组训练 gameRunId",
+          "source": "browser_pose_canvas",
+          "confidence": 0.86,
+          "sampleCount": 120,
+          "qualityFlag": "valid",
+          "windowStartedAt": "2026-06-01T10:00:00.000Z",
+          "windowEndedAt": "2026-06-01T10:03:00.000Z"
+        }
+      ],
+      "auditEvidence": {
+        "auditLogIds": [
+          "另一组 training_session.start 审计日志 ID",
+          "另一组 training_result.submit 审计日志 ID"
+        ],
+        "requiredActions": [
+          "training_session.start",
+          "training_result.submit"
+        ],
+        "checkedAt": "2026-06-01T10:05:00.000Z"
+      }
+    }
+  ]
+}

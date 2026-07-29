@@ -1,9 +1,9 @@
 {
-  "documentVersion": "customer-production-input/v1",
+  "documentVersion": "customer-production-input/v2",
   "project": {
     "customerName": "客户正式名称",
     "acceptanceOwner": "客户验收负责人姓名",
-    "targetLaunchDate": "2026-06-30",
+    "targetLaunchDate": "2026-07-31",
     "deploymentMode": "public_cloud | private_cloud | intranet"
   },
   "infrastructure": {
@@ -11,12 +11,11 @@
     "apiDomain": "https://api.rehab.customer.example.com",
     "serverPlan": "正式服务器规格、部署区域和运维责任说明",
     "databaseUrlRef": "secret-manager://rehab-prod/database-url",
-    "redisUrlRef": "secret-manager://rehab-prod/redis-url",
     "backupPolicy": "备份频率、保留周期和恢复责任人",
     "monitoringOwner": "监控告警负责人"
   },
   "legal": {
-    "privacyAgreementVersion": "privacy-2026-06",
+    "privacyAgreementVersion": "privacy-2026-07",
     "consentOwner": "隐私协议确认负责人",
     "retentionPolicy": "数据保留周期和删除规则",
     "thirdPartyAiDataProcessingApproved": true
@@ -33,41 +32,78 @@
     "desensitizationOwner": "脱敏负责人",
     "exportApprovalOwner": "导出审批负责人"
   },
+  "mimo": {
+    "accountOwner": "客户 MiMo 账号负责人",
+    "apiKeyRef": "secret-manager://<mimo-api-key-reference>",
+    "apiKeyFile": "/etc/secrets/mimo_api_key",
+    "allowedHosts": ["<approved-mimo-api-host>"],
+    "providerTelemetryRetentionDays": "<30-to-3650-integer-days>",
+    "providerTelemetryRetentionTimeoutMs": "<positive-safe-integer-milliseconds>",
+    "providerLimits": {
+      "aiTimeoutMs": "<positive-safe-integer-milliseconds>",
+      "aiMaxResponseBytes": "<positive-safe-integer-up-to-16777216>",
+      "speechTimeoutMs": "<positive-safe-integer-milliseconds>",
+      "speechMaxResponseBytes": "<positive-safe-integer-up-to-16777216>",
+      "ttsTimeoutMs": "<positive-safe-integer-milliseconds>",
+      "ttsMaxResponseBytes": "<positive-safe-integer-up-to-16777216>"
+    },
+    "highCostRequestLimit": {
+      "userOperationRequestLimit": "<positive-safe-integer>",
+      "windowMs": "<positive-safe-integer-milliseconds>"
+    },
+    "usage": {
+      "keyValueUrl": "redis://<render-key-value-private-host>:6379",
+      "keyPrefix": "<customer-approved-mimo-quota-prefix>",
+      "windowMs": "<positive-safe-integer-milliseconds>",
+      "keyValueProbeTimeoutMs": "<positive-safe-integer-milliseconds>",
+      "userRequestLimit": "<positive-safe-integer>",
+      "patientRequestLimit": "<positive-safe-integer>",
+      "organizationRequestLimit": "<positive-safe-integer>",
+      "speechSecondsLimit": "<positive-safe-integer>",
+      "ttsCharactersLimit": "<positive-safe-integer>",
+      "userBudgetUnitsLimit": "<positive-safe-integer>",
+      "patientBudgetUnitsLimit": "<positive-safe-integer>",
+      "organizationBudgetUnitsLimit": "<positive-safe-integer>",
+      "aiCostUnitsPerRequest": "<positive-safe-integer>",
+      "speechCostUnitsPerSecond": "<positive-safe-integer>",
+      "ttsCostUnitsPerCharacter": "<positive-safe-integer>"
+    }
+  },
   "ai": {
     "requiredForLaunch": true,
-    "freeTierPreferred": true,
-    "provider": "iflytek-spark",
-    "accountOwner": "客户 AI 供应商账号负责人",
-    "freeQuotaConfirmed": true,
-    "freeQuotaDescription": "免费额度、有效期、QPS、并发和超额计费确认说明",
-    "endpoint": "https://spark-api.customer.example.com/v1/chat/completions",
-    "apiKeyRef": "secret-manager://rehab-prod/iflytek-spark-api-key",
-    "modelName": "spark-x1",
-    "modelVersion": "spark-x1-2026-06",
-    "promptVersion": "cognitive-assessment-2026-06",
-    "callLogRetentionDays": 180,
+    "provider": "xiaomi-mimo",
+    "modelName": "<customer-approved-mimo-model-name>",
+    "modelVersion": "<customer-approved-mimo-model-version>",
+    "endpoint": "https://<approved-mimo-api-host>/v1",
+    "promptVersion": "<approved-cognitive-assessment-prompt-version>",
     "humanReviewRequired": true,
     "humanReviewOwner": "医师复核负责人"
   },
   "speech": {
     "requiredForLaunch": true,
-    "freeTierPreferred": true,
-    "provider": "iflytek-iat",
-    "accountOwner": "客户语音供应商账号负责人",
-    "freeQuotaConfirmed": true,
-    "freeQuotaDescription": "免费额度、有效期、QPS、并发和超额计费确认说明",
-    "endpoint": "https://speech.customer.example.com/v2/iat",
-    "apiKeyRef": "secret-manager://rehab-prod/iflytek-iat-api-key",
-    "modelVersion": "iat-medical-2026-06",
+    "provider": "xiaomi-mimo-audio-understanding",
+    "endpoint": "https://<approved-mimo-api-host>/v1/chat/completions",
+    "modelVersion": "<customer-approved-mimo-speech-model-version>",
+    "maxDecodedAudioBytes": "<positive-safe-integer-up-to-11796480-bytes>",
+    "maxDurationSeconds": "<positive-safe-integer-seconds>",
     "microphoneConsentRequired": true
+  },
+  "tts": {
+    "requiredForLaunch": true,
+    "provider": "xiaomi-mimo-tts",
+    "endpoint": "https://<approved-mimo-api-host>/v1/chat/completions",
+    "modelVersion": "mimo-v2.5-tts",
+    "voiceId": "<customer-approved-tts-voice-id>",
+    "outputFormat": "wav",
+    "patientPlaybackConsentRequired": true
   },
   "trainingContent": {
     "browserPoseAccepted": true,
     "browserEvidencePath": "evidence/browser-pose/customer-field-evidence.json",
     "targetBrowsers": ["Chrome 126", "Edge 126"],
-    "cameraModel": "Logitech C920",
-    "unityRequiredForLaunch": false,
-    "unityBuildManifestPath": ""
+    "cameraModel": "客户验收摄像头型号",
+    "unityRequiredForLaunch": true,
+    "unityBuildManifestPath": "evidence/unity/manifest.json"
   },
   "acceptanceEvidence": {
     "roleScreenshotsReady": true,

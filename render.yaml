@@ -1,0 +1,197 @@
+# yaml-language-server: $schema=https://render.com/schema/render.yaml.json
+#
+# Production Blueprint. Singapore is the single shared Render region for the
+# API, Web, Postgres, and Key Value resources. Its data-residency approval,
+# custom domains, Secret Files, and every sync:false value remain pre-deploy
+# customer gates. This file deliberately contains no secret values.
+previews:
+  generation: "off"
+
+services:
+  - type: keyvalue
+    name: rehab-platform-kv-prod
+    region: singapore
+    plan: starter
+    ipAllowList: []
+    maxmemoryPolicy: noeviction
+    persistenceMode: journal-snapshot
+
+  - type: web
+    name: rehab-platform-api-prod
+    runtime: node
+    region: singapore
+    plan: starter
+    autoDeployTrigger: "off"
+    buildCommand: corepack enable && pnpm install --frozen-lockfile --prod=false && pnpm --filter @rehab-platform/api build
+    preDeployCommand: pnpm db:migrate:deploy
+    startCommand: pnpm --filter @rehab-platform/api start:prod
+    healthCheckPath: /health/ready
+    maxShutdownDelaySeconds: 60
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "10000"
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: JWT_SECRET
+        generateValue: true
+      - key: DATABASE_URL
+        fromDatabase:
+          name: rehab-platform-db-prod
+          property: connectionString
+      - key: WEB_ORIGIN
+        sync: false
+      - key: PUBLIC_CREDENTIAL_THROTTLE_LIMIT
+        sync: false
+      - key: PUBLIC_CREDENTIAL_THROTTLE_TTL_MS
+        sync: false
+      - key: SENSITIVE_DATA_KEY_REF
+        sync: false
+      - key: SENSITIVE_DATA_KEY_FILE
+        value: /etc/secrets/sensitive_data_key
+      - key: PRODUCTION_BOOTSTRAP_CONFIG_FILE
+        value: /etc/secrets/production_bootstrap.json
+      - key: PRODUCTION_BOOTSTRAP_ADMIN_PASSWORD_FILE
+        value: /etc/secrets/production_bootstrap_admin_password
+      - key: PRODUCTION_BOOTSTRAP_DOCTOR_PASSWORD_FILE
+        value: /etc/secrets/production_bootstrap_doctor_password
+      - key: MIMO_API_KEY_REF
+        sync: false
+      - key: MIMO_API_KEY_FILE
+        value: /etc/secrets/mimo_api_key
+      - key: MIMO_ALLOWED_HOSTS
+        sync: false
+      - key: AI_REQUIRED_FOR_LAUNCH
+        value: "true"
+      - key: SPEECH_REQUIRED_FOR_LAUNCH
+        value: "true"
+      - key: TTS_REQUIRED_FOR_LAUNCH
+        value: "true"
+      - key: AI_HUMAN_REVIEW_REQUIRED
+        value: "true"
+      - key: AI_PROVIDER
+        value: xiaomi-mimo
+      - key: AI_MODEL_VERSION
+        sync: false
+      - key: AI_MODEL_ENDPOINT
+        sync: false
+      - key: AI_PROMPT_VERSION
+        sync: false
+      - key: SPEECH_PROVIDER
+        value: xiaomi-mimo-audio-understanding
+      - key: SPEECH_TO_TEXT_ENDPOINT
+        sync: false
+      - key: SPEECH_MODEL_VERSION
+        sync: false
+      - key: TTS_PROVIDER
+        value: xiaomi-mimo-tts
+      - key: TTS_ENDPOINT
+        sync: false
+      - key: TTS_MODEL_VERSION
+        sync: false
+      - key: TTS_VOICE_ID
+        sync: false
+      - key: TTS_OUTPUT_FORMAT
+        sync: false
+      - key: AI_PROVIDER_TIMEOUT_MS
+        sync: false
+      - key: AI_PROVIDER_MAX_RESPONSE_BYTES
+        sync: false
+      - key: SPEECH_PROVIDER_TIMEOUT_MS
+        sync: false
+      - key: SPEECH_PROVIDER_MAX_RESPONSE_BYTES
+        sync: false
+      - key: STT_MAX_DECODED_AUDIO_BYTES
+        sync: false
+      - key: STT_MAX_DURATION_SECONDS
+        sync: false
+      - key: TTS_PROVIDER_TIMEOUT_MS
+        sync: false
+      - key: TTS_PROVIDER_MAX_RESPONSE_BYTES
+        sync: false
+      - key: MIMO_KEY_VALUE_URL
+        fromService:
+          type: keyvalue
+          name: rehab-platform-kv-prod
+          property: connectionString
+      - key: MIMO_USAGE_KEY_PREFIX
+        sync: false
+      - key: MIMO_USAGE_WINDOW_MS
+        sync: false
+      - key: MIMO_KEY_VALUE_PROBE_TIMEOUT_MS
+        sync: false
+      - key: MIMO_USER_REQUEST_LIMIT
+        sync: false
+      - key: MIMO_PATIENT_REQUEST_LIMIT
+        sync: false
+      - key: MIMO_ORGANIZATION_REQUEST_LIMIT
+        sync: false
+      - key: MIMO_SPEECH_SECONDS_LIMIT
+        sync: false
+      - key: MIMO_TTS_CHARACTERS_LIMIT
+        sync: false
+      - key: MIMO_USER_BUDGET_UNITS_LIMIT
+        sync: false
+      - key: MIMO_PATIENT_BUDGET_UNITS_LIMIT
+        sync: false
+      - key: MIMO_ORGANIZATION_BUDGET_UNITS_LIMIT
+        sync: false
+      - key: MIMO_AI_COST_UNITS_PER_REQUEST
+        sync: false
+      - key: MIMO_SPEECH_COST_UNITS_PER_SECOND
+        sync: false
+      - key: MIMO_TTS_COST_UNITS_PER_CHARACTER
+        sync: false
+      - key: MIMO_HIGH_COST_USER_OPERATION_REQUEST_LIMIT
+        sync: false
+      - key: MIMO_HIGH_COST_USER_OPERATION_WINDOW_MS
+        sync: false
+      - key: PROVIDER_TELEMETRY_RETENTION_DAYS
+        sync: false
+      - key: PROVIDER_TELEMETRY_RETENTION_TIMEOUT_MS
+        sync: false
+
+  - type: web
+    name: rehab-platform-web-prod
+    runtime: node
+    region: singapore
+    plan: starter
+    autoDeployTrigger: "off"
+    buildCommand: corepack enable && pnpm install --frozen-lockfile --prod=false && pnpm --filter @rehab-platform/web build
+    startCommand: pnpm --filter @rehab-platform/web start -- -p $PORT -H 0.0.0.0
+    healthCheckPath: /
+    maxShutdownDelaySeconds: 30
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NEXT_PUBLIC_API_BASE_URL
+        sync: false
+
+  - type: cron
+    name: rehab-platform-provider-telemetry-retention-prod
+    runtime: node
+    region: singapore
+    autoDeployTrigger: "off"
+    schedule: "17 3 * * *"
+    buildCommand: corepack enable && pnpm install --frozen-lockfile --prod=false && pnpm --filter @rehab-platform/api build
+    startCommand: pnpm --filter @rehab-platform/api telemetry:retention
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: rehab-platform-db-prod
+          property: connectionString
+      - key: PROVIDER_TELEMETRY_RETENTION_DAYS
+        sync: false
+      - key: PROVIDER_TELEMETRY_RETENTION_TIMEOUT_MS
+        sync: false
+
+databases:
+  - name: rehab-platform-db-prod
+    region: singapore
+    plan: basic-1gb
+    databaseName: rehab_platform
+    user: rehab_platform
+    ipAllowList: []

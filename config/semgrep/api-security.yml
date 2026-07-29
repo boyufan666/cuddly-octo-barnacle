@@ -1,0 +1,97 @@
+rules:
+  - id: rehab-api.no-command-execution
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: Command execution is not permitted in API request, authentication, AI, audio, or training-result code.
+    patterns:
+      - pattern-either:
+          - pattern: exec($COMMAND, ...)
+          - pattern: execSync($COMMAND, ...)
+          - pattern: execFile($COMMAND, ...)
+          - pattern: execFileSync($COMMAND, ...)
+          - pattern: spawn($COMMAND, ...)
+          - pattern: spawnSync($COMMAND, ...)
+          - pattern: fork($MODULE, ...)
+          - pattern: childProcess.exec($COMMAND, ...)
+          - pattern: childProcess.execSync($COMMAND, ...)
+          - pattern: childProcess.execFile($COMMAND, ...)
+          - pattern: childProcess.execFileSync($COMMAND, ...)
+          - pattern: childProcess.spawn($COMMAND, ...)
+          - pattern: childProcess.spawnSync($COMMAND, ...)
+          - pattern: childProcess.fork($MODULE, ...)
+
+  - id: rehab-api.no-dynamic-code-evaluation
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: Dynamic code evaluation is not permitted in API request, authentication, AI, audio, or training-result code.
+    patterns:
+      - pattern-either:
+          - pattern: eval($EXPRESSION)
+          - pattern: new Function(...)
+          - pattern: $VM.runInThisContext(...)
+          - pattern: $VM.runInNewContext(...)
+          - pattern: $VM.runInContext(...)
+          - pattern: new $VM.Script(...)
+
+  - id: rehab-api.no-tls-verification-bypass
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: TLS verification must not be disabled for authentication, AI, audio, or training-result provider traffic.
+    patterns:
+      - pattern-either:
+          - pattern: "$OBJECT = { ..., rejectUnauthorized: false, ... }"
+          - pattern: $OBJECT.rejectUnauthorized = false
+          - pattern: process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'
+          - pattern: process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0"
+          - pattern: process.env['NODE_TLS_REJECT_UNAUTHORIZED'] = '0'
+          - pattern: process.env["NODE_TLS_REJECT_UNAUTHORIZED"] = "0"
+
+  - id: rehab-api.no-weak-cryptographic-hash
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: MD5 and SHA-1 are not permitted for authentication, AI, audio, or training-result security decisions.
+    patterns:
+      - pattern-either:
+          - pattern: createHash('md5')
+          - pattern: createHash("md5")
+          - pattern: createHash('sha1')
+          - pattern: createHash("sha1")
+          - pattern: createHash('sha-1')
+          - pattern: createHash("sha-1")
+          - pattern: createHmac('md5', ...)
+          - pattern: createHmac("md5", ...)
+          - pattern: createHmac('sha1', ...)
+          - pattern: createHmac("sha1", ...)
+          - pattern: createHmac('sha-1', ...)
+          - pattern: createHmac("sha-1", ...)
+          - pattern: $CRYPTO.createHash('md5')
+          - pattern: $CRYPTO.createHash("md5")
+          - pattern: $CRYPTO.createHash('sha1')
+          - pattern: $CRYPTO.createHash("sha1")
+          - pattern: $CRYPTO.createHash('sha-1')
+          - pattern: $CRYPTO.createHash("sha-1")
+          - pattern: $CRYPTO.createHmac('md5', ...)
+          - pattern: $CRYPTO.createHmac("md5", ...)
+          - pattern: $CRYPTO.createHmac('sha1', ...)
+          - pattern: $CRYPTO.createHmac("sha1", ...)
+          - pattern: $CRYPTO.createHmac('sha-1', ...)
+          - pattern: $CRYPTO.createHmac("sha-1", ...)
+          - pattern: $CRYPTO.subtle.digest('SHA-1', ...)
+          - pattern: $CRYPTO.subtle.digest("SHA-1", ...)
+          - pattern: $CRYPTO.webcrypto.subtle.digest('SHA-1', ...)
+          - pattern: $CRYPTO.webcrypto.subtle.digest("SHA-1", ...)
+
+  - id: rehab-api.no-unsafe-prisma-raw-query
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: Unsafe Prisma raw SQL is not permitted in authentication, AI, audio, or training-result request paths.
+    patterns:
+      - pattern-either:
+          - pattern: $CLIENT.$queryRawUnsafe(...)
+          - pattern: $CLIENT.$executeRawUnsafe(...)
+
+  - id: rehab-api.no-insecure-randomness
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: Math.random is not permitted for authentication, AI, audio, or training-result identifiers, tokens, or security controls.
+    pattern: Math.random()

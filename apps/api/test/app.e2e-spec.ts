@@ -6,8 +6,9 @@ import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from './../src/app.module';
 
-type LoginResponse = {
-  accessToken: string;
+type LoginClient = {
+  agent: ReturnType<typeof request.agent>;
+  csrfToken: string;
   user: {
     id: string;
     account: string;
@@ -50,10 +51,33 @@ type AuditLogResponse = {
   } | null;
 };
 
+type ExportResponseBody = {
+  rowCount: number;
+  rows: Array<Record<string, unknown>>;
+};
+
+function maskPhoneForExpectation(value: string) {
+  return value.length >= 7
+    ? `${value.slice(0, 3)}****${value.slice(-4)}`
+    : value;
+}
+
 describe('Rehab platform data authorization flow (e2e)', () => {
   let app: INestApplication<App>;
   let prisma: PrismaService;
-  const password = '253913';
+  const seedPassword = process.env.API_SMOKE_SEED_PASSWORD;
+  if (!seedPassword || seedPassword.trim() !== seedPassword) {
+    throw new Error(
+      'API_SMOKE_SEED_PASSWORD must be an exact non-empty value.',
+    );
+  }
+  const createdAccountPassword = 'E2E-Created-253913!';
+  const accountPasswords = new Map<string, string>(
+    ['admin', 'doctor001', 'operator001', 'auditor001'].map(
+      (account): [string, string] => [account, seedPassword],
+    ),
+  );
+  let passwordResetIndex = 0;
   const runId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   const accountPrefix = `e2e_${runId}`;
   const createdUserIds = new Set<string>();
@@ -144,15 +168,57 @@ describe('Rehab platform data authorization flow (e2e)', () => {
   }
 
   async function login(account: string) {
-    const response = await request(app.getHttpServer())
+    const currentPassword = accountPasswords.get(account);
+    if (!currentPassword) {
+      throw new Error(`No explicit E2E password registered for ${account}.`);
+    }
+    const agent = request.agent(app.getHttpServer());
+    const csrfResponse = await agent.get('/auth/csrf').expect(200);
+    let csrfToken = (csrfResponse.body as { csrfToken: string }).csrfToken;
+    let response = await agent
       .post('/auth/login')
-      .send({ account, password })
+      .set('X-CSRF-Token', csrfToken)
+      .send({ account, password: currentPassword })
       .expect(201);
-    return response.body as LoginResponse;
+    if (
+      (response.body as { status?: string }).status ===
+      'password_reset_required'
+    ) {
+      passwordResetIndex += 1;
+      const newPassword = `E2E-Reset-${passwordResetIndex}-253913!`;
+      expect(newPassword).not.toBe(currentPassword);
+      await agent
+        .post('/auth/password-reset')
+        .set('X-CSRF-Token', csrfToken)
+        .send({ newPassword })
+        .expect(200);
+      accountPasswords.set(account, newPassword);
+      const refreshedCsrfResponse = await agent.get('/auth/csrf').expect(200);
+      csrfToken = (refreshedCsrfResponse.body as { csrfToken: string })
+        .csrfToken;
+      response = await agent
+        .post('/auth/login')
+        .set('X-CSRF-Token', csrfToken)
+        .send({ account, password: newPassword })
+        .expect(201);
+    }
+    expect((response.body as { status?: string }).status).toBe('authenticated');
+    return {
+      ...(response.body as Omit<LoginClient, 'agent' | 'csrfToken'>),
+      agent,
+      csrfToken,
+    } satisfies LoginClient;
   }
 
-  function bearer(token: string) {
-    return { Authorization: `Bearer ${token}` };
+  function apiRequest(
+    client: LoginClient,
+    method: 'get' | 'post' | 'patch',
+    path: string,
+  ) {
+    const pending = client.agent[method](path);
+    return method === 'get'
+      ? pending
+      : pending.set('X-CSRF-Token', client.csrfToken);
   }
 
   it('runs caregiver account, patient consent, binding, summary, and revoke flow', async () => {
@@ -162,12 +228,11 @@ describe('Rehab platform data authorization flow (e2e)', () => {
     expect(doctorId).toBeTruthy();
 
     const caregiverAccount = `${accountPrefix}_cg`;
-    const caregiver = await request(app.getHttpServer())
-      .post('/caregivers')
-      .set(bearer(admin.accessToken))
+    accountPasswords.set(caregiverAccount, createdAccountPassword);
+    const caregiver = await apiRequest(admin, 'post', '/caregivers')
       .send({
         account: caregiverAccount,
-        initialPassword: password,
+        initialPassword: createdAccountPassword,
         displayName: 'E2E 家属',
         mobilePhone: `139${String(Date.now()).slice(-8)}`,
       })
@@ -175,12 +240,11 @@ describe('Rehab platform data authorization flow (e2e)', () => {
     createdUserIds.add((caregiver.body as { id: string }).id);
 
     const patientAccount = `${accountPrefix}_pt`;
-    const patientCreate = await request(app.getHttpServer())
-      .post('/patients')
-      .set(bearer(doctor.accessToken))
+    accountPasswords.set(patientAccount, createdAccountPassword);
+    const patientCreate = await apiRequest(doctor, 'post', '/patients')
       .send({
         account: patientAccount,
-        initialPassword: password,
+        initialPassword: createdAccountPassword,
         name: 'E2E 患者',
         gender: 'female',
         age: 70,
@@ -205,9 +269,7 @@ describe('Rehab platform data authorization flow (e2e)', () => {
       'ai_processing',
     ] as const;
     for (const consentType of consentTypes) {
-      const consent = await request(app.getHttpServer())
-        .post('/consents')
-        .set(bearer(patientLogin.accessToken))
+      const consent = await apiRequest(patientLogin, 'post', '/consents')
         .send({
           patientId: patient.id,
           subjectUserId: patientLogin.user.id,
@@ -222,9 +284,11 @@ describe('Rehab platform data authorization flow (e2e)', () => {
       createdConsentIds.add((consent.body as ConsentResponse).id);
     }
 
-    const relationResponse = await request(app.getHttpServer())
-      .post(`/patients/${patient.id}/caregivers`)
-      .set(bearer(patientLogin.accessToken))
+    const relationResponse = await apiRequest(
+      patientLogin,
+      'post',
+      `/patients/${patient.id}/caregivers`,
+    )
       .send({
         caregiverAccount,
         relation: '女儿',
@@ -242,32 +306,39 @@ describe('Rehab platform data authorization flow (e2e)', () => {
     const caregiverLogin = await login(caregiverAccount);
     expect(caregiverLogin.context.caregiverPatientIds).toContain(patient.id);
 
-    await request(app.getHttpServer())
-      .get(`/patients/${patient.id}/training-records`)
-      .set(bearer(caregiverLogin.accessToken))
-      .expect(403);
+    await apiRequest(
+      caregiverLogin,
+      'get',
+      `/patients/${patient.id}/training-records`,
+    ).expect(403);
 
-    const summaryResponse = await request(app.getHttpServer())
-      .get(`/caregiver/patients/${patient.id}/summary`)
-      .set(bearer(caregiverLogin.accessToken))
-      .expect(200);
+    const summaryResponse = await apiRequest(
+      caregiverLogin,
+      'get',
+      `/caregiver/patients/${patient.id}/summary`,
+    ).expect(200);
     expect(JSON.stringify(summaryResponse.body)).not.toContain('motionMetrics');
     expect(JSON.stringify(summaryResponse.body)).not.toContain(
       'metricsSummary',
     );
 
-    await request(app.getHttpServer())
-      .patch(`/patients/${patient.id}/caregivers/${relation.id}/revoke`)
-      .set(bearer(patientLogin.accessToken))
-      .expect(200);
+    await apiRequest(
+      patientLogin,
+      'patch',
+      `/patients/${patient.id}/caregivers/${relation.id}/revoke`,
+    ).expect(200);
 
-    await request(app.getHttpServer())
-      .get(`/caregiver/patients/${patient.id}/summary`)
-      .set(bearer(caregiverLogin.accessToken))
-      .expect(403);
+    await apiRequest(
+      caregiverLogin,
+      'get',
+      `/caregiver/patients/${patient.id}/summary`,
+    ).expect(403);
 
-    const deniedAuditResponse = await request(app.getHttpServer())
-      .get('/admin/audit-logs')
+    const deniedAuditResponse = await apiRequest(
+      admin,
+      'get',
+      '/admin/audit-logs',
+    )
       .query({
         result: 'denied',
         actorRole: 'caregiver',
@@ -277,7 +348,6 @@ describe('Rehab platform data authorization flow (e2e)', () => {
         actorAccount: caregiverAccount,
         limit: 10,
       })
-      .set(bearer(admin.accessToken))
       .expect(200);
     const deniedAudits = deniedAuditResponse.body as AuditLogResponse[];
     expect(deniedAudits.length).toBeGreaterThanOrEqual(1);
@@ -293,32 +363,52 @@ describe('Rehab platform data authorization flow (e2e)', () => {
       ),
     ).toBe(true);
 
-    await request(app.getHttpServer())
-      .get('/admin/audit-logs')
+    await apiRequest(admin, 'get', '/admin/audit-logs')
       .query({ result: 'blocked' })
-      .set(bearer(admin.accessToken))
       .expect(400);
 
-    await request(app.getHttpServer())
-      .get('/admin/audit-logs')
-      .set(bearer(doctor.accessToken))
-      .expect(403);
+    await apiRequest(doctor, 'get', '/admin/audit-logs').expect(403);
   });
 
   it('exports desensitized patient data and records export audit', async () => {
     const admin = await login('admin');
     const doctor = await login('doctor001');
+    const shortRunId = runId.replace(/_/g, '').slice(-12);
+    const exportPatientAccount = `ex_${shortRunId}_pt`;
+    const exportPatientMobile = `138${String(Date.now()).slice(-8)}`;
+    const patientCreate = await apiRequest(doctor, 'post', '/patients')
+      .send({
+        account: exportPatientAccount,
+        initialPassword: createdAccountPassword,
+        name: 'E2E 导出患者',
+        gender: 'female',
+        age: 70,
+        mobilePhone: exportPatientMobile,
+        caregiverName: 'E2E 家属',
+        caregiverPhone: '13900008206',
+        healthMetrics: {
+          bloodPressure: '128/80',
+          heartRate: 72,
+        },
+      })
+      .expect(201);
+    const patient = patientCreate.body as PatientResponse;
+    createdPatientIds.add(patient.id);
+    createdUserIds.add(patient.userId);
     const reason = `${accountPrefix}_export_reason`;
     exportReasonHashes.add(reasonHash(reason));
 
-    const exportResponse = await request(app.getHttpServer())
-      .post('/admin/exports/patients')
+    const exportResponse = await apiRequest(
+      admin,
+      'post',
+      '/admin/exports/patients',
+    )
       .send({
         format: 'json',
         reason,
+        patientId: patient.id,
         limit: 10,
       })
-      .set(bearer(admin.accessToken))
       .expect(200);
     expect(exportResponse.headers['cache-control']).toBe('no-store');
     expect(exportResponse.headers['x-content-type-options']).toBe('nosniff');
@@ -336,26 +426,28 @@ describe('Rehab platform data authorization flow (e2e)', () => {
         'maskedCaregiverPhone',
       ]) as string[],
     });
-    const exportText = JSON.stringify(exportResponse.body);
-    expect(exportText).toContain('138****6721');
-    expect(exportText).not.toContain('13800006721');
+    const exportBody = exportResponse.body as unknown as ExportResponseBody;
+    const exportText = JSON.stringify(exportBody);
+    expect(exportBody.rowCount).toBe(1);
+    expect(exportBody.rows[0]).toMatchObject({
+      maskedName: 'E*',
+      maskedMobilePhone: maskPhoneForExpectation(exportPatientMobile),
+      maskedCaregiverName: 'E*',
+      maskedCaregiverPhone: '139****8206',
+    });
+    expect(exportText).not.toContain(exportPatientMobile);
     expect(exportText).not.toContain('13900008206');
     expect(exportText).not.toContain('bloodPressure');
 
-    await request(app.getHttpServer())
-      .post('/admin/exports/patients')
+    await apiRequest(doctor, 'post', '/admin/exports/patients')
       .send({ format: 'json', reason })
-      .set(bearer(doctor.accessToken))
       .expect(403);
 
-    await request(app.getHttpServer())
-      .post('/admin/exports/not-real')
+    await apiRequest(admin, 'post', '/admin/exports/not-real')
       .send({ format: 'json', reason })
-      .set(bearer(admin.accessToken))
       .expect(400);
 
-    const auditResponse = await request(app.getHttpServer())
-      .get('/admin/audit-logs')
+    const auditResponse = await apiRequest(admin, 'get', '/admin/audit-logs')
       .query({
         action: 'data.export',
         targetType: 'data_export',
@@ -363,7 +455,6 @@ describe('Rehab platform data authorization flow (e2e)', () => {
         actorRole: 'admin_super',
         limit: 5,
       })
-      .set(bearer(admin.accessToken))
       .expect(200);
     const audits = auditResponse.body as AuditLogResponse[];
     expect(
@@ -376,14 +467,16 @@ describe('Rehab platform data authorization flow (e2e)', () => {
       ),
     ).toBe(true);
 
-    const exportAuditResponse = await request(app.getHttpServer())
-      .get('/admin/audit-logs')
+    const exportAuditResponse = await apiRequest(
+      admin,
+      'get',
+      '/admin/audit-logs',
+    )
       .query({
         action: 'data.export',
         targetType: 'data_export',
         limit: 20,
       })
-      .set(bearer(admin.accessToken))
       .expect(200);
     const exportAudits = exportAuditResponse.body as AuditLogResponse[];
     const auditText = JSON.stringify(exportAudits);
@@ -411,7 +504,7 @@ describe('Rehab platform data authorization flow (e2e)', () => {
     ).toBe(true);
   });
 
-  it('enforces split admin role permissions through real tokens', async () => {
+  it('enforces split admin role permissions through cookie sessions', async () => {
     const superAdmin = await login('admin');
     const operator = await login('operator001');
     const auditor = await login('auditor001');
@@ -429,51 +522,42 @@ describe('Rehab platform data authorization flow (e2e)', () => {
     );
     expect(operator.context.primaryRole).toBe('admin_operator');
     expect(operator.context.adminPermissions).toEqual(
-      expect.arrayContaining(['dashboard.view', 'data.export', 'user.manage']),
+      expect.arrayContaining(['dashboard.view', 'user.manage', 'game.manage']),
     );
+    expect(operator.context.adminPermissions).not.toContain('data.export');
+    expect(operator.context.adminPermissions).not.toContain('audit.read');
     expect(auditor.context.primaryRole).toBe('admin_auditor');
     expect(auditor.context.adminPermissions).toEqual(
       expect.arrayContaining(['dashboard.view', 'audit.read']),
     );
 
-    await request(app.getHttpServer())
-      .get('/admin/audit-logs')
-      .set(bearer(superAdmin.accessToken))
-      .expect(200);
-    await request(app.getHttpServer())
-      .get('/admin/audit-logs')
-      .set(bearer(operator.accessToken))
-      .expect(403);
-    await request(app.getHttpServer())
-      .get('/admin/audit-logs')
-      .set(bearer(auditor.accessToken))
-      .expect(200);
+    await apiRequest(superAdmin, 'get', '/admin/audit-logs').expect(200);
+    await apiRequest(operator, 'get', '/admin/audit-logs').expect(403);
+    await apiRequest(auditor, 'get', '/admin/audit-logs').expect(200);
 
-    await request(app.getHttpServer())
-      .post('/admin/exports/patients')
+    await apiRequest(operator, 'post', '/admin/exports/patients')
       .send({ format: 'json', reason, limit: 1 })
-      .set(bearer(operator.accessToken))
-      .expect(200);
-    await request(app.getHttpServer())
-      .post('/admin/exports/patients')
+      .expect(403);
+    await apiRequest(auditor, 'post', '/admin/exports/patients')
       .send({ format: 'json', reason })
-      .set(bearer(auditor.accessToken))
       .expect(403);
 
-    const auditResponse = await request(app.getHttpServer())
-      .get('/admin/audit-logs')
+    const auditResponse = await apiRequest(
+      superAdmin,
+      'get',
+      '/admin/audit-logs',
+    )
       .query({
         action: 'data.export',
         targetType: 'data_export',
         targetId: 'patients',
         limit: 20,
       })
-      .set(bearer(superAdmin.accessToken))
       .expect(200);
     const audits = auditResponse.body as AuditLogResponse[];
     expect(
       audits.some(
-        (log) => log.actorRole === 'admin_operator' && log.result === 'success',
+        (log) => log.actorRole === 'admin_operator' && log.result === 'denied',
       ),
     ).toBe(true);
     expect(
@@ -484,32 +568,28 @@ describe('Rehab platform data authorization flow (e2e)', () => {
 
     const shortRunId = runId.replace(/_/g, '').slice(-12);
     const caregiverAccount = `op_${shortRunId}_cg`;
-    const caregiver = await request(app.getHttpServer())
-      .post('/caregivers')
-      .set(bearer(operator.accessToken))
+    const caregiver = await apiRequest(operator, 'post', '/caregivers')
       .send({
         account: caregiverAccount,
-        initialPassword: password,
+        initialPassword: createdAccountPassword,
         displayName: 'E2E 运营创建家属',
       })
       .expect(201);
     createdUserIds.add((caregiver.body as { id: string }).id);
 
-    await request(app.getHttpServer())
-      .post('/caregivers')
-      .set(bearer(auditor.accessToken))
+    await apiRequest(auditor, 'post', '/caregivers')
       .send({
         account: `au_${shortRunId}_cg`,
-        initialPassword: password,
+        initialPassword: createdAccountPassword,
         displayName: 'E2E 审计创建家属',
       })
       .expect(403);
   });
 
-  it('health endpoint returns service status', async () => {
+  it('live health endpoint returns process status', async () => {
     await request(app.getHttpServer())
-      .get('/health')
+      .get('/health/live')
       .expect(200)
-      .expect({ status: 'ok', service: 'rehab-platform-api' });
+      .expect({ status: 'live', service: 'rehab-platform-api' });
   });
 });

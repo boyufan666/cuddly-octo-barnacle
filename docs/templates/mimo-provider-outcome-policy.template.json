@@ -1,0 +1,127 @@
+{
+  "documentVersion": "mimo-provider-outcome-policy/v2",
+  "policy": {
+    "customerName": "<customer-legal-name>",
+    "policyOwner": "<customer-policy-owner>",
+    "approvedAt": "<approved-iso-datetime>",
+    "legalApprovalReference": "<legal-approval-reference>",
+    "changeControlReference": "<change-control-reference>"
+  },
+  "mimoUpstream": {
+    "idempotencySupported": true,
+    "idempotencyTransport": "<provider-confirmed-http_header-request_body-or-query_parameter>",
+    "idempotencyKeyName": "<mimo-confirmed-idempotency-field-name>",
+    "idempotencyScopeComponents": [
+      "provider_account",
+      "organization",
+      "operation",
+      "patient",
+      "actor",
+      "canonical_request"
+    ],
+    "idempotencyExpiryHours": "<positive-integer-hours>",
+    "statusQuery": {
+      "mode": "<provider_api_by_idempotency_key-provider_api_by_provider_request_id-or-provider_support_case_by_correlation_id>",
+      "queryIdentity": "<idempotency_key-provider_request_id-or-support_case_correlation_id>",
+      "endpointOrProcedureReference": "<provider-status-query-reference>",
+      "maximumAgeHours": "<positive-integer-hours>"
+    },
+    "reconciliation": {
+      "owner": "<provider-reconciliation-owner>",
+      "procedureReference": "<provider-reconciliation-procedure-reference>",
+      "providerEscalationReference": "<provider-escalation-reference>",
+      "maximumResolutionMinutes": "<positive-integer-minutes>"
+    },
+    "providerEvidenceReference": "<mimo-contract-or-support-evidence-reference>"
+  },
+  "requestIdentity": {
+    "localCanonicalRequestIdRequired": true,
+    "uniquenessScopeComponents": [
+      "organization",
+      "operation",
+      "patient",
+      "actor",
+      "canonical_request"
+    ],
+    "sameKeyDifferentPayload": "reject_conflict_without_provider_call",
+    "providerKeyExpiryAction": "block_until_reconciled_or_approved_new_paid_request",
+    "newPaidRequestApproval": {
+      "required": true,
+      "authorizedRoles": ["<authorized-role>"],
+      "procedureReference": "<new-paid-request-approval-procedure-reference>",
+      "maximumDecisionMinutes": "<positive-integer-minutes>"
+    }
+  },
+  "financialSettlement": {
+    "providerBillingSource": "<customer-approved-provider-billing-basis>",
+    "providerBillingEvidenceReference": "<provider-billing-evidence-reference>",
+    "sttDurationBilling": {
+      "method": "<customer-approved-duration-billing-method>",
+      "unitSeconds": "<positive-integer-seconds>",
+      "evidenceReference": "<stt-billing-rule-reference>"
+    },
+    "reservationExpiryMinutes": "<positive-integer-minutes>",
+    "reservationExpiryAction": "<customer-approved-reservation-expiry-action>",
+    "reservationExpiryPolicyReference": "<reservation-expiry-policy-reference>",
+    "chargeReleaseRule": "<customer-approved-post-confirmation-settlement-rule>",
+    "chargeReleasePolicyReference": "<post-confirmation-settlement-policy-reference>",
+    "automaticFinancialAdjustmentAllowed": false,
+    "unconfirmedOutcomeSettlement": {
+      "decisionRequired": true,
+      "owner": "<unconfirmed-outcome-financial-decision-owner>",
+      "policyReference": "<unconfirmed-outcome-financial-policy-reference>",
+      "approvedAction": "<customer-approved-unconfirmed-outcome-financial-action>",
+      "maximumDecisionMinutes": "<positive-integer-minutes>"
+    }
+  },
+  "unknownOutcomeHandling": {
+    "caseRequired": true,
+    "initialStatus": "blocked_pending_reconciliation",
+    "automaticProviderRetryAllowed": false,
+    "automaticNewKeyAllowed": false,
+    "caseOwner": "<unknown-outcome-case-owner>",
+    "escalationOwner": "<unknown-outcome-escalation-owner>",
+    "maximumResponseMinutes": "<positive-integer-minutes>",
+    "completionConfirmedAction": "<customer-approved-confirmed-outcome-action>",
+    "completionConfirmedPolicyReference": "<confirmed-outcome-policy-reference>",
+    "completionUnconfirmedAction": "<customer-approved-unconfirmed-outcome-closure-action>",
+    "closureEvidenceReference": "<unknown-outcome-closure-evidence-reference>"
+  },
+  "resultAndAssetProtection": {
+    "outcome": {
+      "encryptionAtRestRequired": true,
+      "legalBasisReference": "<outcome-legal-basis-reference>",
+      "retentionDays": "<positive-integer-days>",
+      "accessRoles": ["<outcome-access-role>"],
+      "deletion": {
+        "method": "<customer-approved-secure-deletion-method>",
+        "evidenceReference": "<outcome-deletion-evidence-reference>"
+      }
+    },
+    "ttsAsset": {
+      "storageClass": "<customer-approved-encrypted-asset-storage-class>",
+      "encryptionAtRestRequired": true,
+      "maximumBytes": "<positive-integer-bytes>",
+      "contentTypes": ["<registered-audio-media-type>"],
+      "legalBasisReference": "<tts-asset-legal-basis-reference>",
+      "retentionDays": "<positive-integer-days>",
+      "accessRoles": ["<tts-asset-access-role>"],
+      "deletion": {
+        "method": "<customer-approved-secure-deletion-method>",
+        "evidenceReference": "<tts-asset-deletion-evidence-reference>"
+      }
+    }
+  },
+  "retention": {
+    "outcomeRetentionDays": "<positive-integer-days>",
+    "ttsAssetRetentionDays": "<positive-integer-days>",
+    "financialRetentionDays": "<positive-integer-days>",
+    "auditRetentionDays": "<positive-integer-days>",
+    "telemetryRetentionDays": "<positive-integer-days>",
+    "outcomePolicyReference": "<outcome-retention-policy-reference>",
+    "ttsAssetPolicyReference": "<tts-asset-retention-policy-reference>",
+    "financialPolicyReference": "<financial-retention-policy-reference>",
+    "auditPolicyReference": "<audit-retention-policy-reference>",
+    "telemetryPolicyReference": "<telemetry-retention-policy-reference>"
+  }
+}

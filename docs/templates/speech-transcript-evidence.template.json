@@ -1,0 +1,75 @@
+{
+  "evidenceVersion": "speech-transcript-acceptance/v1",
+  "acceptance": {
+    "acceptedAt": "<2026-05-27T10:00:00.000Z>",
+    "testerName": "<现场验收员姓名>",
+    "siteName": "<试点或正式现场名称>",
+    "environment": "<trial-or-production>"
+  },
+  "browser": {
+    "name": "<Chrome/Edge/Safari>",
+    "version": "<浏览器版本>",
+    "userAgent": "<验收浏览器 navigator.userAgent>",
+    "pageUrl": "https://<正式 Web 域名>/assessment"
+  },
+  "patient": {
+    "patientId": "<真实或验收患者 ID>",
+    "patientExportId": "<脱敏患者导出 ID>"
+  },
+  "consent": {
+    "microphoneConsentId": "<microphone_capture 授权记录 ID>",
+    "consentType": "microphone_capture",
+    "consentVersion": "v1.2",
+    "grantedAt": "<2026-05-27T09:50:00.000Z>",
+    "status": "granted"
+  },
+  "speechProvider": {
+    "provider": "xiaomi-mimo-audio-understanding",
+    "modelVersion": "<mimo-v2.5>",
+    "endpointRef": "https://token-plan-cn.xiaomimimo.com/v1/chat/completions",
+    "apiKeyRef": "secret-manager://<speech-provider-key-ref>",
+    "accountOwner": "<客户供应商账号负责人>",
+    "callLogRetentionDays": 180
+  },
+  "audioCapture": {
+    "mimeType": "audio/wav",
+    "durationSeconds": "<真实录音时长秒数>",
+    "capturedAt": "<2026-05-27T09:58:00.000Z>",
+    "rawAudioStored": false,
+    "browserRecorder": "MediaRecorder"
+  },
+  "transcriptResult": {
+    "patientId": "<真实或验收患者 ID>",
+    "assessmentType": "MMSE/CDR",
+    "status": "transcribed",
+    "transcript": "<供应商返回的真实转写文本>",
+    "callId": "<语音供应商调用 ID>",
+    "calledAt": "<2026-05-27T09:58:45.000Z>",
+    "source": "provider_audio_understanding"
+  },
+  "humanReview": {
+    "required": true,
+    "reviewerUserId": "<复核医师用户 ID>",
+    "reviewedAt": "<2026-05-27T10:02:00.000Z>",
+    "nextAction": "generate_ai_assessment_draft",
+    "formalAssessmentCreatedAutomatically": false
+  },
+  "auditEvidence": {
+    "auditLogIds": [
+      "<ai.assessment_speech_transcript.generate 成功审计日志 ID>"
+    ],
+    "requiredActions": [
+      "ai.assessment_speech_transcript.generate"
+    ],
+    "checkedAt": "<2026-05-27T10:05:00.000Z>"
+  },
+  "artifacts": {
+    "screenshots": [
+      {
+        "label": "<评估页语音转写回填截图>",
+        "path": "evidence/speech-transcript/assessment-transcript-filled.png",
+        "capturedAt": "<2026-05-27T10:03:00.000Z>"
+      }
+    ]
+  }
+}

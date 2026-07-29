@@ -4,15 +4,24 @@ import { createHash, randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import {
-  buildConsentRestoreWhere,
-  verifyCompletedContractChecks,
-} from "./local-contract-checks.mjs";
+import { CookieSessionClient } from "./local-contract-cookie-session.mjs";
+import { verifyCompletedContractChecks } from "./local-contract-checks.mjs";
 
+const patientAccount = requiredEnv("LOCAL_CONTRACT_PATIENT_ACCOUNT");
+const patientPassword = requiredEnv("LOCAL_CONTRACT_PATIENT_PASSWORD");
+const caregiverAccount = requiredEnv("LOCAL_CONTRACT_CAREGIVER_ACCOUNT");
+const caregiverPassword = requiredEnv("LOCAL_CONTRACT_CAREGIVER_PASSWORD");
+const adminAccount = requiredEnv("LOCAL_CONTRACT_ADMIN_ACCOUNT");
+const adminPassword = requiredEnv("LOCAL_CONTRACT_ADMIN_PASSWORD");
+const auditorAccount = requiredEnv("LOCAL_CONTRACT_AUDITOR_ACCOUNT");
+const auditorPassword = requiredEnv("LOCAL_CONTRACT_AUDITOR_PASSWORD");
+const doctorAccount = requiredEnv("LOCAL_CONTRACT_DOCTOR_ACCOUNT");
+const doctorPassword = requiredEnv("LOCAL_CONTRACT_DOCTOR_PASSWORD");
 const rootDir = resolve(import.meta.dirname, "..");
 const projectEnv = readProjectEnv(resolve(rootDir, ".env"));
 const apiBaseUrl = readRequiredConfig(projectEnv, "NEXT_PUBLIC_API_BASE_URL");
 const databaseUrl = readRequiredConfig(projectEnv, "DATABASE_URL");
+const publicSession = new CookieSessionClient(apiBaseUrl);
 
 process.env.DATABASE_URL = databaseUrl;
 
@@ -22,18 +31,15 @@ const requireFromDbPackage = createRequire(
 const { PrismaClient } = requireFromDbPackage("@prisma/client");
 const prisma = new PrismaClient();
 
-const seedPassword = "253913";
-const patientAccount = "patient001";
-const adminAccount = "admin";
-const auditorAccount = "auditor001";
-const doctorAccount = "doctor001";
 const runKey = `contract_${Date.now()}_${randomUUID().slice(0, 8)}`;
 
 const created = {
   sessionIds: [],
-  revokedConsentIds: [],
-  revokedAtByConsentId: {},
+  revokedConsentTypes: [],
   auditLogIds: [],
+  collectionBatchIds: [],
+  collectionProtocolIds: [],
+  collectionConditionIds: [],
 };
 const completedChecks = new Set();
 const expectedPatientExportColumns = [
@@ -45,9 +51,14 @@ const expectedPatientExportColumns = [
   "maskedCaregiverName",
   "maskedCaregiverPhone",
   "responsibleDoctor",
-  "currentRiskLevel",
   "status",
   "createdAt",
+];
+const requiredBrowserPoseMetricTypes = [
+  "reaction_time_ms",
+  "target_hit_rate",
+  "pose_visibility_avg",
+  "arm_raise_accuracy",
 ];
 
 console.log(
@@ -56,9 +67,9 @@ console.log(
 console.log("注意：本脚本不进行摄像头实采，也不会生成姿态帧或伪造训练过程。");
 
 try {
-  await step("健康检查 /health", async () => {
-    const health = await request("/health");
-    assert(health.status === "ok", "健康检查 status 应为 ok。");
+  await step("健康检查 /health/live", async () => {
+    const health = await request("/health/live", { session: publicSession });
+    assert(health.status === "live", "健康检查 status 应为 live。");
     assert(
       health.service === "rehab-platform-api",
       "健康检查 service 应为 rehab-platform-api。",
@@ -66,56 +77,66 @@ try {
   });
 
   const patientLogin = await step("患者账号登录", async () => {
-    const loginResponse = await login(patientAccount);
-    assert(loginResponse.accessToken, "患者登录未返回 accessToken。");
+    const loginResponse = await login(patientAccount, patientPassword);
     assert(
       loginResponse.context?.primaryRole === "patient",
-      "patient001 的 primaryRole 应为 patient。",
+      `${patientAccount} 的 primaryRole 应为 patient。`,
     );
     assert(
       loginResponse.context?.patientIds?.length > 0,
-      "patient001 未绑定 patientId，请先执行 seed。",
+      `${patientAccount} 未绑定 patientId，请先执行 seed。`,
     );
     return loginResponse;
   });
 
   const patientId = patientLogin.context.patientIds[0];
   const adminLogin = await step("管理员账号登录", async () => {
-    const loginResponse = await login(adminAccount);
-    assert(loginResponse.accessToken, "管理员登录未返回 accessToken。");
+    const loginResponse = await login(adminAccount, adminPassword);
     assert(
       loginResponse.context?.adminPermissions?.includes("audit.read"),
-      "admin 缺少 audit.read 权限。",
+      `${adminAccount} 缺少 audit.read 权限。`,
     );
     assert(
       loginResponse.context?.adminPermissions?.includes("data.export"),
-      "admin 缺少 data.export 权限。",
+      `${adminAccount} 缺少 data.export 权限。`,
     );
     return loginResponse;
   });
 
   const doctorLogin = await step("负责医师账号登录", async () => {
-    const loginResponse = await login(doctorAccount);
-    assert(loginResponse.accessToken, "负责医师登录未返回 accessToken。");
+    const loginResponse = await login(doctorAccount, doctorPassword);
     assert(
       loginResponse.context?.doctorPatientIds?.includes(patientId),
-      "doctor001 未绑定 patient001 负责患者，请先执行 seed。",
+      `${doctorAccount} 未绑定 ${patientAccount} 负责患者，请先执行 seed。`,
     );
     completedChecks.add("doctor_login_verified");
     return loginResponse;
   });
 
   const auditorLogin = await step("只读审计账号登录", async () => {
-    const loginResponse = await login(auditorAccount);
-    assert(loginResponse.accessToken, "只读审计登录未返回 accessToken。");
+    const loginResponse = await login(auditorAccount, auditorPassword);
     assert(
       loginResponse.context?.adminPermissions?.includes("audit.read"),
-      "auditor001 缺少 audit.read 权限。",
+      `${auditorAccount} 缺少 audit.read 权限。`,
     );
     assert(
       !loginResponse.context?.adminPermissions?.includes("data.export"),
-      "auditor001 不应具备 data.export 权限。",
+      `${auditorAccount} 不应具备 data.export 权限。`,
     );
+    return loginResponse;
+  });
+
+  const caregiverLogin = await step("家属账号登录", async () => {
+    const loginResponse = await login(caregiverAccount, caregiverPassword);
+    assert(
+      loginResponse.context?.primaryRole === "caregiver",
+      `${caregiverAccount} 的 primaryRole 应为 caregiver。`,
+    );
+    assert(
+      loginResponse.context?.caregiverPatientIds?.includes(patientId),
+      `${caregiverAccount} 未绑定 ${patientAccount} 授权患者，请先执行 seed。`,
+    );
+    completedChecks.add("caregiver_login_verified");
     return loginResponse;
   });
 
@@ -123,35 +144,20 @@ try {
     "读取患者当前计划和 Browser Pose Game",
     async () => {
       const patientProfile = await request(`/patients/${patientId}`, {
-        token: patientLogin.accessToken,
+        session: patientLogin.session,
       });
       const activePlan = patientProfile.rehabPlans?.find(
         (plan) => plan.isCurrent && plan.status === "active",
       );
       assert(activePlan, "患者没有当前 active 康复计划，请先执行 seed。");
-      const browserPoseItem = activePlan.items?.find((item) => {
-        const content = item.gameContent;
-        return (
-          content?.code === "pose_reaction_hit" &&
-          content.runtimeType === "browser_pose_game" &&
-          content.status === "active" &&
-          content.buildStatus === "released"
-        );
-      });
+      const browserPoseItem = findReleasedBrowserPosePlanItem(activePlan.items);
       assert(
         browserPoseItem,
-        "当前计划中没有已发布的 pose_reaction_hit browser_pose_game 项。",
+        "当前计划中没有已发布且包含必要指标的 browser_pose_canvas 训练项目。",
       );
       const content = browserPoseItem.gameContent;
-      const metricTypes = new Set(
-        (content.requiredMetrics ?? []).map((metric) => metric.metricType),
-      );
-      for (const metricType of [
-        "reaction_time_ms",
-        "target_hit_rate",
-        "pose_visibility_avg",
-        "arm_raise_accuracy",
-      ]) {
+      const metricTypes = collectRequiredMetricTypes(content.requiredMetrics);
+      for (const metricType of requiredBrowserPoseMetricTypes) {
         assert(
           metricTypes.has(metricType),
           `游戏 requiredMetrics 缺少 ${metricType}。`,
@@ -166,13 +172,174 @@ try {
     },
   );
 
-  const session = await step("创建正式训练会话", async () => {
-    const response = await createTrainingSession({
-      token: patientLogin.accessToken,
+  await step("家属端摘要只返回脱敏摘要", async () => {
+    const requestedAt = new Date().toISOString();
+    const summary = await request(`/caregiver/patients/${patient.id}/summary`, {
+      session: caregiverLogin.session,
+    });
+    const completedAt = new Date().toISOString();
+    assert(summary.patient?.id === patient.id, "家属摘要 patient.id 不正确。");
+    assert(summary.patient?.name === "李*", "家属摘要患者姓名必须脱敏。");
+    assert(summary.patient?.age === patient.age, "家属摘要患者年龄不正确。");
+    assert(
+      summary.permissions?.fullMedicalRecord === false,
+      "家属摘要不得开放完整病历。",
+    );
+    assert(
+      summary.permissions?.rawAssessment === false,
+      "家属摘要不得开放原始评估。",
+    );
+    assert(
+      summary.permissions?.planEdit === false,
+      "家属摘要不得开放方案编辑。",
+    );
+    assert(
+      Array.isArray(summary.recentTraining),
+      "家属摘要 recentTraining 必须是数组。",
+    );
+    assert(
+      !containsKeyDeep(summary, "motionMetrics"),
+      "家属摘要不得包含原始动作指标 motionMetrics。",
+    );
+    assert(
+      !containsKeyDeep(summary, "metricsSummary"),
+      "家属摘要不得包含训练原始 metricsSummary。",
+    );
+    assert(
+      !containsKeyDeep(summary, "rawInputSummary"),
+      "家属摘要不得包含原始评估输入 rawInputSummary。",
+    );
+    const summaryText = JSON.stringify(summary);
+    assert(!summaryText.includes("李秀兰"), "家属摘要不得包含患者完整姓名。");
+    assert(
+      !summaryText.includes("13800006721"),
+      "家属摘要不得包含患者完整手机号。",
+    );
+    assert(
+      !summaryText.includes("13900008206"),
+      "家属摘要不得包含照护人完整手机号。",
+    );
+    completedChecks.add("caregiver_summary_desensitized");
+
+    const summaryLog = await findAuditLog({
+      adminSession: adminLogin.session,
+      actorUserId: caregiverLogin.user.id,
+      actorRole: "caregiver",
+      action: "caregiver.summary.view",
+      targetType: "patient_profile",
+      targetId: patient.id,
+      result: "success",
+      requestedAt,
+      dateTo: completedAt,
+      expectedMetadata: isEmptyMetadata,
+    });
+    created.auditLogIds.push(summaryLog.id);
+    completedChecks.add("caregiver_summary_view_audit_log_persisted");
+  });
+
+  await step("家属账号不能读取完整训练记录并记录拒绝审计", async () => {
+    const requestedAt = new Date().toISOString();
+    const denied = await request(`/patients/${patient.id}/training-records`, {
+      session: caregiverLogin.session,
+      expectedStatus: 403,
+    });
+    const completedAt = new Date().toISOString();
+    assert(
+      typeof denied.message === "string" && denied.message.length > 0,
+      "家属读取完整训练记录被拒绝时应返回明确错误消息。",
+    );
+    completedChecks.add("caregiver_full_training_records_denied");
+
+    const deniedLog = await findAuditLog({
+      adminSession: adminLogin.session,
+      actorUserId: caregiverLogin.user.id,
+      actorRole: "caregiver",
+      action: "access.denied",
+      targetType: "patient_profile",
+      targetId: patient.id,
+      result: "denied",
+      requestedAt,
+      dateTo: completedAt,
+      expectedMetadata: isEmptyMetadata,
+    });
+    created.auditLogIds.push(deniedLog.id);
+    completedChecks.add("caregiver_full_record_denied_audit_log_persisted");
+  });
+
+  const collectionCondition = await step("管理员创建正式采集条件", async () => {
+    const response = await createFormalCollectionCondition({
+      session: adminLogin.session,
+    });
+    assert(response.id, "采集条件未返回 id。");
+    assert(response.status === "active", "采集条件状态应为 active。");
+    return response;
+  });
+
+  const collectionProtocol = await step("管理员创建正式采集协议", async () => {
+    const response = await createFormalCollectionProtocol({
+      session: adminLogin.session,
+      condition: collectionCondition,
+      game,
+    });
+    assert(response.id, "采集协议未返回 id。");
+    assert(response.status === "active", "采集协议状态应为 active。");
+    assert(
+      response.conditionId === collectionCondition.id,
+      "采集协议未绑定本次采集条件。",
+    );
+    assert(response.gameContentId === game.id, "采集协议未绑定本次训练内容。");
+    assert(
+      response.runtimeType === "browser_pose_canvas",
+      "采集协议 runtimeType 应为 browser_pose_canvas。",
+    );
+    return response;
+  });
+
+  const collectionBatch = await step("医师创建正式采集批次", async () => {
+    const response = await createFormalCollectionBatch({
+      session: doctorLogin.session,
       patient,
       currentPlan,
       planItem,
       game,
+      protocol: collectionProtocol,
+    });
+    assert(response.id, "采集批次未返回 id。");
+    assert(response.status === "ready", "采集批次状态应为 ready。");
+    assert(response.patientId === patient.id, "采集批次 patientId 不正确。");
+    assert(
+      response.rehabPlanId === currentPlan.id,
+      "采集批次 rehabPlanId 不正确。",
+    );
+    assert(response.planItemId === planItem.id, "采集批次 planItemId 不正确。");
+    assert(
+      response.gameContentId === game.id,
+      "采集批次 gameContentId 不正确。",
+    );
+    assert(
+      response.protocolId === collectionProtocol.id,
+      "采集批次未绑定本次采集协议。",
+    );
+    assert(response.conditionId, "采集批次缺少 conditionId。");
+    assert(
+      response.protocolVersion === collectionProtocol.version,
+      "采集批次协议版本应与采集协议一致。",
+    );
+    assert(
+      response.consentSnapshot?.status === "granted",
+      "采集批次授权快照应为 granted。",
+    );
+    return response;
+  });
+
+  const session = await step("创建正式训练会话", async () => {
+    const response = await createTrainingSession({
+      session: patientLogin.session,
+      patient,
+      currentPlan,
+      planItem,
+      game,
+      collectionBatch,
       caseKey: "valid",
     });
     assert(response.id, "创建训练会话未返回 id。");
@@ -185,8 +352,17 @@ try {
       "训练会话 gameRunId 与请求不一致。",
     );
     assert(
-      response.runtimeConfigSnapshot?.runtimeType === "browser_pose_game",
-      "runtimeConfigSnapshot.runtimeType 应为 browser_pose_game。",
+      response.runtimeConfigSnapshot?.runtimeType === "browser_pose_canvas",
+      "runtimeConfigSnapshot.runtimeType 应为 browser_pose_canvas。",
+    );
+    assert(
+      response.collectionBatchId === collectionBatch.id,
+      "训练会话未绑定正式采集批次。",
+    );
+    assert(
+      response.runtimeConfigSnapshot?.collectionBatch?.id ===
+        collectionBatch.id,
+      "runtimeConfigSnapshot 未保留采集批次快照。",
     );
     assert(
       response.bridgeProtocolVersion === game.bridgeProtocolVersion,
@@ -198,11 +374,12 @@ try {
   await step("拒绝 source/runtime mismatch", async () => {
     const mismatch = await request(`/training-sessions/${session.id}/results`, {
       method: "POST",
-      token: patientLogin.accessToken,
+      session: patientLogin.session,
       body: buildTrainingResultPayload({
         source: "unity_webgl",
         session,
         game,
+        collectionBatch,
       }),
       expectedStatus: 400,
     });
@@ -219,15 +396,16 @@ try {
         `/training-sessions/${session.id}/results`,
         {
           method: "POST",
-          token: patientLogin.accessToken,
+          session: patientLogin.session,
           body: buildTrainingResultPayload({
-            source: "browser_pose_game",
+            source: "browser_pose_canvas",
             session,
             game,
+            collectionBatch,
           }),
         },
       );
-      assert(response.source === "browser_pose_game", "结果 source 不正确。");
+      assert(response.source === "browser_pose_canvas", "结果 source 不正确。");
       assert(
         response.gameRunId === session.gameRunId,
         "结果 gameRunId 不正确。",
@@ -248,13 +426,17 @@ try {
         response.abnormalFlag === false,
         "合法结果 abnormalFlag 应为 false。",
       );
+      assert(
+        response.collectionBatchId === collectionBatch.id,
+        "合法结果未绑定正式采集批次。",
+      );
       return response;
     },
   );
 
   await step("训练记录可查询且动作指标已入库", async () => {
     const records = await request(`/patients/${patient.id}/training-records`, {
-      token: patientLogin.accessToken,
+      session: doctorLogin.session,
     });
     const persistedSession = records.sessions?.find(
       (item) => item.id === session.id,
@@ -273,6 +455,20 @@ try {
       "训练记录应包含 4 条动作指标。",
     );
     assert(
+      persistedSession.collectionBatchId === collectionBatch.id,
+      "训练记录 session.collectionBatchId 应绑定正式采集批次。",
+    );
+    assert(
+      persistedSession.result?.collectionBatchId === collectionBatch.id,
+      "训练记录 result.collectionBatchId 应绑定正式采集批次。",
+    );
+    assert(
+      persistedSession.motionMetrics.every(
+        (metric) => metric.collectionBatchId === collectionBatch.id,
+      ),
+      "每条动作指标都应绑定正式采集批次。",
+    );
+    assert(
       records.summary.completedSessions >= 1,
       "训练记录 summary.completedSessions 应包含本次完成训练。",
     );
@@ -283,7 +479,7 @@ try {
       `/training-results/${result.id}/review`,
       {
         method: "PATCH",
-        token: doctorLogin.accessToken,
+        session: doctorLogin.session,
         body: {
           reviewConclusion: "accepted_valid",
           reviewNote: "正常训练结果不应进入人工复核流程。",
@@ -301,11 +497,12 @@ try {
 
   const suspiciousSession = await step("创建可疑训练复核会话", async () => {
     const response = await createTrainingSession({
-      token: patientLogin.accessToken,
+      session: patientLogin.session,
       patient,
       currentPlan,
       planItem,
       game,
+      collectionBatch,
       caseKey: "suspicious_review",
     });
     assert(response.id, "创建可疑训练会话未返回 id。");
@@ -327,11 +524,12 @@ try {
         `/training-sessions/${suspiciousSession.id}/results`,
         {
           method: "POST",
-          token: patientLogin.accessToken,
+          session: patientLogin.session,
           body: buildTrainingResultPayload({
-            source: "browser_pose_game",
+            source: "browser_pose_canvas",
             session: suspiciousSession,
             game,
+            collectionBatch,
             caseKey: "suspicious_review",
             overrides: {
               durationSeconds: 45,
@@ -352,6 +550,10 @@ try {
         response.qualityReasons?.includes("训练时长过短"),
         "可疑结果 qualityReasons 应包含训练时长过短。",
       );
+      assert(
+        response.collectionBatchId === collectionBatch.id,
+        "可疑结果未绑定正式采集批次。",
+      );
       completedChecks.add("suspicious_result_created");
       return response;
     },
@@ -362,7 +564,7 @@ try {
       `/training-results/${suspiciousResult.id}/review`,
       {
         method: "PATCH",
-        token: doctorLogin.accessToken,
+        session: doctorLogin.session,
         body: {
           reviewConclusion: "needs_retrain",
           reviewNote:
@@ -403,7 +605,7 @@ try {
 
   await step("训练记录持久化复核结论且保留原始质量状态", async () => {
     const records = await request(`/patients/${patient.id}/training-records`, {
-      token: patientLogin.accessToken,
+      session: doctorLogin.session,
     });
     const persistedSession = records.sessions?.find(
       (item) => item.id === suspiciousSession.id,
@@ -450,7 +652,7 @@ try {
         result: "success",
         limit: "10",
       })}`,
-      { token: adminLogin.accessToken },
+      { session: adminLogin.session },
     );
     assert(reviewLogs.length > 0, "未查询到 training_result.review 审计日志。");
     const reviewLog = reviewLogs.find(
@@ -471,7 +673,7 @@ try {
       `/training-results/${suspiciousResult.id}/review`,
       {
         method: "PATCH",
-        token: doctorLogin.accessToken,
+        session: doctorLogin.session,
         body: {
           reviewConclusion: "excluded_from_analysis",
           reviewNote: "重复复核应被阻断。",
@@ -496,7 +698,7 @@ try {
         result: "success",
         limit: "10",
       })}`,
-      { token: adminLogin.accessToken },
+      { session: adminLogin.session },
     );
     assert(startLogs.length > 0, "未查询到 training_session.start 审计日志。");
 
@@ -508,7 +710,7 @@ try {
         result: "success",
         limit: "10",
       })}`,
-      { token: adminLogin.accessToken },
+      { session: adminLogin.session },
     );
     assert(submitLogs.length > 0, "未查询到 training_result.submit 审计日志。");
   });
@@ -537,9 +739,9 @@ try {
 
       const revoked = await request(`/consents/${cameraConsent.id}/revoke`, {
         method: "PATCH",
-        token: patientLogin.accessToken,
+        session: patientLogin.session,
       });
-      created.revokedConsentIds.push(...currentCameraConsentIds);
+      created.revokedConsentTypes.push("camera_capture");
       assert(
         revoked.status === "revoked",
         "摄像头授权撤回后 status 应为 revoked。",
@@ -557,18 +759,18 @@ try {
           snapshot.status === "revoked" && snapshot.revokedAt,
           "摄像头授权撤回后所有当前授权都应为 revoked。",
         );
-        created.revokedAtByConsentId[snapshot.id] = snapshot.revokedAt;
       }
       completedChecks.add("camera_consent_revoked");
 
       const blocked = await request("/training-sessions", {
         method: "POST",
-        token: patientLogin.accessToken,
+        session: patientLogin.session,
         body: buildTrainingSessionPayload({
           patient,
           currentPlan,
           planItem,
           game,
+          collectionBatch,
           caseKey: "camera_revoked_block",
         }),
         expectedStatus: 403,
@@ -585,35 +787,127 @@ try {
   );
 
   await step("审计日志记录摄像头授权撤回", async () => {
-    const revokeLogs = await request(
-      `/admin/audit-logs?${new URLSearchParams({
-        action: "consent.revoke",
-        targetType: "consent_record",
-        targetId: revokedCameraConsent.id,
-        result: "success",
-        limit: "10",
-      })}`,
-      { token: adminLogin.accessToken },
-    );
-    assert(revokeLogs.length > 0, "未查询到 consent.revoke 审计日志。");
-    const candidateLogs = revokeLogs.filter(
-      (item) =>
-        item.actorUserId === patient.userId &&
-        new Date(item.createdAt).getTime() >=
-          new Date(revokedCameraConsent.revokeRequestedAt).getTime(),
-    );
-    created.auditLogIds.push(...candidateLogs.map((item) => item.id));
-    const revokeLog = candidateLogs.find(
-      (item) =>
-        item.metadata?.patientId === patient.id &&
-        item.metadata?.consentType === "camera_capture",
-    );
-    assert(
-      revokeLog,
-      "consent.revoke 审计日志缺少 patientId/consentType 元数据。",
-    );
+    const revokeLog = await findAuditLog({
+      adminSession: adminLogin.session,
+      actorUserId: patient.userId,
+      actorRole: "patient",
+      action: "consent.revoke",
+      targetType: "consent_record",
+      targetId: revokedCameraConsent.id,
+      result: "success",
+      requestedAt: revokedCameraConsent.revokeRequestedAt,
+      expectedMetadata: (metadata) =>
+        metadata.patientId === patient.id &&
+        metadata.consentType === "camera_capture",
+    });
     created.auditLogIds.push(revokeLog.id);
     completedChecks.add("consent_revoke_audit_log_persisted");
+  });
+
+  const revokedCaregiverSharingConsent = await step(
+    "患者撤回家属共享授权并阻断家属摘要",
+    async () => {
+      const caregiverSharingConsent = findCurrentConsent(
+        patient.consents,
+        "caregiver_sharing",
+      );
+      assert(
+        caregiverSharingConsent,
+        "未找到当前 caregiver_sharing 授权，无法验证撤回阻断。",
+      );
+      const currentCaregiverSharingConsentIds = await currentConsentIds(
+        patient.id,
+        patient.userId,
+        "caregiver_sharing",
+      );
+      assert(
+        currentCaregiverSharingConsentIds.includes(caregiverSharingConsent.id),
+        "当前 caregiver_sharing 授权列表与患者详情不一致。",
+      );
+      const revokeRequestedAt = new Date().toISOString();
+
+      const revoked = await request(
+        `/consents/${caregiverSharingConsent.id}/revoke`,
+        {
+          method: "PATCH",
+          session: patientLogin.session,
+        },
+      );
+      created.revokedConsentTypes.push("caregiver_sharing");
+      assert(
+        revoked.status === "revoked",
+        "家属共享授权撤回后 status 应为 revoked。",
+      );
+      assert(revoked.revokedAt, "家属共享授权撤回后应记录 revokedAt。");
+      const revokedSnapshots = await revokedConsentSnapshots(
+        currentCaregiverSharingConsentIds,
+      );
+      assert(
+        revokedSnapshots.length === currentCaregiverSharingConsentIds.length,
+        "家属共享授权撤回后未找到所有授权快照。",
+      );
+      for (const snapshot of revokedSnapshots) {
+        assert(
+          snapshot.status === "revoked" && snapshot.revokedAt,
+          "家属共享授权撤回后所有当前授权都应为 revoked。",
+        );
+      }
+      completedChecks.add("caregiver_sharing_consent_revoked");
+
+      const blockedRequestedAt = new Date().toISOString();
+      const blocked = await request(
+        `/caregiver/patients/${patient.id}/summary`,
+        {
+          session: caregiverLogin.session,
+          expectedStatus: 403,
+        },
+      );
+      const blockedCompletedAt = new Date().toISOString();
+      assert(
+        typeof blocked.message === "string" &&
+          (blocked.message.includes("家属共享授权") ||
+            blocked.message.includes("无权访问")),
+        "家属共享授权撤回后摘要查看应被明确阻断。",
+      );
+      completedChecks.add("revoked_caregiver_sharing_blocks_summary");
+
+      const blockedLog = await findAuditLog({
+        adminSession: adminLogin.session,
+        actorUserId: caregiverLogin.user.id,
+        actorRole: "caregiver",
+        action: "access.denied",
+        targetType: "patient_profile",
+        targetId: patient.id,
+        result: "denied",
+        requestedAt: blockedRequestedAt,
+        dateTo: blockedCompletedAt,
+        expectedMetadata: isEmptyMetadata,
+      });
+      created.auditLogIds.push(blockedLog.id);
+      completedChecks.add(
+        "revoked_caregiver_summary_denied_audit_log_persisted",
+      );
+
+      return { ...revoked, revokeRequestedAt };
+    },
+  );
+
+  await step("审计日志记录家属共享授权撤回", async () => {
+    const revokeLog = await findAuditLog({
+      adminSession: adminLogin.session,
+      actorUserId: patient.userId,
+      actorRole: "patient",
+      action: "consent.revoke",
+      targetType: "consent_record",
+      targetId: revokedCaregiverSharingConsent.id,
+      result: "success",
+      requestedAt: revokedCaregiverSharingConsent.revokeRequestedAt,
+      expectedMetadata: (metadata) =>
+        metadata.patientId === patient.id &&
+        metadata.consentType === "caregiver_sharing",
+    });
+    created.auditLogIds.push(revokeLog.id);
+    completedChecks.add("caregiver_sharing_revoke_audit_log_persisted");
   });
 
   const exportReason = `本地契约验收导出原因 ${runKey}：验证脱敏，不应出现在导出结果或审计 metadata。`;
@@ -621,7 +915,7 @@ try {
     const requestedAt = new Date().toISOString();
     const exported = await request("/admin/exports/patients", {
       method: "POST",
-      token: adminLogin.accessToken,
+      session: adminLogin.session,
       body: {
         format: "json",
         reason: exportReason,
@@ -674,7 +968,7 @@ try {
     completedChecks.add("desensitized_patient_export_verified");
 
     const exportLog = await findDataExportAuditLog({
-      adminToken: adminLogin.accessToken,
+      adminSession: adminLogin.session,
       actorUserId: adminLogin.user.id,
       dataset: "patients",
       result: "success",
@@ -707,7 +1001,7 @@ try {
     const requestedAt = new Date().toISOString();
     const denied = await request("/admin/exports/patients", {
       method: "POST",
-      token: doctorLogin.accessToken,
+      session: doctorLogin.session,
       body: {
         format: "json",
         reason: deniedReason,
@@ -721,7 +1015,7 @@ try {
       "医师越权导出被拒绝时应返回明确错误消息。",
     );
     const deniedLog = await findDataExportAuditLog({
-      adminToken: adminLogin.accessToken,
+      adminSession: adminLogin.session,
       actorUserId: doctorLogin.user.id,
       dataset: "patients",
       result: "denied",
@@ -748,7 +1042,7 @@ try {
     const requestedAt = new Date().toISOString();
     const denied = await request("/admin/exports/patients", {
       method: "POST",
-      token: auditorLogin.accessToken,
+      session: auditorLogin.session,
       body: {
         format: "json",
         reason: deniedReason,
@@ -762,7 +1056,7 @@ try {
       "只读审计越权导出被拒绝时应返回明确错误消息。",
     );
     const deniedLog = await findDataExportAuditLog({
-      adminToken: adminLogin.accessToken,
+      adminSession: adminLogin.session,
       actorUserId: auditorLogin.user.id,
       dataset: "patients",
       result: "denied",
@@ -802,29 +1096,156 @@ try {
   await prisma.$disconnect();
 }
 
-async function login(account) {
-  return request("/auth/login", {
-    method: "POST",
-    body: { account, password: seedPassword },
+async function login(account, password) {
+  const session = new CookieSessionClient(apiBaseUrl);
+  const loginResponse = await session.login(account, password);
+  assert(
+    loginResponse.status === "authenticated",
+    `${account} 登录 status 必须是 authenticated。`,
+  );
+  assert(loginResponse.context, `${account} 登录响应缺少 context。`);
+  return { ...loginResponse, session };
+}
+
+function findReleasedBrowserPosePlanItem(items) {
+  return items?.find((item) => {
+    const content = item.gameContent;
+    if (!content) return false;
+    if (content.runtimeType !== "browser_pose_canvas") return false;
+    if (content.status !== "active") return false;
+    if (content.buildStatus !== "released") return false;
+    return hasRequiredBrowserPoseMetrics(content.requiredMetrics);
   });
 }
 
-async function createTrainingSession({
-  token,
+function hasRequiredBrowserPoseMetrics(requiredMetrics) {
+  const metricTypes = collectRequiredMetricTypes(requiredMetrics);
+  return requiredBrowserPoseMetricTypes.every((metricType) =>
+    metricTypes.has(metricType),
+  );
+}
+
+function collectRequiredMetricTypes(requiredMetrics) {
+  const metricTypes = new Set();
+  if (!Array.isArray(requiredMetrics)) return metricTypes;
+  for (const metric of requiredMetrics) {
+    if (metric && typeof metric === "object") {
+      metricTypes.add(metric.metricType);
+    }
+  }
+  return metricTypes;
+}
+
+async function createFormalCollectionCondition({ session }) {
+  const response = await request("/admin/collection-conditions", {
+    method: "POST",
+    session,
+    body: {
+      code: `${runKey}_clinic_capture`.slice(0, 64),
+      name: "接口契约验收诊室采集条件",
+      description: "接口契约验收使用的诊室光照、上肢入镜和摄像头准备条件。",
+      environment: {
+        lighting: "standard_clinic",
+        distanceMeters: 1.5,
+        posture: "standing_or_seated",
+      },
+      deviceRequirements: {
+        camera: "front_rgb",
+        minResolution: "720p",
+        browser: "chromium_or_edge",
+      },
+      taskParameters: {
+        bodyScope: "upper_body",
+        expectedDurationSeconds: 120,
+      },
+      qualityRules: {
+        minPoseVisibility: 0.8,
+        requiredMetrics: requiredBrowserPoseMetricTypes,
+      },
+    },
+  });
+  created.collectionConditionIds.push(response.id);
+  return response;
+}
+
+async function createFormalCollectionProtocol({ session, condition, game }) {
+  const response = await request("/admin/collection-protocols", {
+    method: "POST",
+    session,
+    body: {
+      conditionId: condition.id,
+      gameContentId: game.id,
+      code: `${runKey}_pose_protocol`.slice(0, 64),
+      name: "接口契约验收体感采集协议",
+      version: "1.0.0",
+      runtimeType: "browser_pose_canvas",
+      requiredConsentTypes: ["privacy_policy", "camera_capture"],
+      requiredInputModes: ["camera_pose"],
+      requiredMetrics: requiredBrowserPoseMetricTypes.map((metricType) =>
+        requiredMetric(metricType, metricUnit(metricType)),
+      ),
+      conditionRules: {
+        requireUpperBodyInFrame: true,
+        minDistanceMeters: 1.2,
+        maxDistanceMeters: 2,
+      },
+      samplingConfig: {
+        sampleRateHz: 30,
+        windowSeconds: 120,
+      },
+      qualityGate: {
+        minPoseVisibility: 0.8,
+        requireQualityFlag: "valid",
+      },
+    },
+  });
+  created.collectionProtocolIds.push(response.id);
+  return response;
+}
+
+async function createFormalCollectionBatch({
+  session,
   patient,
   currentPlan,
   planItem,
   game,
+  protocol,
+}) {
+  const response = await request("/collection-batches", {
+    method: "POST",
+    session,
+    body: {
+      patientId: patient.id,
+      rehabPlanId: currentPlan.id,
+      planItemId: planItem.id,
+      gameContentId: game.id,
+      protocolId: protocol.id,
+      idempotencyKey: `${runKey}_collection_batch`,
+      operatorNotes: "接口契约验收正式采集批次。",
+    },
+  });
+  created.collectionBatchIds.push(response.id);
+  return response;
+}
+
+async function createTrainingSession({
+  session,
+  patient,
+  currentPlan,
+  planItem,
+  game,
+  collectionBatch,
   caseKey,
 }) {
   const response = await request("/training-sessions", {
     method: "POST",
-    token,
+    session,
     body: buildTrainingSessionPayload({
       patient,
       currentPlan,
       planItem,
       game,
+      collectionBatch,
       caseKey,
     }),
   });
@@ -837,6 +1258,7 @@ function buildTrainingSessionPayload({
   currentPlan,
   planItem,
   game,
+  collectionBatch,
   caseKey,
 }) {
   return {
@@ -844,6 +1266,7 @@ function buildTrainingSessionPayload({
     rehabPlanId: currentPlan.id,
     planItemId: planItem.id,
     gameContentId: game.id,
+    collectionBatchId: collectionBatch.id,
     idempotencyKey: `${runKey}_${caseKey}`,
     gameRunId: `${runKey}_${caseKey}_browser_pose`,
     deviceCode: `${runKey}_${caseKey}_camera_device`,
@@ -888,6 +1311,7 @@ function buildTrainingResultPayload({
   source,
   session,
   game,
+  collectionBatch,
   caseKey = "valid",
   overrides = {},
 }) {
@@ -898,11 +1322,17 @@ function buildTrainingResultPayload({
     gameVersion: game.gameVersion,
     protocolVersion: session.bridgeProtocolVersion,
     clientGeneratedAt,
+    collectionBatchId: collectionBatch.id,
+    dynamicDifficultyEvidence: buildDynamicDifficultyEvidence({
+      session,
+      clientGeneratedAt,
+    }),
     rawPayloadHash: hashPayload({
       runKey,
       caseKey,
       source,
       sessionId: session.id,
+      collectionBatchId: collectionBatch.id,
       clientGeneratedAt,
       overrides,
     }),
@@ -927,8 +1357,64 @@ function buildTrainingResultPayload({
   return { ...payload, ...overrides, metricsSummary };
 }
 
+function requiredMetric(metricType, unit) {
+  return { metricType, unit, min: 0, ...(unit === "ratio" ? { max: 1 } : {}) };
+}
+
+function metricUnit(metricType) {
+  if (
+    metricType === "target_hit_rate" ||
+    metricType === "pose_visibility_avg" ||
+    metricType === "arm_raise_accuracy"
+  ) {
+    return "ratio";
+  }
+  return "ms";
+}
+
+function buildDynamicDifficultyEvidence({ session, clientGeneratedAt }) {
+  const approvedPlanItemId = session.runtimeConfigSnapshot?.approvedPlanItemId;
+  const assessmentSourceId = session.runtimeConfigSnapshot?.assessmentSourceId;
+  const startingDifficultyLevel =
+    session.runtimeConfigSnapshot?.startingDifficultyLevel;
+
+  assert(approvedPlanItemId, "训练会话缺少 approvedPlanItemId 难度证据。");
+  assert(assessmentSourceId, "训练会话缺少 assessmentSourceId 难度证据。");
+  assert(
+    Number.isFinite(startingDifficultyLevel),
+    "训练会话缺少 startingDifficultyLevel 难度证据。",
+  );
+
+  return {
+    schemaVersion: "1.0.0",
+    events: [
+      {
+        startingLevel: startingDifficultyLevel,
+        startingLevelSource: "clinician_approved_plan",
+        approvedPlanItemId,
+        assessmentSourceId,
+        triggerReason: "accuracy_high",
+        before: {
+          speed: 1,
+          complexityLevel: startingDifficultyLevel,
+        },
+        after: {
+          speed: 1.2,
+          complexityLevel: Math.min(startingDifficultyLevel + 1, 3),
+        },
+        adjustedAt: clientGeneratedAt,
+        runtimeFrameId: `${session.gameRunId}:frame:72`,
+        runtimeWindowId: `${session.gameRunId}:window:0-120000`,
+        ...(startingDifficultyLevel >= 3
+          ? { safetyClampReason: "clinician_limit:no_runtime_change" }
+          : {}),
+      },
+    ],
+  };
+}
+
 async function findDataExportAuditLog({
-  adminToken,
+  adminSession,
   actorUserId,
   dataset,
   result,
@@ -946,7 +1432,7 @@ async function findDataExportAuditLog({
       result,
       limit: "200",
     })}`,
-    { token: adminToken },
+    { session: adminSession },
   );
   const reasonHash = hashText(reason).slice(0, 16);
   const requestedAtMs = new Date(requestedAt).getTime();
@@ -963,6 +1449,55 @@ async function findDataExportAuditLog({
   return log;
 }
 
+async function findAuditLog({
+  adminSession,
+  actorUserId,
+  actorRole,
+  action,
+  targetType,
+  targetId,
+  result,
+  requestedAt,
+  dateTo,
+  expectedMetadata,
+}) {
+  const searchParams = new URLSearchParams({
+    action,
+    targetType,
+    targetId,
+    actorUserId,
+    actorRole,
+    dateFrom: requestedAt,
+    result,
+    limit: "200",
+  });
+  if (dateTo) {
+    searchParams.set("dateTo", dateTo);
+  }
+  const logs = await request(`/admin/audit-logs?${searchParams}`, {
+    session: adminSession,
+  });
+  const requestedAtMs = new Date(requestedAt).getTime();
+  const dateToMs = dateTo ? new Date(dateTo).getTime() : undefined;
+  const log = logs.find((item) => {
+    const metadata = item.metadata ?? {};
+    return (
+      item.actorUserId === actorUserId &&
+      item.actorRole === actorRole &&
+      item.action === action &&
+      item.targetType === targetType &&
+      item.targetId === targetId &&
+      item.result === result &&
+      new Date(item.createdAt).getTime() >= requestedAtMs &&
+      (dateToMs === undefined ||
+        new Date(item.createdAt).getTime() <= dateToMs) &&
+      expectedMetadata(metadata)
+    );
+  });
+  assert(log, `未查询到本次 ${action} ${result} 审计日志。`);
+  return log;
+}
+
 function assertStringArrayEqual(actual, expected, message) {
   assert(Array.isArray(actual), message);
   assert(actual.length === expected.length, message);
@@ -970,6 +1505,21 @@ function assertStringArrayEqual(actual, expected, message) {
     assert(actual[index] === value, message);
   }
   return true;
+}
+
+function isEmptyMetadata(metadata) {
+  return Object.keys(metadata).length === 0;
+}
+
+function containsKeyDeep(value, targetKey) {
+  if (!value || typeof value !== "object") return false;
+  if (Array.isArray(value)) {
+    return value.some((item) => containsKeyDeep(item, targetKey));
+  }
+  return Object.entries(value).some(
+    ([key, childValue]) =>
+      key === targetKey || containsKeyDeep(childValue, targetKey),
+  );
 }
 
 function metric(metricType, metricValue, unit, sampleCount) {
@@ -990,91 +1540,151 @@ function metric(metricType, metricValue, unit, sampleCount) {
   };
 }
 
-async function request(path, options = {}) {
-  const response = await fetch(`${apiBaseUrl}${path}`, {
-    method: options.method ?? "GET",
-    headers: {
-      "Content-Type": "application/json",
-      ...(options.token ? { Authorization: `Bearer ${options.token}` } : {}),
-    },
-    body: options.body === undefined ? undefined : JSON.stringify(options.body),
-  });
-
-  const body = await readResponseBody(response);
-  const expectedStatus = options.expectedStatus;
-  const statusMatches =
-    expectedStatus === undefined
-      ? response.ok
-      : response.status === expectedStatus;
-
-  if (!statusMatches) {
-    throw new Error(
-      `HTTP ${response.status} ${response.statusText} for ${path}: ${JSON.stringify(
-        body,
-      )}`,
-    );
-  }
-
-  return body;
-}
-
-async function readResponseBody(response) {
-  const text = await response.text();
-  if (!text) return null;
-  try {
-    return JSON.parse(text);
-  } catch {
-    return text;
-  }
+async function request(path, { session, ...options }) {
+  assert(
+    session instanceof CookieSessionClient,
+    `${path} 请求必须显式使用对应角色的 cookie session。`,
+  );
+  return session.request(path, options);
 }
 
 async function cleanupCreatedData() {
   await restoreRevokedConsents();
   await cleanupRecordedAuditLogs();
-  if (!created.sessionIds.length) return;
   const sessionIds = [...created.sessionIds].filter(Boolean);
-  await prisma.auditLog.deleteMany({
-    where: { targetId: { in: sessionIds } },
-  });
-  await prisma.motionMetric.deleteMany({
-    where: { trainingSessionId: { in: sessionIds } },
-  });
-  const createdResults = await prisma.trainingResult.findMany({
-    where: { sessionId: { in: sessionIds } },
-    select: { id: true },
-  });
-  const resultIds = createdResults.map((result) => result.id);
-  if (resultIds.length) {
+  if (sessionIds.length) {
     await prisma.auditLog.deleteMany({
-      where: { targetType: "training_result", targetId: { in: resultIds } },
+      where: { targetId: { in: sessionIds } },
     });
-    await prisma.trainingResult.deleteMany({
-      where: { id: { in: resultIds } },
+    await prisma.motionMetric.deleteMany({
+      where: { trainingSessionId: { in: sessionIds } },
     });
+    const createdResults = await prisma.trainingResult.findMany({
+      where: { sessionId: { in: sessionIds } },
+      select: { id: true },
+    });
+    const resultIds = createdResults.map((result) => result.id);
+    if (resultIds.length) {
+      await prisma.auditLog.deleteMany({
+        where: { targetType: "training_result", targetId: { in: resultIds } },
+      });
+      await prisma.trainingResult.deleteMany({
+        where: { id: { in: resultIds } },
+      });
+    }
+    await prisma.trainingSession.deleteMany({
+      where: { id: { in: sessionIds } },
+    });
+    const remaining = await prisma.trainingSession.count({
+      where: { id: { in: sessionIds } },
+    });
+    assert(remaining === 0, "接口契约验收训练数据清理失败。");
   }
-  await prisma.trainingSession.deleteMany({
-    where: { id: { in: sessionIds } },
-  });
-  const remaining = await prisma.trainingSession.count({
-    where: { id: { in: sessionIds } },
-  });
-  assert(remaining === 0, "接口契约验收数据清理失败。");
+
+  await cleanupCreatedCollectionRecords();
   console.log("已清理本次接口契约验收数据。");
 }
 
+async function cleanupCreatedCollectionRecords() {
+  const collectionBatchIds = Array.from(
+    new Set(created.collectionBatchIds),
+  ).filter(Boolean);
+  if (collectionBatchIds.length) {
+    await prisma.auditLog.deleteMany({
+      where: {
+        targetType: "collection_batch",
+        targetId: { in: collectionBatchIds },
+      },
+    });
+    await prisma.collectionBatch.deleteMany({
+      where: { id: { in: collectionBatchIds } },
+    });
+  }
+
+  const collectionProtocolIds = Array.from(
+    new Set(created.collectionProtocolIds),
+  ).filter(Boolean);
+  if (collectionProtocolIds.length) {
+    await prisma.auditLog.deleteMany({
+      where: {
+        targetType: "collection_protocol",
+        targetId: { in: collectionProtocolIds },
+      },
+    });
+    await prisma.collectionProtocol.deleteMany({
+      where: { id: { in: collectionProtocolIds } },
+    });
+  }
+
+  const collectionConditionIds = Array.from(
+    new Set(created.collectionConditionIds),
+  ).filter(Boolean);
+  if (collectionConditionIds.length) {
+    await prisma.auditLog.deleteMany({
+      where: {
+        targetType: "collection_condition",
+        targetId: { in: collectionConditionIds },
+      },
+    });
+    await prisma.collectionCondition.deleteMany({
+      where: { id: { in: collectionConditionIds } },
+    });
+  }
+}
+
 async function restoreRevokedConsents() {
-  if (!created.revokedConsentIds.length) return;
-  const consentIds = Array.from(new Set(created.revokedConsentIds)).filter(
+  const consentTypes = Array.from(new Set(created.revokedConsentTypes)).filter(
     Boolean,
   );
-  await prisma.consentRecord.updateMany({
-    where: buildConsentRestoreWhere(consentIds, created.revokedAtByConsentId),
-    data: {
-      status: "granted",
-      revokedAt: null,
-    },
-  });
-  console.log("已恢复本次接口契约验收临时撤回的授权。");
+  if (!consentTypes.length) return;
+
+  const patientLogin = await login(patientAccount, patientPassword);
+  const patientId = patientLogin.context?.patientIds?.[0];
+  assert(patientId, "恢复授权失败：患者登录上下文缺少 patientId。");
+
+  for (const consentType of consentTypes) {
+    const activeConsent = await prisma.consentRecord.findFirst({
+      where: {
+        patientId,
+        subjectUserId: patientLogin.user.id,
+        consentType,
+        consentVersion: "v1.2",
+        status: "granted",
+        revokedAt: null,
+      },
+    });
+    if (activeConsent) continue;
+
+    const requestedAt = new Date().toISOString();
+    const restoredConsent = await request("/consents", {
+      method: "POST",
+      session: patientLogin.session,
+      body: {
+        patientId,
+        subjectUserId: patientLogin.user.id,
+        consentType,
+        consentVersion: "v1.2",
+        evidenceSnapshot: {
+          source: "local_contract_restore",
+          runKey,
+          restoredAt: new Date().toISOString(),
+        },
+      },
+    });
+    const grantLog = await findAuditLog({
+      adminSession: (await login(adminAccount, adminPassword)).session,
+      actorUserId: patientLogin.user.id,
+      actorRole: "patient",
+      action: "consent.grant",
+      targetType: "consent_record",
+      targetId: restoredConsent.id,
+      result: "success",
+      requestedAt,
+      expectedMetadata: isEmptyMetadata,
+    });
+    created.auditLogIds.push(grantLog.id);
+  }
+  console.log("已通过正式授权 API 恢复本次接口契约验收临时撤回的授权。");
 }
 
 async function cleanupRecordedAuditLogs() {
@@ -1104,6 +1714,14 @@ function assert(condition, message) {
   if (!condition) {
     throw new Error(message);
   }
+}
+
+function requiredEnv(name) {
+  const value = process.env[name];
+  if (typeof value !== "string" || !value.trim()) {
+    throw new Error(`缺少环境变量 ${name}。`);
+  }
+  return value;
 }
 
 function readProjectEnv(path) {

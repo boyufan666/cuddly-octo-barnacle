@@ -1,0 +1,57 @@
+{
+  "documentVersion": "empty-real-loop-orchestrator/v1",
+  "acceptance": {
+    "customerName": "<customer-name>",
+    "acceptedAt": "<2026-06-30T10:00:00.000Z>",
+    "testerName": "<field-acceptance-tester>",
+    "environment": "<trial-or-production>"
+  },
+  "productionGate": {
+    "customerInputPath": "evidence/customer-production-input.json"
+  },
+  "trialEmptyLoop": {
+    "required": true
+  },
+  "formalAcceptanceChain": {
+    "requiredForLaunch": true,
+    "chainConfigPath": "evidence/formal-chain/formal-acceptance-chain.json"
+  },
+  "ad8CaregiverInterview": {
+    "requiredForLaunch": true,
+    "acceptanceConfigPath": "evidence/assessments/ad8-caregiver-interview.acceptance.json"
+  },
+  "aiSpeechTts": {
+    "aiRequiredForLaunch": true,
+    "speechRequiredForLaunch": true,
+    "ttsRequiredForLaunch": true,
+    "aiAssessmentAcceptanceConfigPath": "evidence/ai/ai-assessment.acceptance.json",
+    "speechTranscriptEvidencePath": "evidence/speech/speech-transcript.evidence.json",
+    "speechTranscriptAcceptanceConfigPath": "evidence/speech/speech-transcript.acceptance.json",
+    "speechAiAssessmentConfigPath": "evidence/speech/speech-ai-assessment.acceptance.json",
+    "ttsEvidencePath": "evidence/tts/tts-speech-output.evidence.json",
+    "ttsAcceptanceConfigPath": "evidence/tts/tts-speech-output.acceptance.json"
+  },
+  "unity": {
+    "requiredForLaunch": true,
+    "evidencePath": "evidence/unity/unity-field.evidence.json",
+    "apiBaseUrl": "https://api.customer-health.cn",
+    "patientAccount": "<unity-patient-read-account>",
+    "patientPassword": "<unity-patient-read-password>",
+    "auditAccount": "<unity-audit-read-account>",
+    "auditPassword": "<unity-audit-read-password>"
+  },
+  "browserPose": {
+    "requiredForLaunch": true,
+    "evidencePath": "evidence/browser-pose/browser-pose.evidence.json",
+    "apiBaseUrl": "https://api.customer-health.cn",
+    "patientAccount": "<browser-pose-patient-read-account>",
+    "patientPassword": "<browser-pose-patient-read-password>",
+    "auditAccount": "<browser-pose-audit-read-account>",
+    "auditPassword": "<browser-pose-audit-read-password>"
+  },
+  "caregiverAudit": {
+    "required": true,
+    "localContractsRequired": true,
+    "evidenceNotes": "家属摘要脱敏、完整训练记录拒绝、撤权阻断、后台审计反查均已纳入本次验收。"
+  }
+}

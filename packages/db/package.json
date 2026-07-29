@@ -3,22 +3,34 @@
   "version": "0.1.0",
   "private": true,
   "type": "commonjs",
-  "main": "src/index.ts",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "scripts": {
-    "build": "tsc --noEmit",
+    "build": "tsc -p tsconfig.build.json",
     "lint": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test src/*.test.ts prisma/*.contract.test.mjs",
+    "test:seed:postgres": "tsx --test prisma/encrypted-seed.postgres.test.ts",
+    "test:sensitive:postgres": "node --test prisma/sensitive-encryption-migration.postgres.test.mjs",
+    "test:task7:postgres": "node --test prisma/task7-training-session-lifecycle.postgres.test.mjs",
+    "sensitive:backfill": "tsx src/backfill-sensitive-encryption.ts",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev --name init",
+    "prisma:migrate:deploy": "prisma migrate deploy",
+    "prisma:migrate:status": "prisma migrate status",
     "prisma:seed": "tsx prisma/seed.ts",
-    "prisma:seed:trial": "tsx prisma/seed-trial.ts"
+    "prisma:seed:trial": "tsx prisma/seed-trial.ts",
+    "credential:reset:first-admin": "tsx src/reset-credential.ts",
+    "bootstrap:production": "tsx src/production-bootstrap.ts"
   },
   "dependencies": {
-    "@prisma/client": "^6.19.2"
+    "@prisma/client": "^6.19.2",
+    "argon2": "^0.44.0"
   },
   "devDependencies": {
     "@types/node": "^24.10.1",
     "prisma": "^6.19.2",
-    "tsx": "^4.21.0",
+    "tsx": "^4.23.1",
     "typescript": "^5.9.3"
   },
   "prisma": {

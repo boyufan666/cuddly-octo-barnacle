@@ -1,0 +1,77 @@
+{
+  "evidenceVersion": "tts-speech-output-acceptance/v1",
+  "acceptance": {
+    "acceptedAt": "2026-05-29T10:00:00.000Z",
+    "testerName": "现场验收员",
+    "siteName": "康复中心试点现场",
+    "environment": "trial"
+  },
+  "browser": {
+    "name": "Chrome",
+    "version": "126.0.0.0",
+    "userAgent": "现场浏览器 userAgent",
+    "pageUrl": "https://rehab.customer.example.com/assessment"
+  },
+  "patient": {
+    "patientId": "patient_real_001",
+    "patientExportId": "patient_export_8a72"
+  },
+  "consent": {
+    "privacyConsentId": "consent_privacy_real_001",
+    "aiProcessingConsentId": "consent_ai_real_001",
+    "consentVersion": "v1.2",
+    "privacyStatus": "granted",
+    "aiProcessingStatus": "granted",
+    "grantedAt": "2026-05-29T09:50:00.000Z"
+  },
+  "ttsProvider": {
+    "provider": "xiaomi-mimo-tts",
+    "modelVersion": "mimo-v2.5-tts",
+    "endpointRef": "https://token-plan-cn.xiaomimimo.com/v1/chat/completions",
+    "apiKeyRef": "secret-manager://rehab-prod/xiaomi-mimo-tts-api-key",
+    "accountOwner": "客户供应商账号负责人",
+    "voiceId": "Chloe",
+    "callLogRetentionDays": 180
+  },
+  "synthesisRequest": {
+    "scenario": "assessment_prompt",
+    "inputTextHash": "sha256-of-synthesized-text",
+    "fullTextStored": false,
+    "sentThroughPlatformApi": true
+  },
+  "synthesisResult": {
+    "patientId": "patient_real_001",
+    "status": "synthesized",
+    "callId": "tts-call-real-001",
+    "calledAt": "2026-05-29T09:58:45.000Z",
+    "source": "provider_text_to_speech",
+    "inputTextHash": "sha256-of-synthesized-text",
+    "audio": {
+      "mimeType": "audio/wav",
+      "format": "wav",
+      "byteLength": 20480,
+      "rawAudioStored": false
+    }
+  },
+  "playbackResult": {
+    "playedInBrowser": true,
+    "playedAt": "2026-05-29T09:59:00.000Z",
+    "userGesture": "assessment_play_tts_button",
+    "usedBrowserSpeechSynthesis": false,
+    "usedPreGeneratedAudio": false
+  },
+  "auditEvidence": {
+    "auditLogIds": ["audit_tts_output_001"],
+    "requiredActions": ["ai.tts_speech_output.generate"],
+    "checkedAt": "2026-05-29T10:05:00.000Z"
+  },
+  "artifacts": {
+    "screenshots": [
+      {
+        "label": "评估页 TTS 播放验收",
+        "path": "artifacts/tts-speech-output.png",
+        "capturedAt": "2026-05-29T10:03:00.000Z"
+      }
+    ]
+  }
+}

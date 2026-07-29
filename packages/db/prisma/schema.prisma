@@ -62,6 +62,7 @@ enum TrainingSessionStatus {
   completed
   interrupted
   upload_failed
+  aborted
 }
 
 enum SyncStatus {
@@ -76,6 +77,12 @@ enum AuditResult {
   denied
 }
 
+enum RegistrationReviewStatus {
+  pending
+  approved
+  rejected
+}
+
 model Organization {
   id        String   @id @default(uuid())
   name      String
@@ -87,28 +94,51 @@ model Organization {
 
   roleBindings UserRoleBinding[]
   doctors      DoctorProfile[]
+  providerOperations ProviderOperation[]
 
   @@map("organization")
 }
 
 model User {
-  id             String        @id @default(uuid())
-  account        String        @unique
-  mobilePhone    String?       @unique
-  passwordHash   String
-  displayName    String
-  accountStatus  AccountStatus @default(active)
-  lastLoginAt    DateTime?
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  id                    String        @id @default(uuid())
+  account               String        @unique
+  identityEnvelope      Json
+  mobilePhoneLookup     String?       @unique
+  passwordHash          String
+  credentialVersion     Int           @default(1)
+  passwordResetRequired Boolean       @default(false)
+  passwordUpdatedAt     DateTime?
+  authSessionVersion    Int           @default(1)
+  accountStatus         AccountStatus @default(active)
+  lastLoginAt           DateTime?
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
 
-  roleBindings       UserRoleBinding[]
-  doctorProfile      DoctorProfile?
-  patientProfile     PatientProfile?
-  caregiverRelations CaregiverRelation[]
-  auditLogs          AuditLog[]
-  systemEvents       SystemEventLog[]
-  reviewedTrainingResults TrainingResult[] @relation("TrainingResultReviewedBy")
+  roleBindings                   UserRoleBinding[]
+  doctorProfile                  DoctorProfile?
+  patientProfile                 PatientProfile?
+  caregiverRelations             CaregiverRelation[]
+  auditLogs                      AuditLog[]
+  systemEvents                   SystemEventLog[]
+  providerCallTelemetries        ProviderCallTelemetry[]
+  providerOperations             ProviderOperation[]   @relation("ProviderOperationActor")
+  assignedProviderOutcomeCases   ProviderOutcomeCase[]  @relation("ProviderOutcomeCaseAssignee")
+  resolvedProviderOutcomeCases   ProviderOutcomeCase[]  @relation("ProviderOutcomeCaseResolver")
+  reviewedTrainingResults        TrainingResult[]        @relation("TrainingResultReviewedBy")
+  createdCollectionConditions    CollectionCondition[]   @relation("CollectionConditionCreatedBy")
+  createdCollectionProtocols     CollectionProtocol[]    @relation("CollectionProtocolCreatedBy")
+  createdCollectionBatches       CollectionBatch[]       @relation("CollectionBatchCreatedBy")
+  reviewedRegistrationRequests   RegistrationRequest[]   @relation("RegistrationRequestReviewedBy")
+  createdRegistrationRequests    RegistrationRequest[]   @relation("RegistrationRequestCreatedUser")
+  createdAiConversationSessions  AiConversationSession[] @relation("AiConversationSessionCreatedBy")
+  reviewedAiConversationSessions AiConversationSession[] @relation("AiConversationSessionReviewedBy")
+  authoredCareCirclePosts        CareCirclePost[]        @relation("CareCirclePostAuthor")
+  moderatedCareCirclePosts       CareCirclePost[]        @relation("CareCirclePostModerator")
+  authoredCareCircleComments     CareCircleComment[]     @relation("CareCircleCommentAuthor")
+  careCircleReactions            CareCircleReaction[]    @relation("CareCircleReactionAuthor")
+  createdCarePrecautions         CarePrecaution[]        @relation("CarePrecautionCreatedBy")
+  createdTrainingSessions        TrainingSession[]       @relation("TrainingSessionCreatedBy")
+  abortedTrainingSessions        TrainingSession[]       @relation("TrainingSessionAbortedBy")
 
   @@map("user")
 }
@@ -134,8 +164,8 @@ model UserRoleBinding {
   bindingStatus     BindingStatus @default(active)
   createdAt         DateTime      @default(now())
 
-  user         User          @relation(fields: [userId], references: [id])
-  organization Organization? @relation(fields: [organizationId], references: [id])
+  user         User           @relation(fields: [userId], references: [id])
+  organization Organization?  @relation(fields: [organizationId], references: [id])
   role         RoleDefinition @relation(fields: [roleCode], references: [code])
 
   @@unique([userId, roleCode, relatedObjectId])
@@ -152,8 +182,8 @@ model DoctorProfile {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  user         User         @relation(fields: [userId], references: [id])
-  organization Organization @relation(fields: [organizationId], references: [id])
+  user         User                   @relation(fields: [userId], references: [id])
+  organization Organization           @relation(fields: [organizationId], references: [id])
   patients     PatientProfile[]
   rehabPlans   RehabPlan[]
   adjustments  PlanAdjustmentRecord[]
@@ -164,43 +194,46 @@ model DoctorProfile {
 model PatientProfile {
   id                  String   @id @default(uuid())
   userId              String   @unique
-  responsibleDoctorId String?
-  name                String
-  gender              String
-  age                 Int
-  mobilePhone         String?
-  caregiverName       String?
-  caregiverPhone      String?
-  healthMetrics       Json     @default("{}")
+  responsibleDoctorId String
+  identityEnvelope    Json
+  contactEnvelope     Json?
+  careDetailsEnvelope Json
   status              String   @default("active")
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 
-  user              User           @relation(fields: [userId], references: [id])
-  responsibleDoctor DoctorProfile? @relation(fields: [responsibleDoctorId], references: [id])
-  caregiverRelations CaregiverRelation[]
-  consents          ConsentRecord[]
-  assessments       AssessmentRecord[]
-  aiAnalyses        AiAnalysisRecord[]
-  riskGrades        RiskGradeRecord[]
-  rehabPlans        RehabPlan[]
-  trainingSessions  TrainingSession[]
+  user                   User                    @relation(fields: [userId], references: [id])
+  responsibleDoctor      DoctorProfile           @relation(fields: [responsibleDoctorId], references: [id])
+  caregiverRelations     CaregiverRelation[]
+  consents               ConsentRecord[]
+  assessments            AssessmentRecord[]
+  aiAnalyses             AiAnalysisRecord[]
+  aiConversationSessions AiConversationSession[]
+  careCirclePosts        CareCirclePost[]
+  carePrecautions        CarePrecaution[]
+  riskGrades             RiskGradeRecord[]
+  rehabPlans             RehabPlan[]
+  trainingSessions       TrainingSession[]
+  collectionBatches      CollectionBatch[]
+  rewardLedger           RewardLedger[]
+  achievements           Achievement[]
+  providerOperations     ProviderOperation[]
 
   @@index([responsibleDoctorId])
   @@map("patient_profile")
 }
 
 model CaregiverRelation {
-  id              String        @id @default(uuid())
-  caregiverUserId String
-  patientId       String
-  relation        String
+  id                  String        @id @default(uuid())
+  caregiverUserId     String
+  patientId           String
+  relation            String
   authorizationStatus BindingStatus @default(active)
-  authorizedAt    DateTime
-  revokedAt       DateTime?
-  scope           Json          @default("{}")
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  authorizedAt        DateTime
+  revokedAt           DateTime?
+  scope               Json          @default("{}")
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
 
   caregiver User           @relation(fields: [caregiverUserId], references: [id])
   patient   PatientProfile @relation(fields: [patientId], references: [id])
@@ -211,14 +244,14 @@ model CaregiverRelation {
 
 model ConsentRecord {
   id               String        @id @default(uuid())
-  patientId         String
-  subjectUserId     String
-  consentType       ConsentType
-  consentVersion    String
-  status            ConsentStatus @default(granted)
-  grantedAt         DateTime      @default(now())
-  revokedAt         DateTime?
-  evidenceSnapshot  Json          @default("{}")
+  patientId        String
+  subjectUserId    String
+  consentType      ConsentType
+  consentVersion   String
+  status           ConsentStatus @default(granted)
+  grantedAt        DateTime      @default(now())
+  revokedAt        DateTime?
+  evidenceSnapshot Json          @default("{}")
 
   patient PatientProfile @relation(fields: [patientId], references: [id])
 
@@ -226,38 +259,63 @@ model ConsentRecord {
   @@map("consent_record")
 }
 
-model AssessmentRecord {
-  id              String   @id @default(uuid())
-  patientId       String
-  assessmentType  String
-  source          String   @default("ai_assessment")
-  status          String   @default("completed")
-  scoreSummary    Json     @default("{}")
-  rawInputSummary Json     @default("{}")
-  startedAt       DateTime @default(now())
-  completedAt     DateTime?
-  createdAt       DateTime @default(now())
+model RegistrationRequest {
+  id                  String                   @id @default(uuid())
+  requestedRole       RoleCode
+  account             String
+  initialPasswordHash String?
+  credentialExpiresAt DateTime
+  mobilePhoneLookup   String?
+  identityEnvelope    Json
+  reviewEnvelope      Json?
+  reviewStatus        RegistrationReviewStatus @default(pending)
+  reviewedByUserId    String?
+  reviewedAt          DateTime?
+  createdUserId       String?
+  createdPatientId    String?
+  createdAt           DateTime                 @default(now())
+  updatedAt           DateTime                 @updatedAt
 
-  patient     PatientProfile   @relation(fields: [patientId], references: [id])
-  riskGrades  RiskGradeRecord[]
-  aiAnalyses  AiAnalysisRecord[]
+  reviewedBy  User? @relation("RegistrationRequestReviewedBy", fields: [reviewedByUserId], references: [id])
+  createdUser User? @relation("RegistrationRequestCreatedUser", fields: [createdUserId], references: [id])
+
+  @@index([reviewStatus, createdAt])
+  @@index([account, reviewStatus])
+  @@index([mobilePhoneLookup])
+  @@map("registration_request")
+}
+
+model AssessmentRecord {
+  id             String    @id @default(uuid())
+  patientId      String
+  assessmentType String
+  source         String    @default("clinician_input")
+  status         String    @default("completed")
+  resultEnvelope Json
+  startedAt      DateTime  @default(now())
+  completedAt    DateTime?
+  createdAt      DateTime  @default(now())
+
+  patient    PatientProfile     @relation(fields: [patientId], references: [id])
+  riskGrades RiskGradeRecord[]
+  aiAnalyses AiAnalysisRecord[]
 
   @@index([patientId, createdAt])
   @@map("assessment_record")
 }
 
 model RiskGradeRecord {
-  id             String    @id @default(uuid())
-  patientId      String
-  assessmentId   String
-  riskLevel      RiskLevel
+  id              String     @id @default(uuid())
+  patientId       String
+  assessmentId    String
+  riskLevel       RiskLevel
   systemRiskLevel RiskLevel
   manualRiskLevel RiskLevel?
-  isCurrent      Boolean   @default(false)
-  reasonSummary  String
-  confirmedById  String?
-  confirmedAt    DateTime?
-  createdAt      DateTime  @default(now())
+  isCurrent       Boolean    @default(false)
+  reasonEnvelope  Json
+  confirmedById   String?
+  confirmedAt     DateTime?
+  createdAt       DateTime   @default(now())
 
   patient    PatientProfile   @relation(fields: [patientId], references: [id])
   assessment AssessmentRecord @relation(fields: [assessmentId], references: [id])
@@ -267,18 +325,18 @@ model RiskGradeRecord {
 }
 
 model AiAnalysisRecord {
-  id              String   @id @default(uuid())
-  patientId       String
-  assessmentId    String?
+  id                String   @id @default(uuid())
+  patientId         String
+  assessmentId      String?
   trainingSessionId String?
-  analysisScene   String
-  modelVersion    String
-  confidence      Float
-  inputSummary    Json     @default("{}")
-  outputSummary   Json     @default("{}")
-  createdAt       DateTime @default(now())
+  analysisScene     String
+  modelVersion      String
+  confidence        Float
+  inputEnvelope     Json
+  outputEnvelope    Json
+  createdAt         DateTime @default(now())
 
-  patient         PatientProfile   @relation(fields: [patientId], references: [id])
+  patient         PatientProfile    @relation(fields: [patientId], references: [id])
   assessment      AssessmentRecord? @relation(fields: [assessmentId], references: [id])
   trainingSession TrainingSession?  @relation(fields: [trainingSessionId], references: [id])
 
@@ -286,89 +344,223 @@ model AiAnalysisRecord {
   @@map("ai_analysis_record")
 }
 
-model GameContent {
-  id              String   @id @default(uuid())
-  code            String   @unique
-  name            String
-  trainingTargets String[]
-  tags            String[]
-  defaultDuration Int
-  defaultDifficulty String
-  /// Formal runtime identifier. Supported values are "unity_webgl" and "browser_pose_game".
-  runtimeType     String   @default("unity_webgl")
-  manifestUrl     String?
-  buildBaseUrl    String?
-  gameVersion     String?
-  bridgeProtocolVersion String @default("1.0.0")
-  buildStatus     String   @default("pending_assets")
-  releaseChannel  String   @default("development")
-  supportsCamera  Boolean  @default(true)
-  supportsMicrophone Boolean @default(false)
-  supportedInputModes String[] @default([])
-  requiredMetrics Json     @default("[]")
-  status          String   @default("active")
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+model AiConversationSession {
+  id               String    @id @default(uuid())
+  patientId        String
+  createdByUserId  String
+  assessmentType   String
+  status           String    @default("active")
+  startedAt        DateTime  @default(now())
+  completedAt      DateTime?
+  provider         String
+  modelVersion     String
+  callId           String?
+  endpointRef      String
+  promptVersion    String?
+  summaryEnvelope  Json?
+  reviewEnvelope   Json?
+  reviewedByUserId String?
+  reviewedAt       DateTime?
+  metadata         Json      @default("{}")
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
-  planItems        RehabPlanItem[]
-  trainingSessions TrainingSession[]
+  patient    PatientProfile          @relation(fields: [patientId], references: [id])
+  createdBy  User                    @relation("AiConversationSessionCreatedBy", fields: [createdByUserId], references: [id])
+  reviewedBy User?                   @relation("AiConversationSessionReviewedBy", fields: [reviewedByUserId], references: [id])
+  messages   AiConversationMessage[]
+
+  @@index([patientId, startedAt])
+  @@index([status, startedAt])
+  @@index([reviewedByUserId, reviewedAt])
+  @@map("ai_conversation_session")
+}
+
+model AiConversationMessage {
+  id              String   @id @default(uuid())
+  sessionId       String
+  turnIndex       Int
+  role            String
+  contentEnvelope Json
+  createdAt       DateTime @default(now())
+
+  session AiConversationSession @relation(fields: [sessionId], references: [id])
+
+  @@unique([sessionId, turnIndex])
+  @@index([sessionId, createdAt])
+  @@index([sessionId, turnIndex])
+  @@index([role, createdAt])
+  @@map("ai_conversation_message")
+}
+
+model CareCirclePost {
+  id                 String    @id @default(uuid())
+  patientId          String
+  authorUserId       String
+  contentEnvelope    Json
+  visibilityScope    String    @default("care_team")
+  moderationStatus   String    @default("visible")
+  moderationEnvelope Json?
+  moderatedByUserId  String?
+  moderatedAt        DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  patient     PatientProfile       @relation(fields: [patientId], references: [id])
+  author      User                 @relation("CareCirclePostAuthor", fields: [authorUserId], references: [id])
+  moderatedBy User?                @relation("CareCirclePostModerator", fields: [moderatedByUserId], references: [id])
+  comments    CareCircleComment[]
+  reactions   CareCircleReaction[]
+
+  @@index([patientId, moderationStatus, createdAt])
+  @@index([authorUserId, createdAt])
+  @@map("care_circle_post")
+}
+
+model CareCircleComment {
+  id               String   @id @default(uuid())
+  postId           String
+  authorUserId     String
+  contentEnvelope  Json
+  moderationStatus String   @default("visible")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  post   CareCirclePost @relation(fields: [postId], references: [id])
+  author User           @relation("CareCircleCommentAuthor", fields: [authorUserId], references: [id])
+
+  @@index([postId, moderationStatus, createdAt])
+  @@index([authorUserId, createdAt])
+  @@map("care_circle_comment")
+}
+
+model CareCircleReaction {
+  id           String   @id @default(uuid())
+  postId       String
+  authorUserId String
+  reactionType String
+  createdAt    DateTime @default(now())
+
+  post   CareCirclePost @relation(fields: [postId], references: [id])
+  author User           @relation("CareCircleReactionAuthor", fields: [authorUserId], references: [id])
+
+  @@unique([postId, authorUserId, reactionType])
+  @@index([postId, reactionType])
+  @@map("care_circle_reaction")
+}
+
+model CarePrecaution {
+  id              String    @id @default(uuid())
+  patientId       String
+  createdByUserId String
+  contentEnvelope Json
+  category        String
+  priority        String    @default("normal")
+  status          String    @default("draft")
+  publishedAt     DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  patient   PatientProfile @relation(fields: [patientId], references: [id])
+  createdBy User           @relation("CarePrecautionCreatedBy", fields: [createdByUserId], references: [id])
+
+  @@index([patientId, status, priority])
+  @@index([createdByUserId, createdAt])
+  @@map("care_precaution")
+}
+
+model GameContent {
+  id                        String   @id @default(uuid())
+  code                      String   @unique
+  name                      String
+  trainingTargets           String[]
+  tags                      String[]
+  defaultDuration           Int
+  defaultDifficulty         String
+  /// Formal runtime identifier. Supported values are "unity_webgl", "browser_pose_canvas", and "cognitive_web".
+  runtimeType               String   @default("unity_webgl")
+  manifestUrl               String?
+  buildBaseUrl              String?
+  gameVersion               String?
+  bridgeProtocolVersion     String   @default("1.0.0")
+  buildStatus               String   @default("pending_assets")
+  releaseChannel            String   @default("development")
+  supportsCamera            Boolean  @default(true)
+  supportsMicrophone        Boolean  @default(false)
+  supportedInputModes       String[] @default([])
+  requiredMetrics           Json     @default("[]")
+  difficultyPolicy          Json     @default("{}")
+  dynamicDifficultyTriggers String[] @default([])
+  requiredPermissions       String[] @default([])
+  resultSchema              Json     @default("{}")
+  publishedStatus           String   @default("draft")
+  status                    String   @default("active")
+  createdAt                 DateTime @default(now())
+  updatedAt                 DateTime @updatedAt
+
+  planItems           RehabPlanItem[]
+  trainingSessions    TrainingSession[]
+  collectionProtocols CollectionProtocol[]
+  collectionBatches   CollectionBatch[]
 
   @@map("game_content")
 }
 
 model RehabPlan {
-  id              String     @id @default(uuid())
-  patientId       String
-  doctorId        String?
-  source          String     @default("system_recommendation")
-  planName        String
-  status          PlanStatus @default(draft)
-  isCurrent       Boolean    @default(false)
-  weekFrequency   Int
-  dailyDuration   Int
-  difficultyLadder Json      @default("{}")
+  id                   String     @id @default(uuid())
+  patientId            String
+  doctorId             String
+  source               String     @default("system_recommendation")
+  planName             String
+  status               PlanStatus @default(draft)
+  isCurrent            Boolean    @default(false)
+  weekFrequency        Int
+  dailyDuration        Int
+  difficultyLadder     Json       @default("{}")
   recommendationReason String
-  confirmedAt     DateTime?
-  createdAt       DateTime   @default(now())
-  updatedAt       DateTime   @updatedAt
+  confirmedAt          DateTime?
+  createdAt            DateTime   @default(now())
+  updatedAt            DateTime   @updatedAt
 
-  patient   PatientProfile @relation(fields: [patientId], references: [id])
-  doctor    DoctorProfile?  @relation(fields: [doctorId], references: [id])
-  items     RehabPlanItem[]
-  adjustments PlanAdjustmentRecord[]
-  trainingSessions TrainingSession[]
+  patient           PatientProfile         @relation(fields: [patientId], references: [id])
+  doctor            DoctorProfile          @relation(fields: [doctorId], references: [id])
+  items             RehabPlanItem[]
+  adjustments       PlanAdjustmentRecord[]
+  trainingSessions  TrainingSession[]
+  collectionBatches CollectionBatch[]
 
   @@index([patientId, status, isCurrent])
   @@map("rehab_plan")
 }
 
 model RehabPlanItem {
-  id             String   @id @default(uuid())
-  rehabPlanId    String
-  gameContentId  String
-  sequence       Int
-  durationMinutes Int
+  id               String   @id @default(uuid())
+  rehabPlanId      String
+  gameContentId    String
+  sequence         Int
+  durationMinutes  Int
   frequencyPerWeek Int
-  difficulty     String
-  adaptiveRules  Json     @default("{}")
-  createdAt      DateTime @default(now())
+  difficulty       String
+  adaptiveRules    Json     @default("{}")
+  createdAt        DateTime @default(now())
 
-  rehabPlan   RehabPlan   @relation(fields: [rehabPlanId], references: [id])
-  gameContent GameContent @relation(fields: [gameContentId], references: [id])
-  trainingSessions TrainingSession[]
+  rehabPlan         RehabPlan         @relation(fields: [rehabPlanId], references: [id])
+  gameContent       GameContent       @relation(fields: [gameContentId], references: [id])
+  trainingSessions  TrainingSession[]
+  collectionBatches CollectionBatch[]
 
   @@unique([rehabPlanId, gameContentId])
   @@map("rehab_plan_item")
 }
 
 model PlanAdjustmentRecord {
-  id             String   @id @default(uuid())
-  rehabPlanId     String
-  doctorId        String
+  id               String   @id @default(uuid())
+  rehabPlanId      String
+  doctorId         String
   originalSnapshot Json
   adjustedSnapshot Json
   adjustmentReason String
-  createdAt       DateTime @default(now())
+  createdAt        DateTime @default(now())
 
   rehabPlan RehabPlan     @relation(fields: [rehabPlanId], references: [id])
   doctor    DoctorProfile @relation(fields: [doctorId], references: [id])
@@ -377,130 +569,302 @@ model PlanAdjustmentRecord {
 }
 
 model DeviceRegistry {
-  id          String   @id @default(uuid())
-  deviceCode  String   @unique
-  deviceType  String
-  status      String   @default("online")
-  lastSeenAt  DateTime?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id         String    @id @default(uuid())
+  deviceCode String    @unique
+  deviceType String
+  status     String    @default("online")
+  lastSeenAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
 
   trainingSessions TrainingSession[]
 
   @@map("device_registry")
 }
 
+model CollectionCondition {
+  id                 String   @id @default(uuid())
+  code               String   @unique
+  name               String
+  description        String?
+  environment        Json     @default("{}")
+  deviceRequirements Json     @default("{}")
+  taskParameters     Json     @default("{}")
+  qualityRules       Json     @default("{}")
+  status             String   @default("active")
+  createdByUserId    String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  createdBy User?                @relation("CollectionConditionCreatedBy", fields: [createdByUserId], references: [id])
+  protocols CollectionProtocol[]
+  batches   CollectionBatch[]
+
+  @@index([status])
+  @@map("collection_condition")
+}
+
+model CollectionProtocol {
+  id                   String   @id @default(uuid())
+  conditionId          String
+  gameContentId        String?
+  code                 String
+  name                 String
+  version              String
+  runtimeType          String
+  requiredConsentTypes String[] @default([])
+  requiredInputModes   String[] @default([])
+  requiredMetrics      Json     @default("[]")
+  conditionRules       Json     @default("{}")
+  samplingConfig       Json     @default("{}")
+  qualityGate          Json     @default("{}")
+  status               String   @default("active")
+  createdByUserId      String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  condition   CollectionCondition @relation(fields: [conditionId], references: [id])
+  gameContent GameContent?        @relation(fields: [gameContentId], references: [id])
+  createdBy   User?               @relation("CollectionProtocolCreatedBy", fields: [createdByUserId], references: [id])
+  batches     CollectionBatch[]
+
+  @@unique([code, version])
+  @@index([conditionId, status])
+  @@index([runtimeType, status])
+  @@map("collection_protocol")
+}
+
+model CollectionBatch {
+  id                String    @id @default(uuid())
+  patientId         String
+  rehabPlanId       String
+  planItemId        String
+  gameContentId     String
+  protocolId        String
+  conditionId       String
+  protocolVersion   String
+  status            String    @default("ready")
+  idempotencyKey    String?
+  conditionSnapshot Json      @default("{}")
+  protocolSnapshot  Json      @default("{}")
+  consentSnapshot   Json      @default("{}")
+  operatorNotes     String?
+  createdByUserId   String?
+  startedAt         DateTime?
+  completedAt       DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  patient          PatientProfile      @relation(fields: [patientId], references: [id])
+  rehabPlan        RehabPlan           @relation(fields: [rehabPlanId], references: [id])
+  planItem         RehabPlanItem       @relation(fields: [planItemId], references: [id])
+  gameContent      GameContent         @relation(fields: [gameContentId], references: [id])
+  protocol         CollectionProtocol  @relation(fields: [protocolId], references: [id])
+  condition        CollectionCondition @relation(fields: [conditionId], references: [id])
+  createdBy        User?               @relation("CollectionBatchCreatedBy", fields: [createdByUserId], references: [id])
+  trainingSessions TrainingSession[]
+  trainingResults  TrainingResult[]
+  motionMetrics    MotionMetric[]
+
+  @@unique([patientId, idempotencyKey])
+  @@index([patientId, status])
+  @@index([protocolId, status])
+  @@index([rehabPlanId, planItemId, gameContentId])
+  @@map("collection_batch")
+}
+
 model TrainingSession {
-  id              String                @id @default(uuid())
-  idempotencyKey  String?               @unique
-  patientId       String
-  rehabPlanId     String
-  planItemId      String
-  gameContentId   String
-  deviceId        String?
-  gameRunId       String?
-  clientStartedAt DateTime?
-  clientEndedAt   DateTime?
-  deviceCode      String?
-  calibrationStatus String @default("pending")
-  runtimeConfigSnapshot Json @default("{}")
-  unityBuildVersion String?
+  id                    String                @id @default(uuid())
+  idempotencyKey        String?
+  createdByUserId       String?
+  patientId             String
+  rehabPlanId           String
+  planItemId            String
+  gameContentId         String
+  collectionBatchId     String?
+  deviceId              String?
+  gameRunId             String?
+  clientStartedAt       DateTime?
+  clientEndedAt         DateTime?
+  deviceCode            String?
+  calibrationStatus     String                @default("pending")
+  runtimeConfigSnapshot Json                  @default("{}")
+  unityBuildVersion     String?
   bridgeProtocolVersion String?
-  uploadAttemptCount Int @default(0)
-  lastUploadError String?
-  sessionStatus   TrainingSessionStatus @default(started)
-  startedAt       DateTime              @default(now())
-  endedAt         DateTime?
-  interruptReason String?
-  syncStatus      SyncStatus            @default(pending)
-  createdAt       DateTime              @default(now())
-  updatedAt       DateTime              @updatedAt
+  uploadAttemptCount    Int                   @default(0)
+  lastUploadError       String?
+  sessionStatus         TrainingSessionStatus @default(started)
+  startedAt             DateTime              @default(now())
+  endedAt               DateTime?
+  interruptReason       String?
+  abortedAt             DateTime?
+  abortedByUserId       String?
+  abortReason           String?
+  syncStatus            SyncStatus            @default(pending)
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
 
-  patient      PatientProfile @relation(fields: [patientId], references: [id])
-  rehabPlan    RehabPlan      @relation(fields: [rehabPlanId], references: [id])
-  planItem     RehabPlanItem  @relation(fields: [planItemId], references: [id])
-  gameContent  GameContent    @relation(fields: [gameContentId], references: [id])
-  device       DeviceRegistry? @relation(fields: [deviceId], references: [id])
-  result       TrainingResult?
-  motionMetrics MotionMetric[]
-  aiAnalyses   AiAnalysisRecord[]
+  patient         PatientProfile     @relation(fields: [patientId], references: [id])
+  rehabPlan       RehabPlan          @relation(fields: [rehabPlanId], references: [id])
+  planItem        RehabPlanItem      @relation(fields: [planItemId], references: [id])
+  gameContent     GameContent        @relation(fields: [gameContentId], references: [id])
+  collectionBatch CollectionBatch?   @relation(fields: [collectionBatchId], references: [id])
+  device          DeviceRegistry?    @relation(fields: [deviceId], references: [id])
+  createdBy       User?              @relation("TrainingSessionCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  abortedBy       User?              @relation("TrainingSessionAbortedBy", fields: [abortedByUserId], references: [id], onDelete: Restrict)
+  result          TrainingResult?
+  motionMetrics   MotionMetric[]
+  aiAnalyses      AiAnalysisRecord[]
 
+  @@unique([patientId, idempotencyKey])
   @@index([patientId, startedAt])
+  @@index([collectionBatchId])
+  @@index([createdByUserId])
+  @@index([abortedByUserId])
   @@map("training_session")
 }
 
 model TrainingResult {
-  id               String   @id @default(uuid())
-  sessionId         String   @unique
+  id                    String    @id @default(uuid())
+  sessionId             String    @unique
+  collectionBatchId     String?
   /// Must match the linked GameContent.runtimeType for formal training results.
-  source           String
-  gameRunId        String
-  gameVersion      String
+  source                String
+  gameRunId             String
+  gameVersion           String
   bridgeProtocolVersion String
-  submittedByUserId String?
-  submittedAt      DateTime @default(now())
-  clientGeneratedAt DateTime?
-  rawPayloadHash   String
-  score             Int
-  completionRate    Float
-  durationSeconds   Int
-  reactionTimeMs    Int
-  motionAccuracy    Float
-  exerciseIntensity String
-  abnormalFlag      Boolean  @default(false)
-  qualityFlag       String   @default("valid")
-  qualityReasons    String[] @default([])
-  reviewStatus      String?
-  reviewConclusion  String?
-  reviewNote        String?
-  reviewedByUserId  String?
-  reviewedAt        DateTime?
-  metricsSummary    Json     @default("{}")
-  createdAt         DateTime @default(now())
+  submittedByUserId     String?
+  submittedAt           DateTime  @default(now())
+  clientGeneratedAt     DateTime?
+  rawPayloadHash        String
+  score                 Int
+  completionRate        Float
+  durationSeconds       Int
+  reactionTimeMs        Int
+  motionAccuracy        Float
+  exerciseIntensity     String
+  abnormalFlag          Boolean   @default(false)
+  qualityFlag           String    @default("valid")
+  qualityReasons        String[]  @default([])
+  reviewStatus          String?
+  reviewConclusion      String?
+  reviewEnvelope        Json?
+  reviewedByUserId      String?
+  reviewedAt            DateTime?
+  metricsSummary        Json      @default("{}")
+  createdAt             DateTime  @default(now())
 
-  session TrainingSession @relation(fields: [sessionId], references: [id])
-  reviewedBy User? @relation("TrainingResultReviewedBy", fields: [reviewedByUserId], references: [id])
+  session         TrainingSession  @relation(fields: [sessionId], references: [id])
+  collectionBatch CollectionBatch? @relation(fields: [collectionBatchId], references: [id])
+  reviewedBy      User?            @relation("TrainingResultReviewedBy", fields: [reviewedByUserId], references: [id])
+  rewardLedger    RewardLedger[]
 
   @@index([reviewStatus], map: "training_result_reviewStatus_idx")
   @@map("training_result")
 }
 
-model MotionMetric {
-  id                  String   @id @default(uuid())
-  trainingSessionId    String
-  gameRunId            String?
-  source               String?
-  metricType           String
-  metricValue          Float
-  unit                 String?
-  confidence           Float?
-  sampleCount          Int?
-  windowStartedAt      DateTime?
-  windowEndedAt        DateTime?
-  qualityFlag          String   @default("valid")
-  bodyPart             String?
-  jointName            String?
-  capturedAt           DateTime @default(now())
-  rawSummary           Json     @default("{}")
+model RewardRule {
+  id                String   @id @default(uuid())
+  code              String   @unique
+  name              String
+  eventType         String
+  points            Int
+  achievementCode   String?
+  achievementName   String?
+  achievementTarget Int?
+  eligibility       Json     @default("{}")
+  status            String   @default("active")
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
-  trainingSession TrainingSession @relation(fields: [trainingSessionId], references: [id])
+  ledger RewardLedger[]
+
+  @@index([eventType, status])
+  @@map("reward_rule")
+}
+
+model RewardLedger {
+  id               String   @id @default(uuid())
+  patientId        String
+  trainingResultId String?
+  ruleId           String
+  eventType        String
+  eventId          String
+  points           Int
+  status           String   @default("issued")
+  evidence         Json     @default("{}")
+  issuedAt         DateTime @default(now())
+
+  patient        PatientProfile  @relation(fields: [patientId], references: [id])
+  trainingResult TrainingResult? @relation(fields: [trainingResultId], references: [id])
+  rule           RewardRule      @relation(fields: [ruleId], references: [id])
+
+  @@unique([patientId, eventType, eventId, ruleId])
+  @@index([patientId, issuedAt])
+  @@index([trainingResultId])
+  @@map("reward_ledger")
+}
+
+model Achievement {
+  id             String    @id @default(uuid())
+  patientId      String
+  code           String
+  name           String
+  level          Int       @default(1)
+  progress       Int       @default(0)
+  target         Int
+  unlockedAt     DateTime?
+  sourceLedgerId String?
+  evidence       Json      @default("{}")
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  patient PatientProfile @relation(fields: [patientId], references: [id])
+
+  @@unique([patientId, code])
+  @@index([patientId, unlockedAt])
+  @@map("achievement")
+}
+
+model MotionMetric {
+  id                String    @id @default(uuid())
+  trainingSessionId String
+  collectionBatchId String?
+  gameRunId         String?
+  source            String?
+  metricType        String
+  metricValue       Float
+  unit              String?
+  confidence        Float?
+  sampleCount       Int?
+  windowStartedAt   DateTime?
+  windowEndedAt     DateTime?
+  qualityFlag       String    @default("valid")
+  bodyPart          String?
+  jointName         String?
+  capturedAt        DateTime  @default(now())
+  rawSummary        Json      @default("{}")
+
+  trainingSession TrainingSession  @relation(fields: [trainingSessionId], references: [id])
+  collectionBatch CollectionBatch? @relation(fields: [collectionBatchId], references: [id])
 
   @@index([trainingSessionId, metricType])
+  @@index([collectionBatchId, metricType])
   @@map("motion_metric")
 }
 
 model AuditLog {
-  id              String      @id @default(uuid())
-  actorUserId      String?
-  actorRole        RoleCode?
-  action           String
-  targetType       String
-  targetId         String?
-  result           AuditResult
-  reason           String?
-  ipAddress        String?
-  metadata         Json        @default("{}")
-  createdAt        DateTime    @default(now())
+  id          String      @id @default(uuid())
+  actorUserId String?
+  actorRole   RoleCode?
+  action      String
+  targetType  String
+  targetId    String?
+  result      AuditResult
+  reason      String?
+  ipAddress   String?
+  metadata    Json        @default("{}")
+  createdAt   DateTime    @default(now())
 
   actor User? @relation(fields: [actorUserId], references: [id])
 
@@ -522,4 +886,141 @@ model SystemEventLog {
 
   @@index([eventType, createdAt])
   @@map("system_event_log")
+}
+
+model ProviderCallTelemetry {
+  id                  String   @id @default(uuid())
+  actorUserId         String?
+  patientId           String?
+  operation           String
+  provider            String
+  modelVersion        String
+  endpointHost        String
+  apiKeyRef           String
+  promptVersion       String?
+  callId              String?
+  requestId           String?
+  statusCategory      String
+  durationMs          Int?
+  requestContentHash  String?
+  responseContentHash String?
+  createdAt           DateTime @default(now())
+
+  actor User? @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([operation, provider, createdAt])
+  @@index([patientId, createdAt])
+  @@index([requestId, operation])
+  @@map("provider_call_telemetry")
+}
+
+model ProviderOperation {
+  id                            String   @id @default(uuid())
+  organizationId                String?
+  patientId                     String?
+  actorUserId                   String?
+  operation                     String
+  clientIdempotencyKey          String
+  canonicalRequestHmac          String
+  requestIntentHmac             String?
+  requestCiphertext             Json
+  expectedBusinessObjectType    String?
+  expectedBusinessObjectId      String?
+  expectedBusinessObjectVersion String?
+  provider                      String
+  modelVersion                  String
+  endpointHost                  String
+  apiKeyRef                     String
+  promptVersion                 String?
+  providerCallId                String?
+  providerRequestId             String?
+  status                        String   @default("accepted")
+  responseCiphertext            Json?
+  responseHmac                  String?
+  failureCategory               String?
+  providerStartedAt             DateTime?
+  providerRespondedAt           DateTime?
+  completedAt                   DateTime?
+  finalizedAt                   DateTime?
+  createdAt                     DateTime @default(now())
+  updatedAt                     DateTime @updatedAt
+
+  organization Organization?  @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  patient      PatientProfile? @relation(fields: [patientId], references: [id], onDelete: SetNull)
+  actor        User?          @relation("ProviderOperationActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+  outboxEvents ProviderOperationOutbox[]
+  outcomeCases ProviderOutcomeCase[]
+
+  /// The hand-written PostgreSQL migration makes this unique index NULLS NOT DISTINCT.
+  @@unique([organizationId, operation, patientId, actorUserId, clientIdempotencyKey], map: "provider_operation_idempotency_scope_key")
+  /// The hand-written PostgreSQL migration makes the active-state intent index NULLS NOT DISTINCT.
+  /// Prisma cannot express a partial unique index, so callers must rely on the database constraint.
+  @@index([status, updatedAt])
+  @@index([patientId, createdAt])
+  @@index([providerCallId])
+  @@index([providerRequestId])
+  @@map("provider_operation")
+}
+
+model ProviderOperationOutbox {
+  id                  String   @id @default(uuid())
+  providerOperationId String
+  eventType           String
+  status              String   @default("pending")
+  availableAt         DateTime @default(now())
+  claimToken          String?
+  claimedAt           DateTime?
+  processedAt         DateTime?
+  attemptCount        Int      @default(0)
+  failureCategory     String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  providerOperation ProviderOperation @relation(fields: [providerOperationId], references: [id], onDelete: Restrict)
+
+  @@unique([providerOperationId, eventType])
+  @@index([status, availableAt])
+  @@map("provider_operation_outbox")
+}
+
+model ProviderOutcomeCase {
+  id                  String   @id @default(uuid())
+  providerOperationId String
+  caseType            String
+  status              String   @default("open")
+  assignedToUserId    String?
+  slaDueAt            DateTime?
+  evidenceReferences  Json     @default("[]")
+  resolutionAction    String?
+  resolvedByUserId    String?
+  resolvedAt          DateTime?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  providerOperation ProviderOperation @relation(fields: [providerOperationId], references: [id], onDelete: Restrict)
+  assignedTo        User?             @relation("ProviderOutcomeCaseAssignee", fields: [assignedToUserId], references: [id], onDelete: SetNull)
+  resolvedBy        User?             @relation("ProviderOutcomeCaseResolver", fields: [resolvedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([status, slaDueAt])
+  @@index([assignedToUserId, status])
+  @@map("provider_outcome_case")
+}
+
+model ProviderTelemetryRetentionRun {
+  id                  String    @id @default(uuid())
+  runDate             DateTime  @unique
+  status              String
+  retentionDays       Int
+  cutoff              DateTime
+  deletedCount        Int?
+  failureCode         String?
+  executionDeadlineAt DateTime?
+  attemptCount        Int       @default(1)
+  completedAt         DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  @@index([status, createdAt])
+  @@map("provider_telemetry_retention_run")
 }

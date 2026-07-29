@@ -1,0 +1,31 @@
+{
+  "templateNotice": "复制本文件后填写正式现场配置；本模板含占位符，不能直接作为验收配置执行。",
+  "apiBaseUrl": "<formal-https-api-base-url>",
+  "doctorAccount": "<doctor-account>",
+  "doctorPassword": "<doctor-password>",
+  "caregiverAccount": "<authorized-caregiver-account>",
+  "caregiverPassword": "<authorized-caregiver-password>",
+  "auditAccount": "<audit-read-account>",
+  "auditPassword": "<audit-read-password>",
+  "chain": {
+    "patientId": "<real-patient-id>",
+    "assessmentId": "<formal-assessment-id>",
+    "rehabPlanId": "<confirmed-rehab-plan-id>",
+    "planItemId": "<confirmed-rehab-plan-item-id>",
+    "gameContentId": "<released-game-content-id>",
+    "trainingSessionId": "<completed-training-session-id>",
+    "trainingResultId": "<reviewed-training-result-id>",
+    "caregiverUserId": "<authorized-caregiver-user-id>"
+  },
+  "requiredAuditActions": [
+    "consent.grant",
+    "caregiver_relation.create",
+    "assessment.create",
+    "rehab_plan.recommend",
+    "rehab_plan.confirm",
+    "training_session.start",
+    "training_result.submit",
+    "training_result.review",
+    "caregiver.summary.view"
+  ]
+}

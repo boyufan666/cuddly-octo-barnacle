@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   buildBrowserPoseEvidence,
+  buildBrowserPoseEvidenceChecklist,
   browserPoseFieldAcceptanceCommand,
   type BrowserPoseEvidenceInput,
 } from "./browser-pose-evidence.ts";
@@ -36,7 +37,7 @@ function validInput(overrides: DeepPartial<BrowserPoseEvidenceInput> = {}) {
       resolution: "1280x720",
     },
     poseRuntime: {
-      runtimeType: "browser_pose_game",
+      runtimeType: "browser_pose_canvas",
       modelName: "MediaPipe PoseLandmarker",
       modelVersion: "0.10.0",
       poseLandmarkCount: 33,
@@ -51,7 +52,7 @@ function validInput(overrides: DeepPartial<BrowserPoseEvidenceInput> = {}) {
       gameContentId: "game_real_browser_pose_001",
       code: "upper-limb-reach-v1",
       name: "上肢触达反应训练",
-      runtimeType: "browser_pose_game",
+      runtimeType: "browser_pose_canvas",
       gameVersion: "1.0.0",
       bridgeProtocolVersion: "1.0.0",
       releaseChannel: "production",
@@ -65,6 +66,7 @@ function validInput(overrides: DeepPartial<BrowserPoseEvidenceInput> = {}) {
     },
     trainingSession: {
       sessionId: "session_real_001",
+      collectionBatchId: "browser_pose_batch_20260523_001",
       gameRunId: "run_real_001",
       deviceCode: "trial-room-a-camera-01",
       sessionStatus: "completed",
@@ -75,7 +77,8 @@ function validInput(overrides: DeepPartial<BrowserPoseEvidenceInput> = {}) {
     },
     trainingResult: {
       resultId: "result_real_001",
-      source: "browser_pose_game",
+      collectionBatchId: "browser_pose_batch_20260523_001",
+      source: "browser_pose_canvas",
       gameRunId: "run_real_001",
       gameVersion: "1.0.0",
       bridgeProtocolVersion: "1.0.0",
@@ -136,6 +139,7 @@ function metric(
     sampleCount,
     confidence,
     qualityFlag: "valid",
+    collectionBatchId: "browser_pose_batch_20260523_001",
     windowStartedAt: "2026-05-23T09:59:00.000Z",
     windowEndedAt: "2026-05-23T10:02:00.000Z",
   };
@@ -163,10 +167,60 @@ test("buildBrowserPoseEvidence returns a complete field evidence document", () =
 
   assert.equal(result.ok, true);
   if (!result.ok) return;
-  assert.equal(result.evidence.evidenceVersion, "browser-pose-field-acceptance/v1");
-  assert.equal(result.evidence.trainingResult.source, "browser_pose_game");
+  assert.equal(
+    result.evidence.evidenceVersion,
+    "browser-pose-field-acceptance/v1",
+  );
+  assert.equal(result.evidence.trainingResult.source, "browser_pose_canvas");
   assert.equal(result.evidence.trainingSession.gameRunId, "run_real_001");
   assert.equal(result.evidence.motionMetrics.length, 4);
+});
+
+test("buildBrowserPoseEvidenceChecklist reports complete field evidence as ready", () => {
+  const checklist = buildBrowserPoseEvidenceChecklist(validInput());
+
+  assert.equal(checklist.ready, true);
+  assert.deepEqual(checklist.failures, []);
+  assert.ok(checklist.items.length >= 10);
+  assert.ok(checklist.items.every((item) => item.ready));
+});
+
+test("buildBrowserPoseEvidenceChecklist highlights missing field acceptance evidence", () => {
+  const checklist = buildBrowserPoseEvidenceChecklist(
+    validInput({
+      browser: {
+        pageUrl: "http://localhost:3000",
+      },
+      auditEvidence: {
+        auditLogIds: [],
+      },
+      artifacts: {
+        screenshots: [],
+        recordings: [],
+      },
+    }),
+  );
+
+  assert.equal(checklist.ready, false);
+  assert.ok(
+    checklist.items.some(
+      (item) => item.key === "browser" && item.ready === false,
+    ),
+  );
+  assert.ok(
+    checklist.items.some(
+      (item) => item.key === "auditEvidence" && item.ready === false,
+    ),
+  );
+  assert.ok(
+    checklist.items.some(
+      (item) => item.key === "artifacts" && item.ready === false,
+    ),
+  );
+  assert.match(
+    checklist.failures.join("\n"),
+    /HTTPS|auditEvidence|screenshots|recordings/,
+  );
 });
 
 test("buildBrowserPoseEvidence rejects missing explicit site evidence", () => {
@@ -179,6 +233,19 @@ test("buildBrowserPoseEvidence rejects missing explicit site evidence", () => {
   assert.equal(result.ok, false);
   if (result.ok) return;
   assert.match(result.error, /siteName/);
+});
+
+test("buildBrowserPoseEvidence rejects generic camera authorization labels", () => {
+  const result = buildBrowserPoseEvidence(
+    validInput({
+      device: { cameraLabel: "已授权摄像头" },
+    }),
+  );
+
+  assert.equal(result.ok, false);
+  if (result.ok) return;
+  assert.match(result.error, /cameraLabel/);
+  assert.match(result.error, /真实摄像头/);
 });
 
 test("buildBrowserPoseEvidence rejects missing required motion metric", () => {
@@ -197,6 +264,70 @@ test("buildBrowserPoseEvidence rejects missing required motion metric", () => {
   assert.match(result.error, /arm_raise_accuracy/);
 });
 
+test("buildBrowserPoseEvidence keeps abnormal review audits out of formal field acceptance", () => {
+  const result = buildBrowserPoseEvidence(
+    validInput({
+      auditEvidence: {
+        auditLogIds: [
+          "audit_session_start_001",
+          "audit_result_submit_001",
+          "audit_result_review_001",
+        ],
+        requiredActions: [
+          "training_session.start",
+          "training_result.submit",
+          "training_result.review",
+        ],
+      },
+    }),
+  );
+
+  assert.equal(result.ok, false);
+  if (result.ok) return;
+  assert.match(result.error, /training_result\.review/);
+  assert.match(result.error, /verify:contracts/);
+});
+
+test("buildBrowserPoseEvidence rejects extra audit actions from formal field acceptance", () => {
+  const result = buildBrowserPoseEvidence(
+    validInput({
+      auditEvidence: {
+        auditLogIds: [
+          "audit_session_start_001",
+          "audit_result_submit_001",
+          "audit_result_approve_001",
+        ],
+        requiredActions: [
+          "training_session.start",
+          "training_result.submit",
+          "training_result.approve",
+        ],
+      },
+    }),
+  );
+
+  assert.equal(result.ok, false);
+  if (result.ok) return;
+  assert.match(result.error, /requiredActions/);
+  assert.match(result.error, /只能包含/);
+  assert.match(result.error, /training_result\.approve/);
+});
+
+test("buildBrowserPoseEvidence rejects non-production browser pose content", () => {
+  const result = buildBrowserPoseEvidence(
+    validInput({
+      gameContent: {
+        releaseChannel: "staging",
+      },
+    }),
+  );
+
+  assert.equal(result.ok, false);
+  if (result.ok) return;
+  assert.match(result.error, /releaseChannel/);
+  assert.match(result.error, /production/);
+});
+
 test("buildBrowserPoseEvidence rejects session and result run mismatch", () => {
   const result = buildBrowserPoseEvidence(
     validInput({
@@ -209,12 +340,125 @@ test("buildBrowserPoseEvidence rejects session and result run mismatch", () => {
   assert.match(result.error, /gameRunId/);
 });
 
+test("buildBrowserPoseEvidence rejects missing collection batch ids", () => {
+  const result = buildBrowserPoseEvidence(
+    validInput({
+      trainingSession: { collectionBatchId: "" },
+      trainingResult: { collectionBatchId: "" },
+      motionMetrics: [
+        {
+          ...metric("reaction_time_ms", 760, "ms", 24, 0.91),
+          collectionBatchId: "",
+        },
+        metric("target_hit_rate", 0.88, "ratio", 24, 0.89),
+        metric("pose_visibility_avg", 0.86, "ratio", 1200, 0.93),
+        metric("arm_raise_accuracy", 0.82, "ratio", 24, 0.87),
+      ],
+    }),
+  );
+
+  assert.equal(result.ok, false);
+  if (result.ok) return;
+  assert.match(result.error, /trainingSession\.collectionBatchId/);
+  assert.match(result.error, /trainingResult\.collectionBatchId/);
+  assert.match(result.error, /reaction_time_ms\.collectionBatchId/);
+});
+
+test("buildBrowserPoseEvidence rejects inconsistent collection batch ids", () => {
+  const result = buildBrowserPoseEvidence(
+    validInput({
+      trainingResult: { collectionBatchId: "browser_pose_batch_20260523_002" },
+      motionMetrics: [
+        metric("reaction_time_ms", 760, "ms", 24, 0.91),
+        {
+          ...metric("target_hit_rate", 0.88, "ratio", 24, 0.89),
+          collectionBatchId: "browser_pose_batch_20260523_003",
+        },
+        metric("pose_visibility_avg", 0.86, "ratio", 1200, 0.93),
+        metric("arm_raise_accuracy", 0.82, "ratio", 24, 0.87),
+      ],
+    }),
+  );
+
+  assert.equal(result.ok, false);
+  if (result.ok) return;
+  assert.match(result.error, /collectionBatchId/);
+  assert.match(result.error, /不一致/);
+});
+
+test("buildBrowserPoseEvidence rejects formal fake data markers anywhere", () => {
+  const result = buildBrowserPoseEvidence(
+    validInput({
+      patient: { patientId: "patient_seed_001" },
+      gameContent: { code: "manual_browser_pose_training" },
+      trainingSession: { gameRunId: "run_fixed_001" },
+      artifacts: {
+        screenshots: [
+          {
+            label: "fallback screenshot",
+            path: "evidence/browser-pose/session-real-001-complete.png",
+            capturedAt: "2026-05-23T10:03:00.000Z",
+          },
+        ],
+      },
+    }),
+  );
+
+  assert.equal(result.ok, false);
+  if (result.ok) return;
+  assert.match(result.error, /mock\/demo\/seed\/fallback\/fixed\/manual/);
+});
+
+test("buildBrowserPoseEvidence rejects sensitive fields and raw payload material", () => {
+  const result = buildBrowserPoseEvidence(
+    validInput({
+      trainingResult: {
+        extra: {
+          accessToken: "short-token",
+          requestBody: { score: 82 },
+          raw: "short-raw",
+          payload: "short-payload",
+          audioBase64:
+            "Zm9ybWFsLXBvc2UtcmF3LXBheWxvYWRzZm9ybWFsLXBvc2UtcmF3LXBheWxvYWRz",
+        },
+      } as DeepPartial<BrowserPoseEvidenceInput["trainingResult"]>,
+    }),
+  );
+
+  assert.equal(result.ok, false);
+  if (result.ok) return;
+  assert.match(result.error, /accessToken/);
+  assert.match(result.error, /requestBody/);
+  assert.match(result.error, /raw/);
+  assert.match(result.error, /payload/);
+  assert.match(result.error, /audioBase64/);
+  assert.doesNotMatch(result.error, /short-token|short-raw|short-payload/);
+});
+
+test("buildBrowserPoseEvidence allows hash digest summaries", () => {
+  const result = buildBrowserPoseEvidence(
+    validInput({
+      device: {
+        cameraDeviceIdHash: "sha256:7f83b1657ff1fc53b92dc18148a1d65dfa1355f7e",
+      },
+      trainingResult: {
+        rawPayloadHash: "sha256:7f83b1657ff1fc53b92dc18148a1d65dfa1355f7e",
+      },
+    }),
+  );
+
+  assert.equal(result.ok, true);
+});
+
 test("browser pose field acceptance command includes JSON self-check and read-only API verification", () => {
   const command = browserPoseFieldAcceptanceCommand("<evidence-json-path>");
 
   assert.match(command, /pnpm verify:browser-pose-evidence/);
   assert.match(command, /pnpm verify:browser-pose-field-acceptance/);
   assert.match(command, /--api-base-url <正式 API 地址>/);
-  assert.match(command, /--patient-token <训练记录读取 token>/);
-  assert.match(command, /--audit-token <审计读取 token>/);
+  assert.match(command, /BROWSER_POSE_PATIENT_ACCOUNT='<训练记录读取账号>'/);
+  assert.match(command, /BROWSER_POSE_PATIENT_PASSWORD='<训练记录读取密码>'/);
+  assert.match(command, /BROWSER_POSE_AUDIT_ACCOUNT='<审计读取账号>'/);
+  assert.match(command, /BROWSER_POSE_AUDIT_PASSWORD='<审计读取密码>'/);
+  assert.doesNotMatch(command, /--patient-token|--audit-token/);
 });

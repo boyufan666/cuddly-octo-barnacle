@@ -1,191 +1,101 @@
-# 客户资料到上线门禁 Runbook
+# 客户资料到 GitHub + Render 上线门禁 Runbook
 
-本文用于把客户回复的资料转成可执行的上线门禁。它衔接 `docs/customer-final-input-request.md`、`docs/templates/customer-production-input.template.json`、`docs/production-delivery-runbook.md` 和正式验收脚本，避免资料收齐后仍靠口头判断。
+本 Runbook 将客户资料、修复、Staging 验收和 Production 发布串为可判定的门禁。它执行严格全量 MiMo 范围：AI、STT、TTS 均为生产必需能力。任何门禁失败均为 `BLOCKED`，不得改成缩小范围、替代供应商、伪造数据或 fallback。
 
-原则：资料缺失、证据缺失、配置不合规或验收失败时，结论必须是 `BLOCKED`。不得用 mock、demo、localhost、个人 token、临时代理、手工改字段、seed 数据或 fallback 作为替代。
-
-## 1. 整理客户回复
-
-收到客户资料后，先建立客户资料包工作副本：
+## 1. 建立受控客户资料包
 
 ```bash
 cp docs/templates/customer-production-input.template.json customer-production-input.json
-```
-
-模板文件只展示字段结构，原样必须校验失败。不得把模板中的示例域名、说明文字、枚举提示或示例账号当成客户正式资料。
-
-逐项把客户回复填入 `customer-production-input.json`：
-
-- `project`：客户名称、验收负责人、目标日期、部署模式。
-- `infrastructure`：正式 Web/API 域名、服务器方案、数据库/Redis 密钥引用、备份和监控负责人。
-- `legal`：隐私协议版本、授权负责人、数据留存、第三方 AI 数据处理授权。
-- `accounts`：超级管理员、运营、审计、医师账号清单。
-- `dataCollection`：真实患者采集授权、患者来源、脱敏和导出审批负责人。
-- `ai`：大模型供应商、账号负责人、免费额度确认、HTTPS endpoint、密钥引用、模型和提示词版本、调用日志、人工复核。
-- `speech`：语音供应商、免费额度确认、HTTPS endpoint、密钥引用、模型版本、麦克风授权要求。
-- `trainingContent`：浏览器体感实机 evidence 路径、目标浏览器、摄像头型号、Unity 是否为上线必需。
-- `acceptanceEvidence`：角色截图、评估证据、训练证据、审计证据、脱敏导出、部署证据。
-
-## 2. 客户资料包门禁
-
-先执行资料包校验：
-
-```bash
 pnpm verify:customer-production-input -- customer-production-input.json
 ```
 
-通过条件：
+填写实际的 `customer-production-input/v2` 后再次运行校验。必须特别确认：
 
-- 所有正式域名和 AI/语音 endpoint 均为 HTTPS。
-- 数据库、Redis、AI、语音密钥均为 `secret-manager://...` 引用。
-- AI/语音若 `requiredForLaunch=true`，必须具备供应商、账号负责人、模型版本、免费额度或费用确认、调用日志留存和医师人工复核。
-- AI/语音若 `requiredForLaunch=false`，资料包可不填写供应商、endpoint、密钥和第三方 AI 授权，但交付范围只能写“结构化评估录入和接口边界”，不能宣称真实 AI/语音能力。
-- 浏览器体感必须提供实机 evidence 路径、目标浏览器和摄像头型号。
-- 资料包中不得出现占位符、mock、demo、local、manual、fallback、明文密钥或本地地址。
+- GitHub/Render 负责人、生产区域、web/api HTTPS origin、数据库、备份、监控和告警。
+- `mimo` 节点的 Secret File 引用、approved hosts、provider 限制、Key Value 配额、telemetry 留存期（30--3650 天）和无默认的 retention job 执行时限。
+- AI、speech、tts 三个 `requiredForLaunch` 都是 `true`，provider 精确为 `xiaomi-mimo`、`xiaomi-mimo-audio-understanding`、`xiaomi-mimo-tts`，且 AI 人工复核、STT 麦克风同意、TTS 播放同意均为 `true`。
+- 真实患者数据采集与 MiMo 第三方处理已批准，机构、医生、脱敏/导出责任人可追溯。
+- 浏览器体感内容/设备已确认；若 Unity 为上线范围，Build 和 manifest 已确认。
 
-失败处理：
+资料包仅存引用与脱敏元数据，不能存真实 key、token、病历、原始音频、完整转写或 provider 正文。
 
-- 退回客户补资料或改为“不声明该能力上线”。
-- 不允许把 `requiredForLaunch` 改成 `false` 来绕过客户明确要求上线的真实能力；范围变更必须由客户或验收负责人确认，开发方不得为了通过门禁自行修改。
-- 不允许把供应商临时试用、个人 token 或代理地址写成生产能力。
+## 2. GitHub 合并前质量门禁
 
-## 3. AI/语音 Go/No-Go
-
-仅当客户要求真实 AI/语音上线时执行本节。免费优先选型口径见 `docs/ai-speech-provider-selection-free-first.md`。
-
-Go 条件：
-
-- 客户确认供应商账号主体、可用模型、免费额度或费用、有效期、QPS、并发、超额计费、是否允许试点或生产使用。
-- 客户确认允许把健康数据、问答转写和评估摘要发送给该供应商。
-- 客户提供正式 HTTPS endpoint，不是 localhost、mock、demo、临时代理或个人测试地址。
-- 客户提供 `secret-manager://...` 密钥引用，不提供真实密钥明文。
-- 客户提供模型版本、语音模型版本、提示词版本、调用日志留存天数。
-- 客户指定医师人工复核负责人，且 `AI_HUMAN_REVIEW_REQUIRED=true`。
-- 语音能力上线时，患者必须签署 `microphone_capture` 授权。
-
-No-Go 条件：
-
-- 只有“有免费额度”的口头描述，但没有控制台截图、额度说明、有效期或生产/试点授权。
-- 只有 ChatGPT、个人控制台、个人 token、第三方不明代理或无法留存日志的服务。
-- endpoint 非 HTTPS，或包含 mock/demo/local/manual/fallback 标记。
-- 缺调用日志、模型版本、提示词版本或人工复核记录。
-
-No-Go 时，只能交付结构化评估录入和 AI/语音接口边界，不能宣传真实 AI 自动评估或真实语音识别已完成。
-
-## 4. 生产环境变量门禁
-
-客户资料包通过后，由客户或运维在目标环境显式配置正式环境变量，再执行：
+在独立分支完成代码审查、迁移审查和生产配置审查。required checks 必须覆盖依赖审计、静态检查、数据库迁移清单、API/Web 单元测试、交付契约、Unity Build 校验及 Render Blueprint 校验。
 
 ```bash
-pnpm delivery:check:production -- --customer-input customer-production-input.json
+pnpm check:static
+pnpm test:delivery
+pnpm db:migration:manifest:verify
+pnpm --filter @rehab-platform/api exec tsc --noEmit --pretty false
+pnpm --filter @rehab-platform/web exec tsc --noEmit --pretty false
+pnpm --filter @rehab-platform/web lint
 ```
 
-必须显式配置基础项和上线范围项：
+变更涉及 AI、语音、权限、训练、数据库或部署时，还必须运行其定向单元/集成测试和完整回归。测试通过不等于生产批准；它不能替代客户真实数据、MiMo 调用或实机训练证据。
 
-- `DATABASE_URL`
-- `REDIS_URL`
-- `JWT_SECRET`
-- `WEB_ORIGIN`
-- `NEXT_PUBLIC_API_BASE_URL`
-- `DEFAULT_PATIENT_PASSWORD`
-- `AI_REQUIRED_FOR_LAUNCH`
-- `SPEECH_REQUIRED_FOR_LAUNCH`
+## 3. Render Staging 配置与迁移
 
-`AI_REQUIRED_FOR_LAUNCH` 和 `SPEECH_REQUIRED_FOR_LAUNCH` 必须与客户资料包中的 `ai.requiredForLaunch`、`speech.requiredForLaunch` 保持一致，只接受精确的 `true` 或 `false`。`false` 只表示该真实能力不在本次上线范围，不是失败后的兜底，也不能包装为真实 AI/语音结果。
+从受保护 GitHub 提交创建或更新 Staging Blueprint。仅由客户授权运维填入 Render 的 `sync: false` 值和 Secret Files。
 
-当 `AI_REQUIRED_FOR_LAUNCH=true` 时，还必须配置：
+- API 必须以 `NODE_ENV=production`、`COOKIE_SECURE=true` 启动；`/health/ready` 必须在数据库、迁移校验、Key Value 探针和生产 MiMo 配置均通过后才返回成功。
+- `MIMO_API_KEY_FILE=/etc/secrets/mimo_api_key` 与 `SENSITIVE_DATA_KEY_FILE=/etc/secrets/sensitive_data_key` 必须存在并合规；所有原始 provider key 环境变量必须不存在。
+- `MIMO_KEY_VALUE_URL` 必须是 Render Key Value 私有地址；配额参数、timeout/response limits、telemetry 留存期和 retention job 执行时限必须是客户批准的精确值。
+- 在部署前执行只增不减、可审查的 `pnpm db:migrate:deploy`。迁移备份、恢复演练与回滚步骤必须记录；不得靠手改生产表绕过迁移。
+- 首次初始化使用 `pnpm db:bootstrap:production`，且只在 `NODE_ENV=production` 下运行。它读取 `/etc/secrets` 中直接的 `PRODUCTION_BOOTSTRAP_CONFIG_FILE`、`PRODUCTION_BOOTSTRAP_ADMIN_PASSWORD_FILE`、`PRODUCTION_BOOTSTRAP_DOCTOR_PASSWORD_FILE` 与敏感数据密钥文件；只幂等创建机构、平台管理员和首位医师，强制首次改密并写受控审计。不得以 `db:seed`、`db:seed:trial` 或手工 SQL 替代生产首启，也不得将配置或口令写入资料包。
+- Web 的 `NEXT_PUBLIC_API_BASE_URL` 必须是 API 的正式 HTTPS origin；发布后检查 CSP、HSTS、Cookie、CORS、摄像头安全上下文与前后端 origin。
 
-- `AI_PROVIDER`
-- `AI_MODEL_VERSION`
-- `AI_MODEL_ENDPOINT`
-- `AI_API_KEY_REF`
-- `AI_PROMPT_VERSION`
-- `AI_CALL_LOG_RETENTION_DAYS`
-- `AI_HUMAN_REVIEW_REQUIRED`
+Staging 任一启动、迁移、健康检查、Secret File、Key Value 或安全检查失败时停止，不自动写默认值或切换到本地配置。
 
-当 `SPEECH_REQUIRED_FOR_LAUNCH=true` 时，还必须配置：
+## 4. 真实业务数据与临床准备
 
-- `SPEECH_PROVIDER`
-- `SPEECH_TO_TEXT_ENDPOINT`
-- `SPEECH_API_KEY_REF`
-- `SPEECH_MODEL_VERSION`
+不得在生产或客户 Staging 用 seed、mock、固定结果或手工脚本构造验收链。必须由授权工作人员建立：
 
-当对应 scope 为 `false` 时，不得残留该能力的半配置，例如 `AI_PROVIDER`、`AI_MODEL_ENDPOINT`、`SPEECH_PROVIDER` 或 `SPEECH_TO_TEXT_ENDPOINT`。否则应判定为阻断，避免把非上线范围配置误当作生产能力。
+1. 首启完成后，由授权工作人员通过正式流程建立真实患者、有效的 `privacy_policy`、`ai_processing`、`camera_capture`，以及 STT 所需 `microphone_capture`。
+2. 真实临床评估输入：MMSE、CDR、认知维度、临床摘要/来源、风险确认和医生责任归属。
+3. 医师确认的评估、康复计划、采集条件、设备、质量阈值、协议参数、批次和训练安排。
+4. 目标电脑、浏览器、摄像头、网络、场地、陪护/中止规则；以及 Unity（如适用）的真实 Build/manifest。
 
-失败处理：
+缺任一环节时，不能开启正式训练或执行保存验收。
 
-- 缺变量、占位符、localhost、HTTP、开发 JWT、固定本地密码、明文密钥或 mock/demo/local 标记时必须阻断。
-- 不允许脚本自动替换默认值。
-- 不允许把本地 `.env` 当成试点或生产配置。
+## 5. Staging 现场验收
 
-## 5. 浏览器体感 Go/No-Go
-
-至少一个正式训练内容必须完成实机验收。
-
-Go 条件：
-
-- 管理后台已发布正式 `browser_pose_game` 训练内容。
-- 目标电脑、浏览器、摄像头、训练场地和网络环境已记录。
-- 患者已签署摄像头授权。
-- 现场完成摄像头授权、姿态识别、训练中反馈、训练结果入库和审计日志。
-- evidence JSON、截图、录屏、训练记录 API 和审计日志 API 均保存。
-
-执行验收：
+按真实执行顺序保留受控证据：
 
 ```bash
-pnpm verify:browser-pose-evidence -- <evidence-json-path>
-pnpm verify:browser-pose-field-acceptance -- \
-  <evidence-json-path> \
-  --api-base-url https://api.rehab.example.com \
-  --patient-token <training-record-read-token> \
-  --audit-token <audit-read-token>
+pnpm verify:ai-assessment-acceptance -- <ai-config.json>
+pnpm verify:speech-transcript-evidence -- <speech-evidence.json>
+pnpm verify:speech-transcript-acceptance -- <speech-config.json>
+pnpm verify:speech-ai-assessment-acceptance -- <speech-ai-config.json>
+pnpm verify:tts-speech-output-evidence -- <tts-evidence.json>
+pnpm verify:tts-speech-output-acceptance -- <tts-config.json>
+pnpm verify:browser-pose-evidence -- <browser-evidence.json>
+pnpm verify:browser-pose-field-acceptance -- <browser-evidence.json> --api-base-url <https-api-origin>
+pnpm verify:formal-acceptance-chain -- <business-chain-config.json>
 ```
 
-No-Go 条件：
-
-- 缺摄像头授权、截图/录屏、动作指标、训练记录 API 或审计日志 API。
-- 训练结果来源为 mock/demo，或成绩固定生成。
-- 姿态质量不足、训练过短、异常反应时间未进入复核。
-
-No-Go 时，不能宣称体感训练正式可交付。
-
-## 6. Unity Go/No-Go
-
-只有客户明确要求 Unity 作为一期上线范围时执行。
-
-Go 条件：
-
-- 客户提供 Unity WebGL Build 文件、`manifest.json`、版本号和授权证明。
-- `manifest.json` 指向的 loader、data、framework、wasm、StreamingAssets 均存在并版本匹配。
-- Unity 通过 `docs/unity/unity-webgl-bridge-protocol.md` 回传真实结构化结果。
-- 训练 session、training result、motion metrics 和 audit log 均可反查。
-
-No-Go 条件：
-
-- 只有截图、视频或旧 demo，没有 WebGL Build 和授权证明。
-- 无法通过 Bridge 回传结构化训练指标。
-- 资源缺失、版本不匹配或无法通过 HTTPS 加载。
-
-No-Go 时，只能说明 Unity 接入通道已预留，不能宣称已有正式 Unity 游戏库。
-
-## 7. 空库闭环与最终验收
-
-在试点或准生产环境中，用 `pnpm db:seed:trial` 初始化角色、机构、首个管理员和首个医师，不创建患者、评估、计划或训练数据。
-
-然后执行：
+Unity 是本期上线范围时，额外执行：
 
 ```bash
-pnpm verify:trial-empty-loop
+pnpm verify:unity-field-evidence -- <unity-evidence.json>
+pnpm verify:unity-field-acceptance -- <unity-evidence.json> --api-base-url <https-api-origin>
 ```
 
-最终交付前至少保留：
+验收必须证明：同一真实患者的同意、临床评估、医师确认、训练条件、会话、结果、动作指标、家属脱敏摘要和审计能够关联；AI/STT/TTS 均为真实 MiMo 调用且无替代路径；浏览器/Unity 均在真实设备上运行并保存真实结果。只读反查脚本不能创建、补写或修正记录。
 
-- `customer-production-input.json` 及校验通过记录。
-- `pnpm delivery:check:production -- --customer-input customer-production-input.json` 通过记录。
-- 空库闭环验收记录。
-- 浏览器体感 evidence JSON、截图、录屏和只读实机验真记录。
-- 如接入 AI/语音：供应商控制台截图、调用日志、模型版本、提示词版本、人工复核记录和授权记录。
-- 如接入 Unity：WebGL Build、manifest、授权证明、Bridge 回传日志和训练结果记录。
-- 脱敏导出样例和导出审计日志。
+## 6. Production Go/No-Go
 
-任一材料缺失时，最终结论为 `BLOCKED`，不得以演示数据、口头说明或脚本构造结果替代。
+只有下列全部满足才能将 GitHub 受保护分支发布到 Production：
+
+- 客户资料包和生产环境门禁均通过。
+- GitHub CI、完整回归、迁移清单和依赖审计通过。
+- Staging 健康检查、迁移、备份恢复、监控告警、HTTPS/CSP/CORS/secure cookie 和 Key Value 均通过。
+- 全量 MiMo 三项现场验收通过，医生人工复核、配额/失败计费书面规则和 telemetry 留存已经确认。
+- 真实临床、同意、设备、采集、训练与审计证据完整；Unity 上线时 Unity 证据也完整。
+- 客户验收包通过其 manifest 校验，并且没有敏感原始内容。
+
+任一条件不满足为 `NO-GO/BLOCKED`。保持当前安全状态，记录缺项、责任人和恢复条件；不要通过关闭功能、更换供应商、修改结果或回填审计来发布。
+
+## 7. 发布后监控与回滚
+
+发布后持续检查 Render API `/health/live` 与 `/health/ready`、错误率、MiMo 拒绝/失败、Key Value 状态、配额告警、数据库备份和患者安全事件。异常时按经批准的回滚 Runbook 回退到上一已验证 GitHub release，并保留事件审计；不得在 Production 临时插入固定结果、人工绕过授权或非 MiMo 供应商。完整角色、命令和阶段依赖以 `docs/github-render-mimo-production-deployment-plan.md` 为准。

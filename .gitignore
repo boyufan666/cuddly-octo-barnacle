@@ -14,8 +14,55 @@ coverage
 .DS_Store
 *.log
 *.zip
+*read-credentials*.json
 infra/data
+offline-deploy-assets/*.tar
+offline-deploy-assets/*.dmg
+tmp/docs/rendered-*
+tmp/docs/manual-quicklook/
+tmp/playwright-qa/
+.superpowers/
+.customer-runtime/
 客户提供/
 output/
 .playwright-cli/
 .playwright-mcp/
+
+# Playwright runtime output; the source specs and acceptance evidence remain tracked separately.
+/test-results/
+/apps/web/test-results/
+
+# Unity generated files and local editor state.
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Bb]uild/
+[Bb]uilds/
+[Ll]ogs/
+[Uu]ser[Ss]ettings/
+*.csproj
+*.sln
+*.user
+*.pidb
+*.booproj
+*.svd
+*.pdb
+*.mdb
+*.slnx
+**/.vscode/
+
+# Root-level Unity residue from accidental project creation.
+/Assets/
+/ProjectSettings/
+/packages/manifest.json
+/packages/packages-lock.json
+
+# Formal Unity WebGL delivery assets generated for the web app are source
+# deliverables, unlike Unity editor-local Build folders.
+!apps/web/public/unity/*/
+!apps/web/public/unity/*/*/
+!apps/web/public/unity/*/*/[Bb]uild/
+!apps/web/public/unity/*/*/[Bb]uild/**
+!apps/web/public/unity/*/*/StreamingAssets/
+!apps/web/public/unity/*/*/StreamingAssets/**
+!apps/web/public/unity/*/*/manifest.json

@@ -2,7 +2,7 @@
 
 本文用于区分“正式交付源码”“本地开发资料”“客户历史参考资料”和“上线前必须补齐事项”，避免将原型、示例密钥或初始化数据误当作生产能力交付。
 
-客户 `康复平台设计(1).docx` 的正式交付范围先按 `docs/customer-docx-coverage-matrix.md` 核对。该矩阵以 `DOCX-USER-LOGIN` 到 `DOCX-FAMILY-SOCIAL` 作为总需求账本，并要求所有能力遵循 `No fallback allowed`：缺正式配置、授权、运行时资源、供应商证据、采集批次、审计日志或现场证据时必须阻断；Wearable device integration is customer-gated，Production deployment is customer-gated。
+客户 `康复平台设计(1).docx` 的正式交付范围先按 `docs/customer-docx-coverage-matrix.md` 核对。该矩阵以 `DOCX-USER-LOGIN` 到 `DOCX-SOCIAL-SQUARE` 作为总需求账本，并要求所有能力遵循 `No fallback allowed`：缺正式配置、授权、运行时资源、供应商证据、采集批次、审计日志或现场证据时必须阻断；Wearable device integration is customer-gated，Production deployment is customer-gated，Public social square is customer-gated。
 
 ## 正式交付范围
 
@@ -11,7 +11,7 @@
 - `apps/web`：四角色 Web 前端与体感训练页面
 - `apps/api`：NestJS API、认证授权、业务接口、审计与导出
 - `packages/db`：Prisma schema、迁移与本地初始化脚本
-- `infra/docker-compose.yml`：本地开发 PostgreSQL 与 Redis
+- `infra/docker-compose.yml`：本地开发 PostgreSQL
 - `docs/unity`：Unity WebGL Bridge 协议
 - `docs/formal-training-content-runbook.md`：正式训练内容发布手册
 - `docs/formal-delivery-acceptance-runbook.md`：正式交付总验收 Runbook
@@ -23,12 +23,12 @@
 - `docs/customer-production-input-checklist.md`：客户上线资料准备清单
 - `docs/customer-final-input-request.md`：客户可转发的最终资料索取单
 - `docs/customer-input-to-launch-gate-runbook.md`：客户资料到上线门禁 Runbook
-- `docs/ai-speech-provider-selection-free-first.md`：AI/语音供应商免费优先选型说明
-- `docs/ai-assessment-draft-integration.md`：AI 评估草稿接口、语音转写骨架接口、MiMo 本地联调与人工复核边界
+- `docs/ai-speech-provider-selection-free-first.md`：MiMo AI、语音与费用确认说明
+- `docs/ai-assessment-draft-integration.md`：MiMo AI 评估草稿、临床人工复核与阻断边界
 - `docs/ai-assessment-acceptance-runbook.md`：AI 评估草稿到医生复核正式入库的验收 Runbook
 - `docs/formal-acceptance-chain-runbook.md`：同一正式业务链只读验真 Runbook
 - `docs/ad8-caregiver-interview-acceptance-runbook.md`：AD-8 照护者访谈正式验收 Runbook
-- `docs/speech-provider-readiness-notes.md`：语音接口探测结果、`POST /ai/assessment-speech-transcripts` 骨架边界、阻断边界和客户补充资料
+- `docs/speech-provider-readiness-notes.md`：MiMo STT/TTS 生产协议、Secret File、同意与现场验收边界
 - `docs/customer-delivery-progress-and-input-summary.md`：客户交付推进与资料确认摘要
 - `docs/production-delivery-runbook.md`：生产交付 Runbook
 - `docs/browser-pose-field-acceptance-runbook.md`：浏览器体感实机验收 Runbook
@@ -48,6 +48,8 @@
 - `docs/templates/speech-ai-assessment-acceptance-config.template.json`：语音转写到 AI 正式评估组合验收配置模板
 - `docs/empty-real-loop-acceptance-runbook.md`：新库真实总闭环验收 Runbook
 - `docs/templates/empty-real-loop-orchestrator.template.json`：新库真实总闭环验收编排配置模板
+- `docs/supply-chain-license-policy-runbook.md`：Render 等价 Linux 生产依赖 SBOM、许可证清单与客户策略门禁手册
+- `docs/templates/customer-license-policy.template.json`：客户安全负责人许可证策略审批模板
 - `docs/templates/customer-acceptance-package-manifest.template.json`：客户验收包 manifest 归档模板
 - `docs/web-playwright-regression-runbook.md`：Web 前端真实浏览器回归测试 Runbook
 - `scripts/verify-speech-ai-assessment-acceptance.mjs`：语音转写、AI 草稿、医生复核和 `speech_ai_assessment` 正式入库组合验收脚本
@@ -109,25 +111,22 @@
 ## 上线前必须替换
 
 - `DATABASE_URL`：正式数据库连接
-- `REDIS_URL`：正式 Redis 连接
 - `JWT_SECRET`：强随机密钥
 - `WEB_ORIGIN`：正式前端域名
 - `NEXT_PUBLIC_API_BASE_URL`：正式 API 域名
 - `DEFAULT_PATIENT_PASSWORD`：不得使用固定通用密码
-- PostgreSQL/Redis 密码和访问策略
+- PostgreSQL 密码和访问策略
 - HTTPS 证书和反向代理配置
 - 日志、备份、监控和告警配置
-- AI 上线范围：`AI_REQUIRED_FOR_LAUNCH` 必须与客户资料包一致；若为 `true`，还必须替换大模型供应商、正式 HTTPS endpoint、`secret-manager://...` 密钥引用、模型/提示词版本、调用日志留存和医师人工复核证据
-- STT 上线范围：`SPEECH_REQUIRED_FOR_LAUNCH` 必须与客户资料包一致；若为 `true`，还必须替换语音转文字供应商、正式 HTTPS endpoint、`secret-manager://...` 密钥引用、语音模型版本、调用日志留存和麦克风授权证据
-- TTS 上线范围：`TTS_REQUIRED_FOR_LAUNCH` 必须与客户资料包一致；若为 `true`，还必须替换 TTS 供应商、正式 HTTPS endpoint、`secret-manager://...` 密钥引用、模型版本、音色、输出格式、调用日志留存和播放验收证据
-
-若 AI/语音对应 scope 为 `false`，只能表示该真实能力不在本次上线范围；不得保留半配置，不得宣传真实 AI/语音能力，也不得作为失败后的兜底。
+- MiMo 密钥与病历加密密钥：必须替换 `MIMO_API_KEY_REF`、`MIMO_API_KEY_FILE=/etc/secrets/mimo_api_key`、`SENSITIVE_DATA_KEY_REF` 与 `SENSITIVE_DATA_KEY_FILE=/etc/secrets/sensitive_data_key`；原始 key 环境变量在生产中禁止存在。
+- 全量 MiMo：`AI_REQUIRED_FOR_LAUNCH`、`SPEECH_REQUIRED_FOR_LAUNCH`、`TTS_REQUIRED_FOR_LAUNCH` 和 `AI_HUMAN_REVIEW_REQUIRED` 必须均为 `true`；provider 固定为 MiMo 三项精确值，并替换客户批准的 HTTPS endpoint、模型、提示词、音色、输出格式、限制、Key Value 配额和 telemetry 留存。
+- 真实临床：替换患者同意、MMSE、CDR、认知维度、风险确认、医师复核、设备/采集条件/协议/批次及现场证据；这些值不能由 seed、脚本或本地样例产生。
 
 ## 当前阻塞交付事项
 
 客户 DOCX 需求覆盖、当前状态、验证命令和 customer-gated 项以 `docs/customer-docx-coverage-matrix.md` 为准；矩阵中软件侧标为 `done` 的条目仍必须按对应 proof、现场证据、客户资料包和 `No fallback allowed` 边界验收，不能被口头说明或本地演示替代；标为 `customer-gated` 的条目必须等客户补齐范围、资料和运营责任后另行验收。
 
-1. 若客户要求本次上线真实 AI/语音服务接入，必须同时具备生产供应商配置、正式 HTTPS endpoint、`secret-manager://...` 密钥引用、模型/语音调用日志留存和医师人工复核证据；任一项缺失均为上线硬阻断，不能以 mock/demo/local、本地录入或脚本兜底替代。
+1. MiMo AI、STT、TTS 必须同时具备生产配置、正式 HTTPS endpoint、`secret-manager://...` 引用、Render Secret File、配额/计费书面规则、模型/语音调用日志留存和医师人工复核/播放证据；任一项缺失均为上线硬阻断，不能以 mock/demo/local、本地录入、其他供应商或脚本兜底替代。
    `POST /ai/assessment-speech-transcripts` 只是严格 STT 接入骨架，不解除真实语音服务接入阻塞。
    若声明真实大模型评估上线，还必须按 `docs/ai-assessment-acceptance-runbook.md` 执行现场 API 验收。
    若声明真实语音转写上线，还必须按 `docs/speech-transcript-acceptance-runbook.md` 执行 evidence JSON 自检和现场 API 验收。
@@ -136,7 +135,7 @@
 2. 至少 1 个正式训练内容实机验收：发布浏览器体感或 Unity 内容，完成真实训练运行、结果生成、入库和审计。
 3. Unity WebGL 正式构建接入：`manifest.json`、Build 文件、真实 Unity runtime、Bridge 回传、只读训练记录验真和审计验真。
 4. 隐私权限专项验收：撤回授权阻断、家属摘要脱敏、医师患者归属、导出脱敏审计。
-5. 生产部署方案：Web、API、PostgreSQL、Redis、静态训练资源、HTTPS、备份与监控。
+5. 生产部署方案：Web、API、PostgreSQL、静态训练资源、HTTPS、备份与监控。
 6. 客户验收标准冻结：角色权限、训练指标、AI 输入输出、数据导出范围、设备和浏览器要求。
 
 详细缺口、游戏路线、客户验收口径和生产上线准备见：
@@ -208,7 +207,7 @@ pnpm verify:customer-acceptance-package-manifest -- <manifest-json-path> --packa
 
 配置模板：`docs/templates/customer-acceptance-package-manifest.template.json`
 
-该命令只检查 manifest 指向的交付证据文件存在、非空、摘要匹配且不含占位符、伪数据标记或敏感字段；它不读取 `.env`，不读取只读令牌文件内容，不生成 evidence，也不替代任何专项现场验收。
+该命令只检查 manifest 指向的交付证据文件存在、非空、摘要匹配且不含占位符、伪数据标记或敏感字段；它不读取 `.env`，不读取 field acceptance 运行时账号密码，不生成 evidence，也不替代任何专项现场验收。
 
 Web 前端壳层回归应使用真实浏览器执行：
 
@@ -227,15 +226,16 @@ pnpm verify:browser-pose-evidence -- <evidence-json-path>
 正式通过还必须执行只读实机验真：
 
 ```bash
+BROWSER_POSE_PATIENT_ACCOUNT='<browser-patient-read-account>' \
+BROWSER_POSE_PATIENT_PASSWORD='<browser-patient-read-password>' \
+BROWSER_POSE_AUDIT_ACCOUNT='<browser-audit-read-account>' \
+BROWSER_POSE_AUDIT_PASSWORD='<browser-audit-read-password>' \
 pnpm verify:browser-pose-field-acceptance -- \
   <evidence-json-path> \
-  --api-base-url https://api.rehab.example.com \
-  --read-credentials <field-acceptance-read-credentials.json> \
-  --patient-token-ref secret-manager://rehab-trial/browser-training-read-token \
-  --audit-token-ref secret-manager://rehab-trial/audit-read-token
+  --api-base-url https://api.rehab.example.com
 ```
 
-只读实机验真必须能证明截图/录屏文件存在且非空、训练记录 API 与 evidence 一致、`training_session.start` 和 `training_result.submit` 两类成功审计日志与 evidence 一致。正式浏览器体感现场验收只接受 `qualityFlag=valid` 且 `abnormalFlag=false` 的有效训练样本；异常、可疑或低质量结果的 `training_result.review`、复核结论和审计日志由 `pnpm verify:contracts` 验收，不放入 field acceptance 通过样本。训练结果页的审计自动聚合只读取已加载日志并辅助填写 ID，最终仍以只读 API 验真为准。缺 API、缺只读令牌文件、缺 token 引用、缺附件、缺训练记录或缺审计日志时，浏览器体感训练不能计为正式可交付。API 地址、evidence JSON 和审计 metadata 必须拒绝 `mock/demo/seed/fallback/fixed/manual` 的明文、拼接和 URL 编码标记，不得包含 token、密钥、请求/响应正文、原始 payload 或 base64 原始内容；验真失败时不得输出 HTTP 响应体或 mismatch 原值。
+只读实机验真必须能证明截图/录屏文件存在且非空、训练记录 API 与 evidence 一致、`training_session.start` 和 `training_result.submit` 两类成功审计日志与 evidence 一致。正式浏览器体感现场验收只接受 `qualityFlag=valid` 且 `abnormalFlag=false` 的有效训练样本；异常、可疑或低质量结果的 `training_result.review`、复核结论和审计日志由 `pnpm verify:contracts` 验收，不放入 field acceptance 通过样本。训练结果页的审计自动聚合只读取已加载日志并辅助填写 ID，最终仍以只读 API 验真为准。缺 API、缺 Browser Pose 专属患者/审计账号密码、Cookie/CSRF 登录失败、缺附件、缺训练记录或缺审计日志时，浏览器体感训练不能计为正式可交付。API 地址、evidence JSON 和审计 metadata 必须拒绝 `mock/demo/seed/fallback/fixed/manual` 的明文、拼接和 URL 编码标记，不得包含密码、token、密钥、请求/响应正文、原始 payload 或 base64 原始内容；验真失败时不得输出 HTTP 响应体或 mismatch 原值。
 
 完成 Unity WebGL 正式现场验收后，应先校验证据 JSON：
 
@@ -246,15 +246,16 @@ pnpm verify:unity-field-evidence -- <evidence-json-path>
 正式通过还必须执行只读实机验真：
 
 ```bash
+UNITY_FIELD_PATIENT_ACCOUNT='<unity-patient-read-account>' \
+UNITY_FIELD_PATIENT_PASSWORD='<unity-patient-read-password>' \
+UNITY_FIELD_AUDIT_ACCOUNT='<unity-audit-read-account>' \
+UNITY_FIELD_AUDIT_PASSWORD='<unity-audit-read-password>' \
 pnpm verify:unity-field-acceptance -- \
   <evidence-json-path> \
-  --api-base-url https://api.rehab.example.com \
-  --read-credentials <field-acceptance-read-credentials.json> \
-  --patient-token-ref secret-manager://rehab-trial/unity-training-read-token \
-  --audit-token-ref secret-manager://rehab-trial/audit-read-token
+  --api-base-url https://api.rehab.example.com
 ```
 
-Unity 只读实机验真只执行 `GET` 查询和本地文件读取，不创建或补写任何业务数据。它必须能证明真实 Unity WebGL runtime 已启动、Bridge 事件与训练结果一致、截图/录屏文件存在且非空、训练记录 API 与 evidence 一致、`training_session.start` 和 `training_result.submit` 两类成功审计日志与 evidence 一致。正式 Unity WebGL 现场验收只接受 `qualityFlag=valid` 且 `abnormalFlag=false` 的有效训练样本；异常、可疑或低质量结果的 `training_result.review`、复核结论和审计日志由 `pnpm verify:contracts` 验收，不放入 field acceptance 通过样本。训练结果页的审计自动聚合只读取已加载日志并辅助填写 ID，最终仍以只读 API 验真为准。缺 API、缺只读令牌文件、缺 token 引用、缺附件、缺训练记录、缺审计日志或缺真实 Unity WebGL runtime 时，Unity 训练不能计为正式可交付；mock、demo、seed、fallback、fixed、manual 和固定成绩不能计为正式证据。API 地址、evidence JSON 和审计 metadata 必须拒绝伪数据标记、敏感字段和原始载荷；验真失败时不得输出 HTTP 响应体或 mismatch 原值。
+Unity 只读实机验真只执行 `GET` 查询和本地文件读取，不创建或补写任何业务数据。它必须能证明真实 Unity WebGL runtime 已启动、Bridge 事件与训练结果一致、截图/录屏文件存在且非空、训练记录 API 与 evidence 一致、`training_session.start` 和 `training_result.submit` 两类成功审计日志与 evidence 一致。正式 Unity WebGL 现场验收只接受 `qualityFlag=valid` 且 `abnormalFlag=false` 的有效训练样本；异常、可疑或低质量结果的 `training_result.review`、复核结论和审计日志由 `pnpm verify:contracts` 验收，不放入 field acceptance 通过样本。训练结果页的审计自动聚合只读取已加载日志并辅助填写 ID，最终仍以只读 API 验真为准。缺 API、缺 Unity 专属患者/审计账号密码、Cookie/CSRF 登录失败、缺附件、缺训练记录、缺审计日志或缺真实 Unity WebGL runtime 时，Unity 训练不能计为正式可交付；mock、demo、seed、fallback、fixed、manual 和固定成绩不能计为正式证据。API 地址、evidence JSON 和审计 metadata 必须拒绝伪数据标记、敏感字段和原始载荷；验真失败时不得输出 HTTP 响应体或 mismatch 原值。
 
 完成 AI 评估正式现场验收时，必须执行：
 

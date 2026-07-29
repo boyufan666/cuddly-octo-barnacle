@@ -1,91 +1,67 @@
-# 客户最终资料索取单
+# 客户正式上线资料索取单
 
-用途：这份清单可直接发给客户，用于一次性收集试点或正式上线前必须确认的资料。目标是保证平台能真实采集数据，而不是依赖演示账号、示例数据、个人免费 token、mock 服务或旧原型截图。
+用途：一次性收集 GitHub + Render 生产上线、全量 MiMo 能力、真实临床闭环与现场验收所需资料。资料不完整时，系统和验收结论必须是 `BLOCKED`；不能以演示账号、测试病历、seed、个人 token、临时代理、浏览器本地语音或任何 fallback 补齐。
 
-客户提供资料后，项目侧会整理为 `customer-production-input.json`，并执行：
+客户应从 `docs/templates/customer-production-input.template.json` 复制资料包，替换全部占位符后提交。项目组只校验资料和证据，不接收真实密钥、原始音频、完整转写、原始病历或 Base64 音频。
 
 ```bash
-pnpm verify:customer-production-input -- customer-production-input.json
-pnpm delivery:check:production -- --customer-input customer-production-input.json
+pnpm verify:customer-production-input -- <customer-production-input.json>
+pnpm delivery:check:production -- --customer-input <customer-production-input.json>
 ```
 
-以上命令只做资料和配置门禁校验，不能替代真实 AI/语音调用验收、浏览器体感实机验收、医师人工复核和最终客户验收。
+这两项检查不能替代 Staging 的真实 MiMo 调用、医师复核、摄像头/Unity 实机训练或客户最终验收。
 
-客户回复后的落地顺序、Go/No-Go 判断和验收证据整理见 `docs/customer-input-to-launch-gate-runbook.md`。
+## 1. GitHub 与 Render
 
-## 1. 基础上线资料
+- GitHub 组织、私有仓库、管理员、受保护主分支、required checks、CODEOWNERS 和发布责任人。
+- Render 团队、账单负责人、部署区域与数据驻留书面批准。当前 Blueprint 将 API、Web、PostgreSQL、Key Value 和 retention cron 放在新加坡；客户必须确认该区域符合合同与数据处理要求。
+- Web/API 正式 HTTPS 域名、DNS 管理人、证书和续期责任人。
+- Render Postgres 备份、恢复目标、恢复演练负责人、监控告警和故障通报责任人。
+- 客户确认 `render.yaml` 中所有 `sync: false` 环境变量、Secret Files、custom domains 和关键资源计划；不得把真实值提交到 GitHub。
 
-- 公司或机构正式名称、项目验收负责人、目标试点或上线日期。
-- Web 正式域名、API 正式域名，均需支持 HTTPS。
-- 服务器资源方案：CPU、内存、磁盘、带宽、部署区域、是否允许 Docker。
-- PostgreSQL 和 Redis 正式连接方案、备份周期、恢复责任人。
-- HTTPS 证书申请方式、续期责任人、反向代理或网关方案。
-- 监控、告警、日志留存、数据库备份和故障处理负责人。
+## 2. 密钥、连接与运行时安全
 
-## 2. 账号与组织资料
+- `DATABASE_URL` 的受控引用；强 `JWT_SECRET` 的 Render 托管方式。
+- `SENSITIVE_DATA_KEY_REF` 和 Secret File `/etc/secrets/sensitive_data_key`。
+- `MIMO_API_KEY_REF` 和 Secret File `/etc/secrets/mimo_api_key`。仅客户/运维向 Render Secret File 写入真实 key；资料包只填写 `secret-manager://` 引用和固定文件路径。
+- 生产首启所需的 `PRODUCTION_BOOTSTRAP_CONFIG_FILE`、`PRODUCTION_BOOTSTRAP_ADMIN_PASSWORD_FILE` 和 `PRODUCTION_BOOTSTRAP_DOCTOR_PASSWORD_FILE` Secret Files。客户/运维必须在 Render 私密配置中维护其内容；项目资料包、GitHub 和验收附件不得包含机构人员资料或首始口令明文。
+- MiMo allowlist 主机名、AI/音频理解/TTS 的精确 HTTPS endpoint、每项模型、提示词版本、TTS 音色和 `mp3` 或 `wav` 输出格式。
+- Render Key Value 私有 URL、额度 key prefix、窗口、请求数、音频秒数、TTS 字符数、预算单位、计费因子、探针超时以及三类 provider 的超时和最大响应字节数；另提供最小化 provider telemetry 的 30--3650 天留存期与无默认的有限执行时限。
+- 客户书面批准配额窗口语义、供应商失败是否计费、退款/重试规则与超过额度的业务处理。项目组不会自行假定或实现兜底策略。
 
-- 超级管理员、运营管理员、审计查看人员实名账号清单。
-- 试点机构名称、机构编码、机构类型。
-- 医师账号清单：姓名、科室、职称、手机号或登录账号。
-- 患者账号开通方式：由后台创建、批量导入或客户现有系统同步。
-- 家属授权绑定方式：由患者授权、医师协助绑定或运营后台审核。
+## 3. 全量 MiMo 与合规授权
 
-## 3. 隐私与真实数据采集
+本期三个能力均是生产上线范围，资料包中必须全部为 `true`：
 
-- 隐私协议正文、版本号、生效日期、客户盖章或确认版本。
-- 知情同意范围：评估数据处理、摄像头体感采集、麦克风采集、家属共享。
-- 授权撤回规则：撤回后哪些功能必须立即阻断。
-- 真实患者数据采集范围、试点患者来源、是否允许使用脱敏患者。
-- 数据留存周期、删除规则、导出审批人和脱敏负责人。
-- 是否允许把健康数据、问答转写、评估摘要发送给第三方 AI/语音供应商。
+- `ai.requiredForLaunch`，provider 必须为 `xiaomi-mimo`，且 `humanReviewRequired=true`。
+- `speech.requiredForLaunch`，provider 必须为 `xiaomi-mimo-audio-understanding`，且 `microphoneConsentRequired=true`。
+- `tts.requiredForLaunch`，provider 必须为 `xiaomi-mimo-tts`，且 `patientPlaybackConsentRequired=true`。
 
-## 4. AI/语音资料
+客户还需提供：MiMo 账号主体和负责人、第三方 AI 数据处理书面批准、服务许可/费用承担人、最小化 telemetry 留存和删除策略、医师人工复核责任人。讯飞、星火、阿里云、通义、DeepSeek、Kimi、智谱、OpenAI 或任何其他服务不能作为本期生产替代。
 
-如果客户一期不要求真实 AI/语音上线，可先只交付结构化评估录入和接口边界；如果要求真实 AI/语音能力，必须提供以下资料。
+## 4. 真实临床与患者数据
 
-- 大模型供应商账号：优先确认客户是否已有星火/讯飞账号；也可评估阿里云百炼、DeepSeek、智谱、Kimi/Moonshot、OpenAI。
-- 语音识别供应商账号：优先确认客户是否已有讯飞语音或阿里云语音识别资源。
-- 免费优先确认：免费额度、有效期、QPS、并发、覆盖模型、是否允许试点或生产使用、超额计费、是否支持用完即停。
-- 正式 HTTPS endpoint：不能是 localhost、mock、demo、临时代理或个人测试地址。
-- 密钥托管引用：只提供 `secret-manager://...` 或客户正式密钥管理系统引用，不提供真实密钥明文。
-- 模型版本、语音识别版本、提示词版本、后续升级责任人。
-- 调用日志样例：调用 ID、时间、模型版本、脱敏请求摘要、脱敏响应摘要、错误码或成功状态。
-- 医师人工复核责任人：复核人、复核结论、复核记录保存方式。
+- 隐私协议版本、留存/删除规则、同意记录责任人和撤回流程。
+- 经批准的真实患者来源、建档责任人、脱敏导出审批责任人；不得用 seed 或手工构造的结果作为生产验收。
+- 每位进入 Staging/Production 验收患者的真实 `privacy_policy`、`ai_processing`、`camera_capture`；使用 STT 时还需要 `microphone_capture`。TTS 依赖前两项同意。
+- 真实临床评估：MMSE、CDR、认知维度分数、临床摘要/来源、风险确认、医生人工复核结论和责任医师。
+- 评估、方案、采集条件/协议/批次、训练会话、结果复核和家属脱敏摘要必须能够关联为同一业务链。
 
-免费优先选型口径见 `docs/ai-speech-provider-selection-free-first.md`。免费额度只能作为试点降成本手段，不作为生产 SLA 或长期免费承诺；资料缺失时必须阻断真实 AI/语音能力，不允许自动降级为 mock 或伪造结果。
+## 5. 训练内容、设备与现场
 
-## 5. 体感训练与游戏资料
+- 至少一个已发布的浏览器体感内容、指定浏览器版本、摄像头型号、电脑/网络/场地光照、陪护及异常停止规则。
+- 经批准的采集条件、设备、质量阈值、协议参数、批次和实际训练安排。
+- 若 Unity 是一期范围：真实 WebGL Build、manifest、版本、资源授权、Bridge 协议与实机回传证据。
+- 真实现场附件：截图、录屏/录像、evidence JSON、训练记录和审计只读反查账号。不得用截图、旧 Build、固定分数或脚本造数代替运行时证据。
 
-- 一期是否确认以浏览器体感训练作为正式训练内容。
-- 验收设备：电脑型号、浏览器版本、摄像头型号、网络环境、训练场地光线。
-- 训练安全说明：适用人群、禁忌、单次训练时长、异常停止条件、现场陪护要求。
-- 训练指标确认：`reaction_time_ms`、`target_hit_rate`、`pose_visibility_avg`、`arm_raise_accuracy` 是否满足验收。
-- 如果客户已有 Unity 游戏：提供 WebGL Build、`manifest.json`、版本号、素材/插件授权证明、Bridge 适配负责人。
-- 如果客户没有 Unity 游戏：一期先验收浏览器体感训练，后续 Unity 自研或采购另立范围。
+## 6. 必须交付的验收材料
 
-## 6. 验收证据资料
+- 角色、授权、评估、AI/STT/TTS、训练、复核、家属脱敏、导出和审计的真实证据。
+- Staging 的 MiMo AI、STT、TTS 现场验收记录，包含受控调用证据、医生复核和 TTS 播放证据。
+- 浏览器体感与（如适用）Unity WebGL 的 evidence、截图/录屏、结果/动作指标与审计反查。
+- Render 部署、HTTPS、健康检查、迁移、备份恢复、监控告警、Key Value、Secret File 和生产回滚记录。
+- 填写后的客户验收包 manifest；包内不得包含密钥、原始病历、完整转写、原始音频、Base64 或 provider 请求/响应正文。
 
-- 角色截图：患者、家属、医师、运营管理员、审计查看人员。
-- 评估证据：结构化评估记录；如接入真实 AI/语音，还需供应商调用日志和医师人工复核记录。
-- 训练证据：浏览器体感 evidence JSON、截图、录屏、训练记录 API、审计日志 API。
-- 审计证据：建档、授权、评估、方案确认、训练开始、结果提交、导出操作日志。
-- 导出证据：脱敏导出样例、导出审批记录、导出审计日志。
-- 部署证据：HTTPS、域名、备份、监控、日志留存、密钥托管配置截图或清单。
+## 7. 缺失即阻断
 
-## 7. 当前最优先请客户回复
-
-1. 是否已有星火/讯飞账号？账号主体是公司还是个人？是否能提供控制台截图。
-2. 星火或语音识别是否有免费额度？额度、有效期、QPS、并发、超额计费和生产/试点授权分别是什么。
-3. 是否允许把健康数据、问答转写和评估摘要发送给该 AI/语音供应商。
-4. 正式 Web/API 域名、服务器、数据库、Redis、HTTPS 和备份方案由谁负责。
-5. 隐私协议版本和真实患者数据采集范围是否已经确认。
-6. 浏览器体感验收设备、摄像头型号、目标浏览器和现场验收负责人是谁。
-7. 是否已有 Unity WebGL 游戏资源；如有，请提供 Build、`manifest.json` 和授权证明。
-
-## 8. 不提供即不能宣称完成
-
-- 缺正式域名、HTTPS、数据库/Redis、备份和监控，不能宣称生产上线完成。
-- 缺隐私协议、授权签署或授权撤回验收，不能采集真实患者数据。
-- 缺 AI/语音供应商、正式 endpoint、密钥引用、调用日志和人工复核，不能宣称真实 AI/语音评估完成。
-- 缺摄像头实机验收、动作指标入库和审计日志，不能宣称体感训练正式可交付。
-- 缺 Unity WebGL Build、manifest、授权证明和 Bridge 回传验收，不能宣称已有 Unity 正式游戏库。
+缺 GitHub 治理、Render 账户/区域批准、HTTPS、密钥、数据库、Key Value、监控/备份、MiMo 三项配置、真实同意、临床评估、医师复核、设备/采集条件、现场证据或验收包任一项，都不能发布或宣称生产完成。下一步执行顺序见 `docs/customer-input-to-launch-gate-runbook.md` 与主计划。

@@ -1,0 +1,11 @@
+{
+  "templateNotice": "复制本文件后填写正式现场配置；本模板含占位符，不能直接作为验收配置执行。",
+  "apiBaseUrl": "<formal-https-api-base-url>",
+  "patientAccount": "<patient-account>",
+  "patientPassword": "<patient-password>",
+  "auditAccount": "<audit-read-account-distinct-from-patient-account>",
+  "auditPassword": "<audit-read-password>",
+  "patientId": "<real-patient-id>",
+  "text": "<real-tts-input-text>",
+  "scenario": "assessment_prompt"
+}

@@ -1,0 +1,270 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - production
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Static, unit, and delivery contracts
+    runs-on: ubuntu-24.04
+    services:
+      redis:
+        image: redis:7.2-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      NEXT_PUBLIC_API_BASE_URL: https://api.ci.rehab.invalid
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .node-version
+
+      - name: Enable pinned pnpm through Corepack
+        run: |
+          corepack enable
+          corepack install --global pnpm@10.29.3
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Scan complete Git history and staged candidate for credentials
+        run: node scripts/scan-git-history-credentials.mjs
+
+      - name: Verify committed deployment baseline
+        run: pnpm delivery:check -- --git-ref "$GITHUB_SHA"
+
+      - name: Audit all dependencies
+        run: node scripts/audit-dependencies.mjs
+
+      - name: Run fixed API Semgrep SAST gate
+        run: pnpm verify:api-sast
+
+      - name: Upload non-sensitive API SAST report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: api-sast-report
+          path: output/api-sast/**
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Validate Render Blueprint structure with Ruby Psych
+        run: pnpm verify:render-blueprint
+
+      - name: Generate and verify production SBOM and customer license policy
+        run: pnpm verify:supply-chain:production
+
+      - name: Upload non-sensitive production supply-chain artifacts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: production-supply-chain
+          path: output/supply-chain/**
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Run static regression
+        run: pnpm check:static
+
+      - name: Run unit and delivery regression
+        run: pnpm test:unit
+
+      - name: Run real disposable Redis Mimo usage gate integration regression
+        env:
+          MIMO_USAGE_GATE_REDIS_TEST_URL: redis://127.0.0.1:6379/15
+          MIMO_USAGE_GATE_REDIS_TEST_CONFIRM_DISPOSABLE: YES
+        run: pnpm --filter @rehab-platform/api test:integration:mimo-usage-gate-redis
+
+  migration:
+    name: Empty database migration
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_DB: rehab_ci
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d rehab_ci"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/rehab_ci?schema=public
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .node-version
+
+      - name: Enable pinned pnpm through Corepack
+        run: |
+          corepack enable
+          corepack install --global pnpm@10.29.3
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify migration manifest
+        run: pnpm db:migration:manifest:verify
+
+      - name: Apply migrations to the empty database
+        run: pnpm db:migrate:deploy
+
+      - name: Verify migration status
+        run: pnpm db:migrate:status
+
+      - name: Run migration-backed disposable PostgreSQL regression
+        shell: bash
+        env:
+          PGPASSWORD: postgres
+        run: |
+          set -euo pipefail
+          postgres_container="$(docker ps --filter 'label=com.github.actions.service=postgres' --format '{{.ID}}')"
+          test -n "$postgres_container"
+          for database in rehab_api_smoke_test rehab_task2_credential_test rehab_task4_followup_test rehab_task7_api_test rehab_regression; do
+            docker exec "$postgres_container" psql -X --set ON_ERROR_STOP=1 --username postgres --dbname postgres -c "CREATE DATABASE \"$database\";"
+          done
+
+          export API_SMOKE_DATABASE_URL="postgresql://postgres:postgres@127.0.0.1:5432/rehab_api_smoke_test"
+          export API_SMOKE_CONFIRM_DISPOSABLE=YES
+          export API_SMOKE_SEED_PASSWORD="$(node -e "process.stdout.write(require('node:crypto').randomBytes(24).toString('base64url'))")"
+          export API_SMOKE_JWT_SECRET="$(node -e "process.stdout.write(require('node:crypto').randomBytes(48).toString('base64url'))")"
+          export API_SMOKE_COOKIE_SECURE=false
+          export API_SMOKE_PUBLIC_CREDENTIAL_THROTTLE_LIMIT=100
+          export API_SMOKE_PUBLIC_CREDENTIAL_THROTTLE_TTL_MS=60000
+          export API_SMOKE_SENSITIVE_DATA_KEY_REF=secret-manager://ci/api-smoke-sensitive-key
+          export API_SMOKE_SENSITIVE_DATA_KEY="$(node -e "process.stdout.write(require('node:crypto').randomBytes(32).toString('base64'))")"
+          export TASK2_E2E_DATABASE_URL="postgresql://postgres:postgres@127.0.0.1:5432/rehab_task2_credential_test"
+          export TASK2_E2E_CONFIRM_DISPOSABLE=YES
+          export TASK4_E2E_DATABASE_URL="postgresql://postgres:postgres@127.0.0.1:5432/rehab_task4_followup_test"
+          export TASK4_E2E_CONFIRM_DISPOSABLE=YES
+          export TASK7_API_E2E_DATABASE_URL="postgresql://postgres:postgres@127.0.0.1:5432/rehab_task7_api_test"
+          export TASK7_API_E2E_CONFIRM_DISPOSABLE=YES
+          export TASK6_SEED_API_E2E_DATABASE_URL="postgresql://postgres:postgres@127.0.0.1:5432/rehab_regression"
+          export TASK6_SEED_API_E2E_CONFIRM_ISOLATED_SCHEMA=YES
+          export TASK6_SEED_API_E2E_SENSITIVE_DATA_KEY_REF=secret-manager://ci/task6-sensitive-key
+          export TASK6_SEED_API_E2E_SENSITIVE_DATA_KEY="$(node -e "process.stdout.write(require('node:crypto').randomBytes(32).toString('base64'))")"
+          export TASK6_SEED_API_E2E_SEED_PASSWORD="$(node -e "process.stdout.write(require('node:crypto').randomBytes(24).toString('base64url'))")"
+          export TASK6_SEED_API_E2E_JWT_SECRET="$(node -e "process.stdout.write(require('node:crypto').randomBytes(48).toString('base64url'))")"
+          export SENSITIVE_ENCRYPTION_BACKFILL_DISPOSABLE_DATABASE_URL="postgresql://postgres:postgres@127.0.0.1:5432/rehab_regression"
+          export ENCRYPTED_SEED_DISPOSABLE_DATABASE_URL="postgresql://postgres:postgres@127.0.0.1:5432/rehab_regression"
+          export AI_CONVERSATION_TURN_COUNT_ROLLOUT_DATABASE_URL="postgresql://postgres:postgres@127.0.0.1:5432/rehab_regression"
+          export TASK7_E2E_CONFIRM_DISPOSABLE=YES
+          export TASK7_POSTGRES_CONTAINER="$postgres_container"
+          export TASK7_POSTGRES_USER=postgres
+          export JWT_SECRET="$(node -e "process.stdout.write(require('node:crypto').randomBytes(48).toString('base64url'))")"
+          export SENSITIVE_DATA_KEY_REF=secret-manager://ci/api-sensitive-key
+          export SENSITIVE_DATA_KEY="$(node -e "process.stdout.write(require('node:crypto').randomBytes(32).toString('base64'))")"
+          pnpm test:postgres
+
+  continuous-conversation-route:
+    name: Two-instance continuous conversation high-cost route
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_DB: rehab_mimo_route_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d rehab_mimo_route_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7.2-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .node-version
+
+      - name: Enable pinned pnpm through Corepack
+        run: |
+          corepack enable
+          corepack install --global pnpm@10.29.3
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Prove the real continuous conversation route shares its AI high-cost window
+        shell: bash
+        env:
+          MIMO_ROUTE_E2E_CONFIRM_DISPOSABLE: YES
+          MIMO_ROUTE_E2E_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/rehab_mimo_route_test
+          MIMO_ROUTE_E2E_REDIS_URL: redis://rehab-mimo-route-ci.internal:6379/14
+          MIMO_ROUTE_E2E_API_PORT_A: 4311
+          MIMO_ROUTE_E2E_API_PORT_B: 4312
+          MIMO_ROUTE_E2E_SENSITIVE_DATA_KEY_FILE: /etc/secrets/rehab_mimo_route_ci_sensitive_data_key
+          MIMO_ROUTE_E2E_MIMO_API_KEY_FILE: /etc/secrets/rehab_mimo_route_ci_mimo_api_key
+        run: |
+          set -euo pipefail
+          hosts_backup="$(mktemp)"
+          sensitive_key_tmp="$(mktemp)"
+          mimo_key_tmp="$(mktemp)"
+          cleanup_complete=false
+          cp /etc/hosts "$hosts_backup"
+          cleanup() {
+            if [ "$cleanup_complete" = true ]; then
+              return
+            fi
+            cleanup_complete=true
+            sudo cp "$hosts_backup" /etc/hosts
+            sudo rm -f /etc/secrets/rehab_mimo_route_ci_sensitive_data_key
+            sudo rm -f /etc/secrets/rehab_mimo_route_ci_mimo_api_key
+            rm -f "$hosts_backup" "$sensitive_key_tmp" "$mimo_key_tmp"
+          }
+          trap cleanup EXIT INT TERM
+
+          printf '%s\n' '127.0.0.1 rehab-mimo-route-ci.internal' | sudo tee -a /etc/hosts >/dev/null
+          umask 077
+          node -e "process.stdout.write(require('node:crypto').randomBytes(32).toString('base64'))" > "$sensitive_key_tmp"
+          node -e "process.stdout.write(require('node:crypto').randomBytes(48).toString('base64url'))" > "$mimo_key_tmp"
+          sudo install -d -m 755 /etc/secrets
+          sudo install -m 600 -o "$(id -u)" -g "$(id -g)" "$sensitive_key_tmp" "$MIMO_ROUTE_E2E_SENSITIVE_DATA_KEY_FILE"
+          sudo install -m 600 -o "$(id -u)" -g "$(id -g)" "$mimo_key_tmp" "$MIMO_ROUTE_E2E_MIMO_API_KEY_FILE"
+
+          export MIMO_ROUTE_E2E_JWT_SECRET="$(node -e "process.stdout.write(require('node:crypto').randomBytes(48).toString('base64url'))")"
+          export MIMO_ROUTE_E2E_SEED_PASSWORD="$(node -e "process.stdout.write(require('node:crypto').randomBytes(24).toString('base64url'))")"
+          export MIMO_ROUTE_E2E_RESET_PASSWORD="$(node -e "process.stdout.write(require('node:crypto').randomBytes(24).toString('base64url'))")"
+          pnpm --filter @rehab-platform/api test:e2e:continuous-conversation-high-cost-route

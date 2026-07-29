@@ -1,33 +1,62 @@
 import type {
+  AbortTrainingSessionRequest,
   AdminDashboardResponse,
+  AiConversationSession,
+  AppendAiConversationMessageRequest,
+  AppendAiConversationMessageResponse,
+  AssessmentSpeechTranscriptResponse,
+  AiAssessmentDraftResponse,
   AssessmentRecord,
   AuditLog,
   AuditLogFilters,
   CaregiverSummaryResponse,
+  CareCircleResponse,
   GameContent,
   CaregiverRelation,
   ConfirmPlanRequest,
   CreateAssessmentRequest,
   CreateCaregiverAccountRequest,
+  CreateCareCircleCommentRequest,
+  CreateCareCirclePostRequest,
+  CreateCarePrecautionRequest,
   CreateGameContentRequest,
   CreateCaregiverRelationRequest,
   CreateConsentRequest,
   CreatePatientRequest,
+  CreateRegistrationRequest,
   ConsentRecord,
   DataExportRequest,
   DownloadedExport,
   CaregiverAccount,
-  LoginResponse,
+  CollectionBatch,
+  CollectionCondition,
+  CollectionProtocol,
+  CreateCollectionBatchRequest,
+  CreateCollectionConditionRequest,
+  CreateCollectionProtocolRequest,
+  CreateAiAssessmentDraftRequest,
+  CreateAssessmentSpeechTranscriptRequest,
+  CreateTtsSpeechOutputRequest,
+  CompleteAiConversationRequest,
+  LoginApiResponse,
   MeResponse,
   PatientProfile,
   RecommendPlanRequest,
+  RegistrationRequest,
   RehabPlan,
+  RewardSummaryResponse,
+  ReviewRegistrationRequest,
+  ModerateCareCirclePostRequest,
+  ReviewAiConversationRequest,
+  ReviewAssessmentRequest,
+  StartAiConversationRequest,
   StartTrainingSessionRequest,
   SubmitTrainingReviewRequest,
   SubmitTrainingResultRequest,
   TrainingRecordsResponse,
   TrainingResult,
   TrainingSession,
+  TtsSpeechOutputResponse,
   UpdateGameContentStatusRequest,
   UpdateUnityBuildRequest,
 } from "@/types/api";
@@ -39,13 +68,17 @@ if (!apiBase) {
 }
 
 type ApiOptions = {
-  token?: string;
   method?: "GET" | "POST" | "PATCH";
   body?: unknown;
+  csrfToken?: string;
+  signal?: AbortSignal;
 };
 
+type ApiRequestContext = Pick<ApiOptions, "signal">;
+
+let csrfTokenInMemory: string | undefined;
+
 type DownloadOptions = {
-  token: string;
   body: Omit<DataExportRequest, "dataset">;
 };
 
@@ -59,14 +92,21 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, options: ApiOptions = {}) {
+async function request<T>(path: string, options: ApiOptions = {}): Promise<T> {
+  const method = options.method ?? "GET";
+  const csrfToken: string | undefined =
+    method === "GET"
+      ? undefined
+      : (options.csrfToken ?? (await ensureCsrfToken()));
   const response = await fetch(`${apiBase}${path}`, {
-    method: options.method ?? "GET",
+    method,
+    credentials: "include",
     headers: {
       "Content-Type": "application/json",
-      ...(options.token ? { Authorization: `Bearer ${options.token}` } : {}),
+      ...(csrfToken ? { "X-CSRF-Token": csrfToken } : {}),
     },
     body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
+    signal: options.signal,
   });
 
   if (!response.ok) {
@@ -81,12 +121,17 @@ async function request<T>(path: string, options: ApiOptions = {}) {
   return (await response.json()) as T;
 }
 
-async function download(path: string, options: DownloadOptions): Promise<DownloadedExport> {
+async function download(
+  path: string,
+  options: DownloadOptions,
+): Promise<DownloadedExport> {
+  const csrfToken = await ensureCsrfToken();
   const response = await fetch(`${apiBase}${path}`, {
     method: "POST",
+    credentials: "include",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${options.token}`,
+      "X-CSRF-Token": csrfToken,
     },
     body: JSON.stringify(options.body),
   });
@@ -106,10 +151,44 @@ async function download(path: string, options: DownloadOptions): Promise<Downloa
   };
 }
 
+function storeCsrfToken(response: { csrfToken: string }) {
+  if (!response.csrfToken) {
+    throw new Error("服务端未签发 CSRF 令牌，请联系管理员。");
+  }
+  csrfTokenInMemory = response.csrfToken;
+  return response;
+}
+
+async function fetchCsrfToken(): Promise<{ csrfToken: string }> {
+  return storeCsrfToken(await request<{ csrfToken: string }>("/auth/csrf"));
+}
+
+async function ensureCsrfToken(): Promise<string> {
+  if (csrfTokenInMemory) return csrfTokenInMemory;
+  return (await fetchCsrfToken()).csrfToken;
+}
+
 function readDownloadFilename(headers: Headers) {
   const disposition = headers.get("content-disposition");
   const match = disposition?.match(/filename="?([^"]+)"?/i);
-  return match?.[1] ?? "rehab-export.csv";
+  const filename = match?.[1]?.trim();
+  if (!filename) {
+    throw new Error("导出文件缺少服务端文件名，请联系管理员检查导出响应配置。");
+  }
+  return filename;
+}
+
+function requireHighCostIdempotencyKey<T extends { idempotencyKey: string }>(
+  body: T,
+): T {
+  if (
+    typeof body.idempotencyKey !== "string" ||
+    !body.idempotencyKey ||
+    body.idempotencyKey.trim() !== body.idempotencyKey
+  ) {
+    throw new Error("高成本服务请求缺少有效幂等键，已阻断提交。");
+  }
+  return { ...body };
 }
 
 function buildAuditLogQuery(filters?: AuditLogFilters) {
@@ -150,34 +229,6 @@ function buildAuditLogQuery(filters?: AuditLogFilters) {
   return query ? `?${query}` : "";
 }
 
-function buildExportBody(request: DataExportRequest): Omit<DataExportRequest, "dataset"> {
-  const body: Omit<DataExportRequest, "dataset"> = {
-    format: request.format,
-    reason: request.reason.trim(),
-  };
-  const dateFrom = toIsoDateTime(request.dateFrom);
-  if (dateFrom) {
-    body.dateFrom = dateFrom;
-  }
-  const dateTo = toIsoDateTime(request.dateTo);
-  if (dateTo) {
-    body.dateTo = dateTo;
-  }
-  if (request.patientId?.trim()) {
-    body.patientId = request.patientId.trim();
-  }
-  if (request.riskLevel && request.riskLevel !== "all") {
-    body.riskLevel = request.riskLevel;
-  }
-  if (request.qualityFlag?.trim()) {
-    body.qualityFlag = request.qualityFlag.trim();
-  }
-  if (request.limit !== undefined) {
-    body.limit = request.limit;
-  }
-  return body;
-}
-
 function toIsoDateTime(value?: string) {
   if (!value) return undefined;
   const date = new Date(value);
@@ -188,160 +239,307 @@ function toIsoDateTime(value?: string) {
 }
 
 export const api = {
-  health: () => request<{ status: string; service: string }>("/health"),
-  login: (account: string, password: string) =>
-    request<LoginResponse>("/auth/login", {
+  health: () => request<{ status: "live"; service: string }>("/health/live"),
+  csrf: fetchCsrfToken,
+  login: async (account: string, password: string) => {
+    const { csrfToken } = await fetchCsrfToken();
+    return request<LoginApiResponse>("/auth/login", {
       method: "POST",
       body: { account, password },
+      csrfToken,
+    });
+  },
+  createRegistrationRequest: async (body: CreateRegistrationRequest) => {
+    const { csrfToken } = await fetchCsrfToken();
+    return request<RegistrationRequest>("/auth/registration-requests", {
+      method: "POST",
+      body,
+      csrfToken,
+    });
+  },
+  me: (context: ApiRequestContext = {}) => request<MeResponse>("/me", context),
+  logout: () =>
+    request<{ status: "logged_out" }>("/auth/logout", { method: "POST" }),
+  completePasswordReset: (newPassword: string) =>
+    request<{ status: "password_reset_complete" }>("/auth/password-reset", {
+      method: "POST",
+      body: { newPassword },
     }),
-  me: (token: string) => request<MeResponse>("/me", { token }),
-  patient: (token: string, patientId: string) =>
-    request<PatientProfile>(`/patients/${patientId}`, { token }),
-  createPatient: (token: string, body: CreatePatientRequest) =>
+  patient: (patientId: string, context: ApiRequestContext = {}) =>
+    request<PatientProfile>(`/patients/${patientId}`, context),
+  createPatient: (body: CreatePatientRequest) =>
     request<PatientProfile>("/patients", {
-      token,
       method: "POST",
       body,
     }),
-  createCaregiverAccount: (
-    token: string,
-    body: CreateCaregiverAccountRequest,
-  ) =>
+  createCaregiverAccount: (body: CreateCaregiverAccountRequest) =>
     request<CaregiverAccount>("/caregivers", {
-      token,
       method: "POST",
       body,
     }),
-  assessments: (token: string, patientId: string) =>
-    request<AssessmentRecord[]>(`/patients/${patientId}/assessments`, {
-      token,
-    }),
-  createAssessment: (token: string, body: CreateAssessmentRequest) =>
+  assessments: (patientId: string, context: ApiRequestContext = {}) =>
+    request<AssessmentRecord[]>(`/patients/${patientId}/assessments`, context),
+  createAssessment: (body: CreateAssessmentRequest) =>
     request<AssessmentRecord>("/assessments", {
-      token,
       method: "POST",
       body,
     }),
-  createConsent: (token: string, body: CreateConsentRequest) =>
+  reviewAssessment: (assessmentId: string, body: ReviewAssessmentRequest) =>
+    request<AssessmentRecord>(`/assessments/${assessmentId}/review`, {
+      method: "PATCH",
+      body,
+    }),
+  createAiAssessmentDraft: (body: CreateAiAssessmentDraftRequest) =>
+    request<AiAssessmentDraftResponse>("/ai/assessment-drafts", {
+      method: "POST",
+      body: requireHighCostIdempotencyKey(body),
+    }),
+  startAiConversation: (body: StartAiConversationRequest) =>
+    request<AiConversationSession>("/ai/conversations", {
+      method: "POST",
+      body,
+    }),
+  appendAiConversationMessage: (
+    conversationId: string,
+    body: AppendAiConversationMessageRequest,
+  ) =>
+    request<AppendAiConversationMessageResponse>(
+      `/ai/conversations/${conversationId}/messages`,
+      {
+        method: "POST",
+        body: requireHighCostIdempotencyKey(body),
+      },
+    ),
+  completeAiConversation: (
+    conversationId: string,
+    body: CompleteAiConversationRequest,
+  ) =>
+    request<AiConversationSession>(
+      `/ai/conversations/${conversationId}/complete`,
+      {
+        method: "PATCH",
+        body,
+      },
+    ),
+  reviewAiConversation: (
+    conversationId: string,
+    body: ReviewAiConversationRequest,
+  ) =>
+    request<AiConversationSession>(
+      `/ai/conversations/${conversationId}/review`,
+      {
+        method: "PATCH",
+        body,
+      },
+    ),
+  patientAiConversations: (
+    patientId: string,
+    context: ApiRequestContext = {},
+  ) =>
+    request<AiConversationSession[]>(
+      `/patients/${patientId}/ai-conversations`,
+      context,
+    ),
+  createAssessmentSpeechTranscript: (
+    body: CreateAssessmentSpeechTranscriptRequest,
+  ) =>
+    request<AssessmentSpeechTranscriptResponse>(
+      "/ai/assessment-speech-transcripts",
+      {
+        method: "POST",
+        body: requireHighCostIdempotencyKey(body),
+      },
+    ),
+  createTtsSpeechOutput: (body: CreateTtsSpeechOutputRequest) =>
+    request<TtsSpeechOutputResponse>("/ai/tts-speech-outputs", {
+      method: "POST",
+      body: requireHighCostIdempotencyKey(body),
+    }),
+  createConsent: (body: CreateConsentRequest) =>
     request<ConsentRecord>("/consents", {
-      token,
       method: "POST",
       body,
     }),
-  revokeConsent: (token: string, consentId: string) =>
+  revokeConsent: (consentId: string) =>
     request<ConsentRecord>(`/consents/${consentId}/revoke`, {
-      token,
       method: "PATCH",
     }),
-  caregiverRelations: (token: string, patientId: string) =>
-    request<CaregiverRelation[]>(`/patients/${patientId}/caregivers`, {
-      token,
-    }),
+  caregiverRelations: (patientId: string) =>
+    request<CaregiverRelation[]>(`/patients/${patientId}/caregivers`),
   createCaregiverRelation: (
-    token: string,
     patientId: string,
     body: CreateCaregiverRelationRequest,
   ) =>
     request<CaregiverRelation>(`/patients/${patientId}/caregivers`, {
-      token,
       method: "POST",
       body,
     }),
-  revokeCaregiverRelation: (
-    token: string,
-    patientId: string,
-    relationId: string,
-  ) =>
+  revokeCaregiverRelation: (patientId: string, relationId: string) =>
     request<CaregiverRelation>(
       `/patients/${patientId}/caregivers/${relationId}/revoke`,
       {
-        token,
         method: "PATCH",
       },
     ),
-  recommendPlan: (token: string, body: RecommendPlanRequest) =>
-    request<RehabPlan>("/rehab-plans/recommend", {
-      token,
+  careCircle: (patientId: string, context: ApiRequestContext = {}) =>
+    request<CareCircleResponse>(
+      `/care-circle/patients/${patientId}/posts`,
+      context,
+    ),
+  createCareCirclePost: (
+    patientId: string,
+    body: CreateCareCirclePostRequest,
+  ) =>
+    request<CareCircleResponse["posts"][number]>(
+      `/care-circle/patients/${patientId}/posts`,
+      {
+        method: "POST",
+        body,
+      },
+    ),
+  createCareCircleComment: (
+    postId: string,
+    body: CreateCareCircleCommentRequest,
+  ) =>
+    request<CareCircleResponse["posts"][number]["comments"][number]>(
+      `/care-circle/posts/${postId}/comments`,
+      {
+        method: "POST",
+        body,
+      },
+    ),
+  moderateCareCirclePost: (
+    postId: string,
+    body: ModerateCareCirclePostRequest,
+  ) =>
+    request<CareCircleResponse["posts"][number]>(
+      `/care-circle/posts/${postId}/moderate`,
+      {
+        method: "PATCH",
+        body,
+      },
+    ),
+  createCarePrecaution: (body: CreateCarePrecautionRequest) =>
+    request<CareCircleResponse["precautions"][number]>("/care-precautions", {
       method: "POST",
       body,
     }),
-  confirmPlan: (token: string, planId: string, body: ConfirmPlanRequest) =>
+  recommendPlan: (body: RecommendPlanRequest) =>
+    request<RehabPlan>("/rehab-plans/recommend", {
+      method: "POST",
+      body,
+    }),
+  confirmPlan: (planId: string, body: ConfirmPlanRequest) =>
     request<RehabPlan>(`/rehab-plans/${planId}/confirm`, {
-      token,
       method: "PATCH",
       body,
     }),
-  startTrainingSession: (token: string, body: StartTrainingSessionRequest) =>
+  collectionProtocols: (context: ApiRequestContext = {}) =>
+    request<CollectionProtocol[]>("/collection-protocols", context),
+  collectionBatches: (patientId: string, context: ApiRequestContext = {}) =>
+    request<CollectionBatch[]>(
+      `/patients/${patientId}/collection-batches`,
+      context,
+    ),
+  collectionConditions: (context: ApiRequestContext = {}) =>
+    request<CollectionCondition[]>("/admin/collection-conditions", context),
+  createCollectionCondition: (body: CreateCollectionConditionRequest) =>
+    request<CollectionCondition>("/admin/collection-conditions", {
+      method: "POST",
+      body,
+    }),
+  createCollectionProtocol: (body: CreateCollectionProtocolRequest) =>
+    request<CollectionProtocol>("/admin/collection-protocols", {
+      method: "POST",
+      body,
+    }),
+  createCollectionBatch: (body: CreateCollectionBatchRequest) =>
+    request<CollectionBatch>("/collection-batches", {
+      method: "POST",
+      body,
+    }),
+  startTrainingSession: (body: StartTrainingSessionRequest) =>
     request<TrainingSession>("/training-sessions", {
-      token,
+      method: "POST",
+      body,
+    }),
+  resumeTrainingSession: (sessionId: string) =>
+    request<TrainingSession>(`/training-sessions/${sessionId}/resume`, {
+      method: "POST",
+    }),
+  abortTrainingSession: (
+    sessionId: string,
+    body: AbortTrainingSessionRequest,
+  ) =>
+    request<TrainingSession>(`/training-sessions/${sessionId}/abort`, {
       method: "POST",
       body,
     }),
   submitTrainingResult: (
-    token: string,
     sessionId: string,
     body: SubmitTrainingResultRequest,
   ) =>
     request<TrainingResult>(`/training-sessions/${sessionId}/results`, {
-      token,
       method: "POST",
       body,
     }),
-  reviewTrainingResult: (
-    token: string,
-    resultId: string,
-    body: SubmitTrainingReviewRequest,
-  ) =>
+  reviewTrainingResult: (resultId: string, body: SubmitTrainingReviewRequest) =>
     request<TrainingResult>(`/training-results/${resultId}/review`, {
-      token,
       method: "PATCH",
       body,
     }),
-  trainingRecords: (token: string, patientId: string) =>
-    request<TrainingRecordsResponse>(`/patients/${patientId}/training-records`, {
-      token,
-    }),
-  caregiverSummary: (token: string, patientId: string) =>
-    request<CaregiverSummaryResponse>(`/caregiver/patients/${patientId}/summary`, {
-      token,
-    }),
-  adminDashboard: (token: string) =>
-    request<AdminDashboardResponse>("/admin/dashboard", { token }),
-  adminGameContents: (token: string) =>
-    request<GameContent[]>("/admin/game-contents", { token }),
-  createGameContent: (token: string, body: CreateGameContentRequest) =>
+  trainingRecords: (patientId: string, context: ApiRequestContext = {}) =>
+    request<TrainingRecordsResponse>(
+      `/patients/${patientId}/training-records`,
+      context,
+    ),
+  patientRewards: (patientId: string, context: ApiRequestContext = {}) =>
+    request<RewardSummaryResponse>(`/patients/${patientId}/rewards`, context),
+  caregiverSummary: (patientId: string, context: ApiRequestContext = {}) =>
+    request<CaregiverSummaryResponse>(
+      `/caregiver/patients/${patientId}/summary`,
+      context,
+    ),
+  adminDashboard: (context: ApiRequestContext = {}) =>
+    request<AdminDashboardResponse>("/admin/dashboard", context),
+  adminGameContents: (context: ApiRequestContext = {}) =>
+    request<GameContent[]>("/admin/game-contents", context),
+  createGameContent: (body: CreateGameContentRequest) =>
     request<GameContent>("/admin/game-contents", {
-      token,
       method: "POST",
       body,
     }),
   updateGameContentStatus: (
-    token: string,
     gameContentId: string,
     body: UpdateGameContentStatusRequest,
   ) =>
     request<GameContent>(`/admin/game-contents/${gameContentId}/status`, {
-      token,
       method: "PATCH",
       body,
     }),
-  updateUnityBuild: (
-    token: string,
-    gameContentId: string,
-    body: UpdateUnityBuildRequest,
-  ) =>
+  updateUnityBuild: (gameContentId: string, body: UpdateUnityBuildRequest) =>
     request<GameContent>(`/admin/game-contents/${gameContentId}/unity-build`, {
-      token,
       method: "PATCH",
       body,
     }),
-  auditLogs: (token: string, filters?: AuditLogFilters) =>
-    request<AuditLog[]>(`/admin/audit-logs${buildAuditLogQuery(filters)}`, {
-      token,
-    }),
-  exportData: (token: string, body: DataExportRequest) =>
-    download(`/admin/exports/${body.dataset}`, {
-      token,
-      body: buildExportBody(body),
-    }),
+  registrationRequests: (context: ApiRequestContext = {}) =>
+    request<RegistrationRequest[]>("/admin/registration-requests", context),
+  reviewRegistrationRequest: (
+    requestId: string,
+    body: ReviewRegistrationRequest,
+  ) =>
+    request<RegistrationRequest>(
+      `/admin/registration-requests/${requestId}/review`,
+      {
+        method: "PATCH",
+        body,
+      },
+    ),
+  auditLogs: (filters?: AuditLogFilters, context: ApiRequestContext = {}) =>
+    request<AuditLog[]>(
+      `/admin/audit-logs${buildAuditLogQuery(filters)}`,
+      context,
+    ),
+  exportData: ({ dataset, ...body }: DataExportRequest) =>
+    download(`/admin/exports/${dataset}`, { body }),
 };

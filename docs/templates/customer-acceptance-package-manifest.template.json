@@ -1,0 +1,99 @@
+{
+  "documentVersion": "customer-acceptance-package-manifest/v1",
+  "package": {
+    "customerName": "<customer-name>",
+    "acceptanceOwner": "<customer-acceptance-owner>",
+    "acceptedAt": "<2026-06-30T10:00:00.000Z>",
+    "environment": "<trial-or-production>",
+    "targetLaunchDate": "<2026-07-15>",
+    "deploymentMode": "<public_cloud-or-private_cloud-or-intranet>"
+  },
+  "productionInput": {
+    "customerInputPath": "customer-production-input.json",
+    "customerInputSha256": "sha256:<64-hex-digest>",
+    "verifiedBy": "<production-input-verifier>",
+    "verifiedAt": "<2026-06-30T10:05:00.000Z>"
+  },
+  "emptyRealLoop": {
+    "orchestratorConfigPath": "empty-real-loop/orchestrator.json",
+    "acceptanceReportPath": "empty-real-loop/acceptance-report.json",
+    "acceptanceReportSha256": "sha256:<64-hex-digest>"
+  },
+  "formalAcceptanceChain": {
+    "requiredForLaunch": true,
+    "configPath": "formal-chain/formal-acceptance-chain.json"
+  },
+  "ad8CaregiverInterview": {
+    "requiredForLaunch": true,
+    "configPath": "assessments/ad8-caregiver-interview.acceptance.json"
+  },
+  "aiSpeechTts": {
+    "aiRequiredForLaunch": true,
+    "speechRequiredForLaunch": true,
+    "ttsRequiredForLaunch": true,
+    "aiAssessmentAcceptanceConfigPath": "ai-speech/ai-assessment.acceptance.json",
+    "speechTranscriptEvidencePath": "ai-speech/speech-transcript.evidence.json",
+    "speechTranscriptAcceptanceConfigPath": "ai-speech/speech-transcript.acceptance.json",
+    "speechAiAssessmentConfigPath": "ai-speech/speech-ai-assessment.acceptance.json",
+    "ttsEvidencePath": "ai-speech/tts-speech-output.evidence.json",
+    "ttsAcceptanceConfigPath": "ai-speech/tts-speech-output.acceptance.json"
+  },
+  "unity": {
+    "requiredForLaunch": true,
+    "evidencePath": "unity/unity-field.evidence.json",
+    "artifactPaths": [
+      "unity/screenshots/unity-training-ready.png",
+      "unity/recordings/unity-training-run.webm"
+    ]
+  },
+  "browserPose": {
+    "requiredForLaunch": true,
+    "evidencePath": "browser-pose/browser-pose.evidence.json",
+    "artifactPaths": [
+      "browser-pose/screenshots/browser-pose-ready.png",
+      "browser-pose/recordings/browser-pose-run.webm"
+    ]
+  },
+  "requiredArtifacts": [
+    {
+      "label": "患者登录、授权和知情同意截图",
+      "path": "screenshots/patient-consent.png",
+      "sha256": "sha256:<64-hex-digest>",
+      "capturedAt": "<2026-06-30T10:10:00.000Z>"
+    },
+    {
+      "label": "医师患者详情和训练记录截图",
+      "path": "screenshots/doctor-patient-detail.png",
+      "sha256": "sha256:<64-hex-digest>",
+      "capturedAt": "<2026-06-30T10:15:00.000Z>"
+    }
+  ],
+  "auditEvidence": {
+    "auditLogExportPath": "exports/audit-log-sample.json",
+    "desensitizedExportPath": "exports/desensitized-training-export.csv",
+    "requiredActions": [
+      "consent.grant",
+      "assessment.create",
+      "rehab_plan.confirm",
+      "training_session.start",
+      "training_result.submit",
+      "caregiver.summary.view"
+    ],
+    "checkedAt": "<2026-06-30T10:20:00.000Z>"
+  },
+  "privacyEvidence": {
+    "caregiverSummaryDesensitized": true,
+    "exportDesensitized": true,
+    "consentWithdrawalBlocked": true,
+    "rawMediaExcluded": true,
+    "checkedBy": "<privacy-auditor>",
+    "checkedAt": "<2026-06-30T10:25:00.000Z>"
+  },
+  "checks": {
+    "generatedBy": "<acceptance-package-builder>",
+    "checkedAt": "<2026-06-30T10:30:00.000Z>",
+    "toolVersions": {
+      "customerAcceptancePackageVerifier": "customer-acceptance-package-manifest/v1"
+    }
+  }
+}

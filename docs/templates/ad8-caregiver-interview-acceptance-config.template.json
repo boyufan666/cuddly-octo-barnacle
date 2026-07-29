@@ -1,0 +1,37 @@
+{
+  "templateNotice": "复制本文件后填写正式现场配置；本模板含占位符，不能直接作为验收配置执行。",
+  "apiBaseUrl": "<formal-https-api-base-url>",
+  "doctorAccount": "<doctor-account>",
+  "doctorPassword": "<doctor-password>",
+  "caregiverAccount": "<authorized-caregiver-account>",
+  "caregiverPassword": "<authorized-caregiver-password>",
+  "auditAccount": "<audit-read-account>",
+  "auditPassword": "<audit-read-password>",
+  "patientId": "<real-patient-id>",
+  "informant": {
+    "caregiverUserId": "<authorized-caregiver-user-id>",
+    "relation": "<caregiver-relation>"
+  },
+  "humanReview": {
+    "reviewerUserId": "<doctor-user-id-from-get-me>",
+    "reviewedAt": "<2026-06-30T10:00:00.000Z>",
+    "conclusion": "approved",
+    "notes": "<doctor-review-notes>"
+  },
+  "interview": {
+    "assessmentSource": "caregiver_interview",
+    "transcript": "<real-caregiver-interview-summary>",
+    "analysisSummary": "<doctor-reviewed-ad8-conclusion>",
+    "confidence": 0.86,
+    "items": {
+      "itemMemoryProblems": 1,
+      "itemReducedInterest": 0,
+      "itemRepeatsQuestions": 1,
+      "itemTroubleLearningTools": 0,
+      "itemForgetsMonthYear": 1,
+      "itemHandlesFinancesPoorly": 0,
+      "itemTroubleAppointments": 1,
+      "itemDailyThinkingMemoryProblems": 0
+    }
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "schema": "rehab-platform/customer-license-policy/v1",
+  "policyVersion": 1,
+  "status": "pending_customer_approval",
+  "lockfileSha256": "COPY_FROM_OUTPUT_SUPPLY_CHAIN_PRODUCTION_DEPENDENCIES_CDX_JSON",
+  "approvedBy": "CUSTOMER_SECURITY_OWNER",
+  "approvedAt": "YYYY-MM-DDTHH:mm:ss.sssZ",
+  "allowedLicenseExpressions": []
+}

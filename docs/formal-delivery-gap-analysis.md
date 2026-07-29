@@ -8,25 +8,27 @@
 - 患者建档、知情同意、家属授权、评估记录、风险评级、康复方案推荐、医师确认、训练记录、审计和脱敏导出已有业务链路。
 - 推荐方案要求患者已有当前风险评级，并且只从 `active + released + gameVersion + bridgeProtocolVersion=1.0.0` 的正式训练内容中选取。
 - 训练 session 要求隐私授权、摄像头授权、生效方案项、正式训练内容、设备编号、校准状态和客户端开始时间。
+- 正式训练 session 已要求绑定 `collectionBatchId`，训练结果和动作指标也会写入同一采集批次，用于追溯采集条件、采集协议和批次上下文。
 - 训练结果会校验 runtime/source、`gameRunId`、版本、协议、payload hash 和动作指标，拒绝重复提交和 `demo/mock` 来源。
 - 浏览器体感训练已有 MediaPipe 姿态识别、摄像头检测、上肢触达训练、质量判断和结构化指标生成能力。
-- Unity WebGL 已有 Bridge 协议、前端接入壳和回传校验逻辑，但还没有真实 Unity 构建产物。
+- Unity WebGL 已有 Bridge 协议、前端接入壳、回传校验逻辑、自研 `Rhythm Reach 3D` 源项目和真实 WebGL 构建产物；正式通过仍取决于现场真实 runtime 启动、Bridge 回传、训练入库和只读验真证据。
+- 训练异常复核已有 API、持久化字段、前端医师复核入口、`training_result.review` 审计和 `pnpm verify:contracts` 契约验收；该能力属于异常数据治理，不作为 Browser Pose/Unity field acceptance 的通过样本。
 - `pnpm db:seed:trial` 和 `pnpm verify:trial-empty-loop` 已用于区分试点真实初始化与本地开发 seed 数据。
 
 ## P0 交付缺口
 
-- 真实 AI/语音服务：还需要接入语音转文字、大模型评估、模型版本、调用日志、失败处理和人工复核流程。
+- 真实 AI/STT/TTS 服务：还需要客户或目标环境提供正式 AI、语音转写和 TTS endpoint、`secret-manager://...` 密钥引用、模型版本、TTS 音色/输出格式、运行时密钥注入、调用日志和现场验收资料；代码链路必须通过 AI 单链路、语音单链路、TTS 语音输出链路和语音 AI 组合验收后才能按正式能力交付。
 - 正式训练内容实机验收：至少 1 个浏览器体感训练内容需要在客户目标浏览器、真实摄像头和真实网络中完成端到端验收。
-- 生产部署方案：需要明确正式 Web/API 域名、HTTPS、PostgreSQL、Redis、静态训练资源、备份、监控、日志留存和密钥轮换。
+- 生产部署方案：需要明确正式 Web/API 域名、HTTPS、PostgreSQL、静态训练资源、备份、监控、日志留存和密钥轮换。
 - 客户验收标准：需要冻结训练指标、AI 输入输出、角色权限、数据导出范围、设备和浏览器要求。
 - 合规证据包：需要形成授权签署、授权撤回阻断、家属摘要脱敏、医师患者归属、导出脱敏和后台审计的验收记录。
 
 ## P1 交付缺口
 
 - 浏览器体感游戏说明：需要补充适用人群、禁忌、训练目标、指标解释、医生调整建议和用户操作说明。
-- Unity 资源校验：需要自动检查 `manifest.json` 指向的 loader、data、framework、wasm、StreamingAssets 是否存在且版本匹配。
+- Unity 资源校验：已有源码和 WebGL Build 校验脚本，但现场交付还需要真实 HTTPS 静态资源、目标浏览器运行截图/录屏、训练记录 API 反查和审计日志反查。
 - 推荐算法说明：当前是可解释规则推荐，不是成熟协同过滤或疗效预测模型，客户材料中必须按真实能力表述。
-- 训练异常复核：需要为过短训练、异常反应时间、低姿态置信度等低质量数据提供后台复核入口。
+- 训练异常复核操作说明：需要补充异常样本判定、医生复核结论含义、复训建议、截图留存和客户验收演示步骤。
 
 ## P2 后续增强
 
@@ -36,8 +38,8 @@
 
 ## 不可宣传边界
 
-- 不能宣传“已接入真实大模型/语音识别”，除非完成正式服务配置、调用日志和验收。
-- 不能宣传“已有 Unity 正式游戏库”，除非真实 WebGL Build 文件、manifest、Bridge 回传和验收记录已经入库。
+- 不能宣传“已接入真实大模型/语音识别/TTS 语音输出”，除非完成正式服务配置、运行时密钥注入、调用日志、真实录音或真实供应商音频和验收。
+- 不能宣传“Unity 现场验收已通过”，除非真实 WebGL Build 文件、manifest、Bridge 回传、训练记录和审计验收记录已经齐备；当前可宣传为“已有自研 Unity WebGL 训练内容和接入能力，待现场验收”。
 - 不能宣传“协同过滤/疗效预测已完成”，当前一期推荐定位是规则过滤、标签匹配、加权评分和医师确认。
 - 不能把 `pnpm db:seed` 里的患者、评估、计划、训练记录当成试点或生产数据。
 - 不能把固定成绩、mock 数据、demo 游戏、旧原型截图当成正式训练采集能力。
@@ -47,6 +49,7 @@
 - `pnpm lint`、`pnpm build`、API 测试和空库闭环验收结果。
 - 真实患者或验收患者完成建档、授权、评估、推荐、确认、训练、结果查看和审计的截图与日志。
 - 浏览器体感游戏实机证据包，包含摄像头授权、姿态识别、训练中反馈、训练结果、四项动作指标、截图/录屏、`pnpm verify:browser-pose-evidence` JSON 自检结果和 `pnpm verify:browser-pose-field-acceptance` 只读实机验真结果。
+- 采集条件证据包，包含 `CollectionCondition`、`CollectionProtocol`、`CollectionBatch`、`training_session.collectionBatchId`、`training_result.collectionBatchId` 和 `motion_metric.collectionBatchId` 的同链路反查结果。
 - 后台审计日志截图，覆盖建档、授权、评估、推荐、方案确认、训练开始、结果提交、导出。
 - 隐私与导出样例，证明家属摘要、脱敏导出、授权撤回和无权限访问被正确处理。
 - 正式部署环境说明，包含域名、HTTPS、数据库备份、日志留存、监控告警和密钥管理。

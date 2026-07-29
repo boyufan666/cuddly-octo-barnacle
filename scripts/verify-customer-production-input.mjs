@@ -4,9 +4,40 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-const expectedDocumentVersion = "customer-production-input/v1";
+const expectedDocumentVersion = "customer-production-input/v2";
 const secretRefPrefix = "secret-manager://";
-const allowedDeploymentModes = new Set(["public_cloud", "private_cloud", "intranet"]);
+const allowedDeploymentModes = new Set([
+  "public_cloud",
+  "private_cloud",
+  "intranet",
+]);
+const allowedTtsModels = new Set([
+  "mimo-v2.5-tts",
+  "mimo-v2.5-tts-voicedesign",
+  "mimo-v2.5-tts-voiceclone",
+]);
+const allowedTtsOutputFormats = new Set(["mp3", "wav"]);
+const mimoProviders = Object.freeze({
+  ai: "xiaomi-mimo",
+  speech: "xiaomi-mimo-audio-understanding",
+  tts: "xiaomi-mimo-tts",
+});
+const maxSttDecodedAudioBytes = 11_796_480;
+const mimoUsageIntegerFields = [
+  "windowMs",
+  "keyValueProbeTimeoutMs",
+  "userRequestLimit",
+  "patientRequestLimit",
+  "organizationRequestLimit",
+  "speechSecondsLimit",
+  "ttsCharactersLimit",
+  "userBudgetUnitsLimit",
+  "patientBudgetUnitsLimit",
+  "organizationBudgetUnitsLimit",
+  "aiCostUnitsPerRequest",
+  "speechCostUnitsPerSecond",
+  "ttsCostUnitsPerCharacter",
+];
 const templateTextMarkers = [
   "客户正式名称",
   "客户验收负责人姓名",
@@ -22,6 +53,7 @@ const templateTextMarkers = [
   "客户 AI 供应商账号负责人",
   "免费额度、有效期",
   "客户语音供应商账号负责人",
+  "客户 TTS 供应商账号负责人",
 ];
 
 export function validateCustomerProductionInput(input) {
@@ -35,19 +67,18 @@ export function validateCustomerProductionInput(input) {
     failures,
     input.documentVersion,
     expectedDocumentVersion,
-    "documentVersion 必须为 customer-production-input/v1。",
+    "documentVersion 必须为 customer-production-input/v2。",
   );
 
   validateProject(failures, input.project);
   validateInfrastructure(failures, input.infrastructure);
-  validateLegal(failures, input.legal, {
-    aiOrSpeechRequiredForLaunch:
-      isServiceRequiredForLaunch(input.ai) || isServiceRequiredForLaunch(input.speech),
-  });
+  validateLegal(failures, input.legal);
   validateAccounts(failures, input.accounts);
   validateDataCollection(failures, input.dataCollection);
-  validateAi(failures, input.ai);
-  validateSpeech(failures, input.speech);
+  const allowedMimoHosts = validateMimo(failures, input.mimo);
+  validateAi(failures, input.ai, allowedMimoHosts);
+  validateSpeech(failures, input.speech, allowedMimoHosts);
+  validateTts(failures, input.tts, allowedMimoHosts);
   validateTrainingContent(failures, input.trainingContent);
   validateAcceptanceEvidence(failures, input.acceptanceEvidence);
   validateNoPlaceholders(failures, input);
@@ -62,7 +93,11 @@ function validateProject(failures, project) {
   if (!isObject(project)) return;
   requireString(failures, project.customerName, "project.customerName");
   requireString(failures, project.acceptanceOwner, "project.acceptanceOwner");
-  requireIsoDate(failures, project.targetLaunchDate, "project.targetLaunchDate");
+  requireIsoDate(
+    failures,
+    project.targetLaunchDate,
+    "project.targetLaunchDate",
+  );
   requireEnum(
     failures,
     project.deploymentMode,
@@ -74,39 +109,64 @@ function validateProject(failures, project) {
 function validateInfrastructure(failures, infrastructure) {
   requireObject(failures, infrastructure, "infrastructure 必须是对象。");
   if (!isObject(infrastructure)) return;
-  requireHttpsUrl(failures, infrastructure.webDomain, "infrastructure.webDomain");
-  requireHttpsUrl(failures, infrastructure.apiDomain, "infrastructure.apiDomain");
-  requireString(failures, infrastructure.serverPlan, "infrastructure.serverPlan");
+  requireHttpsUrl(
+    failures,
+    infrastructure.webDomain,
+    "infrastructure.webDomain",
+  );
+  requireHttpsUrl(
+    failures,
+    infrastructure.apiDomain,
+    "infrastructure.apiDomain",
+  );
+  requireString(
+    failures,
+    infrastructure.serverPlan,
+    "infrastructure.serverPlan",
+  );
   requireSecretRef(
     failures,
     infrastructure.databaseUrlRef,
     "infrastructure.databaseUrlRef",
   );
-  requireSecretRef(failures, infrastructure.redisUrlRef, "infrastructure.redisUrlRef");
-  requireString(failures, infrastructure.backupPolicy, "infrastructure.backupPolicy");
-  requireString(failures, infrastructure.monitoringOwner, "infrastructure.monitoringOwner");
+  requireString(
+    failures,
+    infrastructure.backupPolicy,
+    "infrastructure.backupPolicy",
+  );
+  requireString(
+    failures,
+    infrastructure.monitoringOwner,
+    "infrastructure.monitoringOwner",
+  );
 }
 
-function validateLegal(failures, legal, options) {
+function validateLegal(failures, legal) {
   requireObject(failures, legal, "legal 必须是对象。");
   if (!isObject(legal)) return;
-  requireString(failures, legal.privacyAgreementVersion, "legal.privacyAgreementVersion");
+  requireString(
+    failures,
+    legal.privacyAgreementVersion,
+    "legal.privacyAgreementVersion",
+  );
   requireString(failures, legal.consentOwner, "legal.consentOwner");
   requireString(failures, legal.retentionPolicy, "legal.retentionPolicy");
-  if (options.aiOrSpeechRequiredForLaunch) {
-    requireTrue(
-      failures,
-      legal.thirdPartyAiDataProcessingApproved,
-      "legal.thirdPartyAiDataProcessingApproved 必须为 true，才能接入真实 AI/语音。",
-    );
-  }
+  requireTrue(
+    failures,
+    legal.thirdPartyAiDataProcessingApproved,
+    "legal.thirdPartyAiDataProcessingApproved 必须为 true，才能接入真实 MiMo AI/语音。",
+  );
 }
 
 function validateAccounts(failures, accounts) {
   requireObject(failures, accounts, "accounts 必须是对象。");
   if (!isObject(accounts)) return;
   requireStringArray(failures, accounts.superAdmins, "accounts.superAdmins");
-  requireStringArray(failures, accounts.operatorAdmins, "accounts.operatorAdmins");
+  requireStringArray(
+    failures,
+    accounts.operatorAdmins,
+    "accounts.operatorAdmins",
+  );
   requireStringArray(failures, accounts.auditors, "accounts.auditors");
   requireStringArray(failures, accounts.doctors, "accounts.doctors");
 }
@@ -119,7 +179,11 @@ function validateDataCollection(failures, dataCollection) {
     dataCollection.realPatientDataApproved,
     "dataCollection.realPatientDataApproved 必须为 true，才能采集真实数据。",
   );
-  requireString(failures, dataCollection.patientSource, "dataCollection.patientSource");
+  requireString(
+    failures,
+    dataCollection.patientSource,
+    "dataCollection.patientSource",
+  );
   requireString(
     failures,
     dataCollection.desensitizationOwner,
@@ -132,38 +196,224 @@ function validateDataCollection(failures, dataCollection) {
   );
 }
 
-function validateAi(failures, ai) {
-  requireObject(failures, ai, "ai 必须是对象。");
-  if (!isObject(ai)) return;
-  requireBoolean(failures, ai.requiredForLaunch, "ai.requiredForLaunch");
-  if (!isServiceRequiredForLaunch(ai)) return;
-  validateExternalService(failures, ai, "ai", {
-    requirePrompt: true,
-    requireHumanReview: true,
-    freeQuotaLabel: "AI 免费额度",
-  });
-  requireString(failures, ai.modelName, "ai.modelName");
-  requireString(failures, ai.modelVersion, "ai.modelVersion");
+function validateMimo(failures, mimo) {
+  requireObject(failures, mimo, "mimo 必须是对象。");
+  if (!isObject(mimo)) return new Set();
+
+  validateAllowedKeys(
+    failures,
+    mimo,
+    new Set([
+      "accountOwner",
+      "apiKeyRef",
+      "apiKeyFile",
+      "allowedHosts",
+      "providerTelemetryRetentionDays",
+      "providerTelemetryRetentionTimeoutMs",
+      "providerLimits",
+      "highCostRequestLimit",
+      "usage",
+    ]),
+    "mimo",
+  );
+  requireString(failures, mimo.accountOwner, "mimo.accountOwner");
+  requireSecretRef(failures, mimo.apiKeyRef, "mimo.apiKeyRef");
+  requireSecretFilePath(failures, mimo.apiKeyFile, "mimo.apiKeyFile");
+  const allowedMimoHosts = requireMimoHostArray(
+    failures,
+    mimo.allowedHosts,
+    "mimo.allowedHosts",
+  );
   requireIntegerRange(
     failures,
-    ai.callLogRetentionDays,
+    mimo.providerTelemetryRetentionDays,
     30,
     3650,
-    "ai.callLogRetentionDays",
+    "mimo.providerTelemetryRetentionDays",
+  );
+  requirePositiveSafeInteger(
+    failures,
+    mimo.providerTelemetryRetentionTimeoutMs,
+    "mimo.providerTelemetryRetentionTimeoutMs",
+    2_147_483_647,
+  );
+  validateMimoProviderLimits(failures, mimo.providerLimits);
+  validateMimoHighCostRequestLimit(failures, mimo.highCostRequestLimit);
+  validateMimoUsage(failures, mimo.usage);
+  return allowedMimoHosts;
+}
+
+function validateMimoHighCostRequestLimit(failures, requestLimit) {
+  requireObject(
+    failures,
+    requestLimit,
+    "mimo.highCostRequestLimit 必须是对象。",
+  );
+  if (!isObject(requestLimit)) return;
+  validateAllowedKeys(
+    failures,
+    requestLimit,
+    new Set(["userOperationRequestLimit", "windowMs"]),
+    "mimo.highCostRequestLimit",
+  );
+  requirePositiveSafeInteger(
+    failures,
+    requestLimit.userOperationRequestLimit,
+    "mimo.highCostRequestLimit.userOperationRequestLimit",
+  );
+  requirePositiveSafeInteger(
+    failures,
+    requestLimit.windowMs,
+    "mimo.highCostRequestLimit.windowMs",
   );
 }
 
-function validateSpeech(failures, speech) {
+function validateMimoProviderLimits(failures, providerLimits) {
+  requireObject(failures, providerLimits, "mimo.providerLimits 必须是对象。");
+  if (!isObject(providerLimits)) return;
+  validateAllowedKeys(
+    failures,
+    providerLimits,
+    new Set([
+      "aiTimeoutMs",
+      "aiMaxResponseBytes",
+      "speechTimeoutMs",
+      "speechMaxResponseBytes",
+      "ttsTimeoutMs",
+      "ttsMaxResponseBytes",
+    ]),
+    "mimo.providerLimits",
+  );
+  for (const field of ["aiTimeoutMs", "speechTimeoutMs", "ttsTimeoutMs"]) {
+    requirePositiveSafeInteger(
+      failures,
+      providerLimits[field],
+      `mimo.providerLimits.${field}`,
+      2_147_483_647,
+    );
+  }
+  for (const field of [
+    "aiMaxResponseBytes",
+    "speechMaxResponseBytes",
+    "ttsMaxResponseBytes",
+  ]) {
+    requirePositiveSafeInteger(
+      failures,
+      providerLimits[field],
+      `mimo.providerLimits.${field}`,
+      16 * 1024 * 1024,
+    );
+  }
+}
+
+function validateMimoUsage(failures, usage) {
+  requireObject(failures, usage, "mimo.usage 必须是对象。");
+  if (!isObject(usage)) return;
+  validateAllowedKeys(
+    failures,
+    usage,
+    new Set(["keyValueUrl", "keyPrefix", ...mimoUsageIntegerFields]),
+    "mimo.usage",
+  );
+  requireKeyValueUrl(failures, usage.keyValueUrl, "mimo.usage.keyValueUrl");
+  requireString(failures, usage.keyPrefix, "mimo.usage.keyPrefix");
+  for (const field of mimoUsageIntegerFields) {
+    requirePositiveSafeInteger(failures, usage[field], `mimo.usage.${field}`);
+  }
+}
+
+function validateAi(failures, ai, allowedMimoHosts) {
+  requireObject(failures, ai, "ai 必须是对象。");
+  if (!isObject(ai)) return;
+  validateAllowedKeys(
+    failures,
+    ai,
+    new Set([
+      "requiredForLaunch",
+      "provider",
+      "modelName",
+      "modelVersion",
+      "endpoint",
+      "promptVersion",
+      "humanReviewRequired",
+      "humanReviewOwner",
+    ]),
+    "ai",
+  );
+  requireTrue(
+    failures,
+    ai.requiredForLaunch,
+    "ai.requiredForLaunch 必须为 true。",
+  );
+  requireEqual(
+    failures,
+    ai.provider,
+    mimoProviders.ai,
+    "ai.provider 必须精确为 xiaomi-mimo。",
+  );
+  requireString(failures, ai.modelName, "ai.modelName");
+  requireString(failures, ai.modelVersion, "ai.modelVersion");
+  requireApprovedMimoEndpoint(
+    failures,
+    ai.endpoint,
+    "ai.endpoint",
+    allowedMimoHosts,
+  );
+  requireString(failures, ai.promptVersion, "ai.promptVersion");
+  requireTrue(
+    failures,
+    ai.humanReviewRequired,
+    "真实 AI 评估必须启用医师人工复核。",
+  );
+  requireString(failures, ai.humanReviewOwner, "ai.humanReviewOwner");
+}
+
+function validateSpeech(failures, speech, allowedMimoHosts) {
   requireObject(failures, speech, "speech 必须是对象。");
   if (!isObject(speech)) return;
-  requireBoolean(failures, speech.requiredForLaunch, "speech.requiredForLaunch");
-  if (!isServiceRequiredForLaunch(speech)) return;
-  validateExternalService(failures, speech, "speech", {
-    requirePrompt: false,
-    requireHumanReview: false,
-    freeQuotaLabel: "语音免费额度",
-  });
+  validateAllowedKeys(
+    failures,
+    speech,
+    new Set([
+      "requiredForLaunch",
+      "provider",
+      "endpoint",
+      "modelVersion",
+      "maxDecodedAudioBytes",
+      "maxDurationSeconds",
+      "microphoneConsentRequired",
+    ]),
+    "speech",
+  );
+  requireTrue(
+    failures,
+    speech.requiredForLaunch,
+    "speech.requiredForLaunch 必须为 true。",
+  );
+  requireEqual(
+    failures,
+    speech.provider,
+    mimoProviders.speech,
+    "speech.provider 必须精确为 xiaomi-mimo-audio-understanding。",
+  );
+  requireApprovedMimoEndpoint(
+    failures,
+    speech.endpoint,
+    "speech.endpoint",
+    allowedMimoHosts,
+  );
   requireString(failures, speech.modelVersion, "speech.modelVersion");
+  requirePositiveSafeInteger(
+    failures,
+    speech.maxDecodedAudioBytes,
+    "speech.maxDecodedAudioBytes",
+    maxSttDecodedAudioBytes,
+  );
+  requirePositiveSafeInteger(
+    failures,
+    speech.maxDurationSeconds,
+    "speech.maxDurationSeconds",
+  );
   requireTrue(
     failures,
     speech.microphoneConsentRequired,
@@ -171,43 +421,54 @@ function validateSpeech(failures, speech) {
   );
 }
 
-function validateExternalService(failures, service, prefix, options) {
-  requireString(failures, service.provider, `${prefix}.provider`);
-  requireString(failures, service.accountOwner, `${prefix}.accountOwner`);
-  requireHttpsUrl(failures, service.endpoint, `${prefix}.endpoint`);
-  requireSecretRef(failures, service.apiKeyRef, `${prefix}.apiKeyRef`);
-  if (options.requirePrompt) {
-    requireString(failures, service.promptVersion, `${prefix}.promptVersion`);
-  }
-  if (service.freeTierPreferred === true) {
-    requireTrue(
-      failures,
-      service.freeQuotaConfirmed,
-      `${options.freeQuotaLabel}已优先选择，必须确认免费额度可用于试点或生产。`,
-    );
-    requireString(
-      failures,
-      service.freeQuotaDescription,
-      `${prefix}.freeQuotaDescription`,
-    );
-    requireFreeQuotaEvidence(
-      failures,
-      service.freeQuotaDescription,
-      `${prefix}.freeQuotaDescription`,
-    );
-  }
-  if (options.requireHumanReview) {
-    requireTrue(
-      failures,
-      service.humanReviewRequired,
-      "真实 AI 评估必须启用医师人工复核。",
-    );
-    requireString(failures, service.humanReviewOwner, `${prefix}.humanReviewOwner`);
-  }
-}
-
-function isServiceRequiredForLaunch(service) {
-  return isObject(service) && service.requiredForLaunch === true;
+function validateTts(failures, tts, allowedMimoHosts) {
+  requireObject(failures, tts, "tts 必须是对象。");
+  if (!isObject(tts)) return;
+  validateAllowedKeys(
+    failures,
+    tts,
+    new Set([
+      "requiredForLaunch",
+      "provider",
+      "endpoint",
+      "modelVersion",
+      "voiceId",
+      "outputFormat",
+      "patientPlaybackConsentRequired",
+    ]),
+    "tts",
+  );
+  requireTrue(
+    failures,
+    tts.requiredForLaunch,
+    "tts.requiredForLaunch 必须为 true。",
+  );
+  requireEqual(
+    failures,
+    tts.provider,
+    mimoProviders.tts,
+    "tts.provider 必须精确为 xiaomi-mimo-tts。",
+  );
+  requireApprovedMimoEndpoint(
+    failures,
+    tts.endpoint,
+    "tts.endpoint",
+    allowedMimoHosts,
+  );
+  requireString(failures, tts.modelVersion, "tts.modelVersion");
+  requireEnum(failures, tts.modelVersion, allowedTtsModels, "tts.modelVersion");
+  requireString(failures, tts.voiceId, "tts.voiceId");
+  requireEnum(
+    failures,
+    tts.outputFormat,
+    allowedTtsOutputFormats,
+    "tts.outputFormat",
+  );
+  requireTrue(
+    failures,
+    tts.patientPlaybackConsentRequired,
+    "tts.patientPlaybackConsentRequired 必须为 true，并对应 privacy_policy 与 ai_processing 授权。",
+  );
 }
 
 function validateTrainingContent(failures, trainingContent) {
@@ -228,7 +489,11 @@ function validateTrainingContent(failures, trainingContent) {
     trainingContent.targetBrowsers,
     "trainingContent.targetBrowsers",
   );
-  requireString(failures, trainingContent.cameraModel, "trainingContent.cameraModel");
+  requireString(
+    failures,
+    trainingContent.cameraModel,
+    "trainingContent.cameraModel",
+  );
   if (trainingContent.unityRequiredForLaunch === true) {
     requireString(
       failures,
@@ -239,7 +504,11 @@ function validateTrainingContent(failures, trainingContent) {
 }
 
 function validateAcceptanceEvidence(failures, acceptanceEvidence) {
-  requireObject(failures, acceptanceEvidence, "acceptanceEvidence 必须是对象。");
+  requireObject(
+    failures,
+    acceptanceEvidence,
+    "acceptanceEvidence 必须是对象。",
+  );
   if (!isObject(acceptanceEvidence)) return;
   for (const field of [
     "roleScreenshotsReady",
@@ -285,12 +554,6 @@ function requireTrue(failures, value, message) {
   }
 }
 
-function requireBoolean(failures, value, field) {
-  if (typeof value !== "boolean") {
-    failures.push(`${field} 必须是布尔值 true 或 false。`);
-  }
-}
-
 function requireEqual(failures, actual, expected, message) {
   if (actual !== expected) {
     failures.push(message);
@@ -299,15 +562,125 @@ function requireEqual(failures, actual, expected, message) {
 
 function requireEnum(failures, value, allowedValues, field) {
   requireString(failures, value, field);
-  if (typeof value === "string" && value.trim() && !allowedValues.has(value.trim())) {
-    failures.push(`${field} 必须是 ${Array.from(allowedValues).join("、")} 之一。`);
+  if (
+    typeof value === "string" &&
+    value.trim() &&
+    !allowedValues.has(value.trim())
+  ) {
+    failures.push(
+      `${field} 必须是 ${Array.from(allowedValues).join("、")} 之一。`,
+    );
   }
 }
 
 function requireSecretRef(failures, value, field) {
   requireString(failures, value, field);
-  if (typeof value === "string" && value.trim() && !value.startsWith(secretRefPrefix)) {
+  if (
+    typeof value === "string" &&
+    value.trim() &&
+    !value.startsWith(secretRefPrefix)
+  ) {
     failures.push(`${field} 必须使用 secret-manager:// 形式的密钥引用。`);
+  }
+}
+
+function requireSecretFilePath(failures, value, field) {
+  if (
+    typeof value !== "string" ||
+    !/^\/etc\/secrets\/[A-Za-z0-9._-]+$/.test(value)
+  ) {
+    failures.push(`${field} 必须是 /etc/secrets 下的直接 Secret File 路径。`);
+  }
+}
+
+function requireMimoHostArray(failures, value, field) {
+  if (!Array.isArray(value) || value.length === 0) {
+    failures.push(`${field} 必须是非空的批准 MiMo DNS 主机名数组。`);
+    return new Set();
+  }
+
+  const hosts = value.map((host) => (typeof host === "string" ? host : ""));
+  if (
+    hosts.some(
+      (host) =>
+        !host ||
+        host.trim() !== host ||
+        host.includes("/") ||
+        host.includes(":") ||
+        host === "localhost" ||
+        host.endsWith(".local") ||
+        /^\d{1,3}(?:\.\d{1,3}){3}$/.test(host),
+    )
+  ) {
+    failures.push(`${field} 必须是无空白的批准 MiMo DNS 主机名数组。`);
+  }
+  return new Set(hosts.map((host) => host.toLowerCase()));
+}
+
+function requireApprovedMimoEndpoint(failures, value, field, allowedMimoHosts) {
+  try {
+    const endpoint = new URL(value);
+    if (
+      endpoint.protocol !== "https:" ||
+      endpoint.username ||
+      endpoint.password ||
+      endpoint.port ||
+      !allowedMimoHosts.has(endpoint.hostname.toLowerCase())
+    ) {
+      throw new Error("invalid endpoint");
+    }
+    for (const queryName of endpoint.searchParams.keys()) {
+      if (
+        /authorization|api[-_ ]?key|token|secret|password|credential|cookie/i.test(
+          queryName,
+        )
+      ) {
+        throw new Error("credential query");
+      }
+    }
+  } catch {
+    failures.push(
+      `${field} 必须使用 mimo.allowedHosts 内无凭据的正式 HTTPS endpoint。`,
+    );
+  }
+}
+
+function requireKeyValueUrl(failures, value, field) {
+  try {
+    const endpoint = new URL(value);
+    const host = endpoint.hostname.toLowerCase();
+    if (
+      (endpoint.protocol !== "redis:" && endpoint.protocol !== "rediss:") ||
+      !host ||
+      host === "localhost" ||
+      host.endsWith(".local") ||
+      /^\d{1,3}(?:\.\d{1,3}){3}$/.test(host)
+    ) {
+      throw new Error("invalid key value URL");
+    }
+  } catch {
+    failures.push(
+      `${field} 必须是批准私网 Key Value 的 redis:// 或 rediss:// URL。`,
+    );
+  }
+}
+
+function requirePositiveSafeInteger(
+  failures,
+  value,
+  field,
+  maximum = Number.MAX_SAFE_INTEGER,
+) {
+  if (!Number.isSafeInteger(value) || value < 1 || value > maximum) {
+    failures.push(`${field} 必须是范围内的正安全整数。`);
+  }
+}
+
+function validateAllowedKeys(failures, value, allowedKeys, field) {
+  for (const key of Object.keys(value)) {
+    if (!allowedKeys.has(key)) {
+      failures.push(`${field}.${key} 不是 v2 MiMo 生产资料允许的字段。`);
+    }
   }
 }
 
@@ -331,36 +704,18 @@ function requireHttpsUrl(failures, value, field) {
 
 function requireIsoDate(failures, value, field) {
   requireString(failures, value, field);
-  if (typeof value === "string" && value.trim() && !Number.isFinite(Date.parse(value))) {
+  if (
+    typeof value === "string" &&
+    value.trim() &&
+    !Number.isFinite(Date.parse(value))
+  ) {
     failures.push(`${field} 必须是有效日期。`);
   }
 }
 
 function requireIntegerRange(failures, value, min, max, field) {
-  const numberValue = Number(value);
-  if (!Number.isInteger(numberValue) || numberValue < min || numberValue > max) {
+  if (!Number.isSafeInteger(value) || value < min || value > max) {
     failures.push(`${field} 必须是 ${min} 到 ${max} 之间的整数。`);
-  }
-}
-
-function requireFreeQuotaEvidence(failures, value, field) {
-  if (typeof value !== "string" || !value.trim()) return;
-
-  const evidenceGroups = [
-    ["额度", "quota", "tokens", "分钟", "minutes", "次"],
-    ["有效期", "到期", "expiry", "expires"],
-    ["QPS", "并发", "concurrency", "rate limit"],
-    ["超额", "计费", "billing", "用完即停"],
-    ["试点", "生产", "production", "pilot"],
-  ];
-  const missingGroup = evidenceGroups.find(
-    (keywords) => !keywords.some((keyword) => value.toLowerCase().includes(keyword.toLowerCase())),
-  );
-
-  if (missingGroup) {
-    failures.push(
-      `${field} 必须写明免费额度、有效期、QPS/并发、超额计费和试点或生产授权。`,
-    );
   }
 }
 
@@ -372,7 +727,9 @@ function validateNoPlaceholders(failures, value, path = "root") {
     return;
   }
   if (Array.isArray(value)) {
-    value.forEach((item, index) => validateNoPlaceholders(failures, item, `${path}[${index}]`));
+    value.forEach((item, index) =>
+      validateNoPlaceholders(failures, item, `${path}[${index}]`),
+    );
     return;
   }
   if (isObject(value)) {
@@ -384,8 +741,12 @@ function validateNoPlaceholders(failures, value, path = "root") {
 
 function validateNoDemoMockLocalManual(failures, value, path = "root") {
   if (typeof value === "string") {
-    if (/(^|[^a-z0-9])(mock|demo|local|manual|fallback)([^a-z0-9]|$)/i.test(value)) {
-      failures.push(`${path} 包含 mock/demo/local/manual/fallback 标记，不能作为客户生产资料。`);
+    if (
+      /(^|[^a-z0-9])(mock|demo|local|manual|fallback)([^a-z0-9]|$)/i.test(value)
+    ) {
+      failures.push(
+        `${path} 包含 mock/demo/local/manual/fallback 标记，不能作为客户生产资料。`,
+      );
     }
     return;
   }
@@ -408,15 +769,21 @@ function validateNoTemplateExampleValues(failures, value, path = "root") {
     if (!trimmed) return;
 
     if (/\bexample\.(com|cn|org|net)\b/i.test(trimmed)) {
-      failures.push(`${path} 使用 example 示例域名，必须替换为客户确认后的正式资料。`);
+      failures.push(
+        `${path} 使用 example 示例域名，必须替换为客户确认后的正式资料。`,
+      );
     }
 
     if (trimmed.includes(" | ")) {
-      failures.push(`${path} 使用模板枚举提示，必须选择客户确认后的单一正式值。`);
+      failures.push(
+        `${path} 使用模板枚举提示，必须选择客户确认后的单一正式值。`,
+      );
     }
 
     if (templateTextMarkers.some((marker) => trimmed.includes(marker))) {
-      failures.push(`${path} 使用模板说明文字，必须替换为客户确认后的正式资料。`);
+      failures.push(
+        `${path} 使用模板说明文字，必须替换为客户确认后的正式资料。`,
+      );
     }
     return;
   }
@@ -444,7 +811,9 @@ function readInput(path) {
 function cli() {
   const inputPath = process.argv.slice(2).find((arg) => arg !== "--");
   if (!inputPath) {
-    console.error("用法：pnpm verify:customer-production-input -- <customer-production-input.json>");
+    console.error(
+      "用法：pnpm verify:customer-production-input -- <customer-production-input.json>",
+    );
     process.exitCode = 1;
     return;
   }

@@ -19,7 +19,7 @@
     "resolution": "1280x720"
   },
   "poseRuntime": {
-    "runtimeType": "browser_pose_game",
+    "runtimeType": "browser_pose_canvas",
     "modelName": "MediaPipe PoseLandmarker",
     "modelVersion": "实际模型版本",
     "poseLandmarkCount": 33,
@@ -34,7 +34,7 @@
     "gameContentId": "正式训练内容 ID",
     "code": "upper-limb-reach-v1",
     "name": "上肢触达反应训练",
-    "runtimeType": "browser_pose_game",
+    "runtimeType": "browser_pose_canvas",
     "gameVersion": "1.0.0",
     "bridgeProtocolVersion": "1.0.0",
     "releaseChannel": "production",
@@ -48,6 +48,7 @@
   },
   "trainingSession": {
     "sessionId": "训练 session ID",
+    "collectionBatchId": "<collection-batch-id>",
     "gameRunId": "本次训练 gameRunId",
     "deviceCode": "trial-room-a-camera-01",
     "sessionStatus": "completed",
@@ -58,7 +59,8 @@
   },
   "trainingResult": {
     "resultId": "训练结果 ID",
-    "source": "browser_pose_game",
+    "collectionBatchId": "<collection-batch-id>",
+    "source": "browser_pose_canvas",
     "gameRunId": "本次训练 gameRunId",
     "gameVersion": "1.0.0",
     "bridgeProtocolVersion": "1.0.0",
@@ -81,6 +83,7 @@
       "sampleCount": 24,
       "confidence": 0.91,
       "qualityFlag": "valid",
+      "collectionBatchId": "<collection-batch-id>",
       "windowStartedAt": "2026-05-23T09:59:00.000Z",
       "windowEndedAt": "2026-05-23T10:02:00.000Z"
     },
@@ -91,6 +94,7 @@
       "sampleCount": 24,
       "confidence": 0.89,
       "qualityFlag": "valid",
+      "collectionBatchId": "<collection-batch-id>",
       "windowStartedAt": "2026-05-23T09:59:00.000Z",
       "windowEndedAt": "2026-05-23T10:02:00.000Z"
     },
@@ -101,6 +105,7 @@
       "sampleCount": 1200,
       "confidence": 0.93,
       "qualityFlag": "valid",
+      "collectionBatchId": "<collection-batch-id>",
       "windowStartedAt": "2026-05-23T09:59:00.000Z",
       "windowEndedAt": "2026-05-23T10:02:00.000Z"
     },
@@ -111,6 +116,7 @@
       "sampleCount": 24,
       "confidence": 0.87,
       "qualityFlag": "valid",
+      "collectionBatchId": "<collection-batch-id>",
       "windowStartedAt": "2026-05-23T09:59:00.000Z",
       "windowEndedAt": "2026-05-23T10:02:00.000Z"
     }

@@ -3,20 +3,47 @@
 import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { CookieSessionClient } from "./local-contract-cookie-session.mjs";
 import { validateBrowserPoseEvidence } from "./verify-browser-pose-evidence.mjs";
 
 const requiredAuditQueries = [
   { action: "training_session.start" },
   { action: "training_result.submit" },
 ];
+const forbiddenMarkers = [
+  "mock",
+  "demo",
+  "seed",
+  "fallback",
+  "fixed",
+  "manual",
+];
+const sensitiveMetadataKeys = new Set([
+  "accesstoken",
+  "apikey",
+  "authorization",
+  "audiobase64",
+  "contentbase64",
+  "imagebase64",
+  "key",
+  "payload",
+  "raw",
+  "rawpayload",
+  "rawpayloadbase64",
+  "requestbody",
+  "responsebody",
+  "secret",
+  "token",
+]);
 
 export async function verifyBrowserPoseFieldAcceptance({
   evidence,
   evidencePath,
   apiBaseUrl,
-  patientToken,
-  auditToken,
-  fetchImpl = globalThis.fetch,
+  patientAccount,
+  patientPassword,
+  auditAccount,
+  auditPassword,
 } = {}) {
   const failures = [];
   const staticResult = validateBrowserPoseEvidence(evidence);
@@ -30,16 +57,30 @@ export async function verifyBrowserPoseFieldAcceptance({
     failures.push("apiBaseUrl 必须显式提供正式 API 地址。");
   } else if (!apiBaseUrlValidation.valid) {
     failures.push("apiBaseUrl 必须使用正式 HTTPS 地址。");
+  } else if (containsForbiddenMarker(apiBaseUrl)) {
+    failures.push(
+      "apiBaseUrl 不能包含 mock/demo/seed/fallback/fixed/manual 标记。",
+    );
   }
-  if (!patientToken || typeof patientToken !== "string" || !patientToken.trim()) {
-    failures.push("patientToken 必须显式提供具备训练记录读取权限的访问令牌。");
-  }
-  if (!auditToken || typeof auditToken !== "string" || !auditToken.trim()) {
-    failures.push("auditToken 必须显式提供具备审计读取权限的访问令牌。");
-  }
-  if (typeof fetchImpl !== "function") {
-    failures.push("fetchImpl 不可用，无法只读验真 API 数据。");
-  }
+  requireCredential(
+    failures,
+    patientAccount,
+    "patientAccount",
+    "训练记录读取账号",
+  );
+  requireCredential(
+    failures,
+    patientPassword,
+    "patientPassword",
+    "训练记录读取账号密码",
+  );
+  requireCredential(failures, auditAccount, "auditAccount", "审计读取账号");
+  requireCredential(
+    failures,
+    auditPassword,
+    "auditPassword",
+    "审计读取账号密码",
+  );
 
   if (!evidence || staticResult.failures.length) {
     return { failures };
@@ -53,27 +94,97 @@ export async function verifyBrowserPoseFieldAcceptance({
 
   if (
     failures.some((failure) =>
-      /apiBaseUrl|patientToken|auditToken|fetchImpl/.test(failure),
+      /apiBaseUrl|patientAccount|patientPassword|auditAccount|auditPassword/.test(
+        failure,
+      ),
     )
   ) {
     return { failures };
   }
 
   const apiRoot = normalizeApiRoot(apiBaseUrl);
+  const patientClient = new CookieSessionClient(apiBaseUrl);
+  const auditClient = new CookieSessionClient(apiBaseUrl);
+  if (
+    !(await loginReadSession(failures, {
+      client: patientClient,
+      account: patientAccount,
+      password: patientPassword,
+      label: "训练记录读取账号",
+    }))
+  ) {
+    return { failures };
+  }
+  if (
+    !(await loginReadSession(failures, {
+      client: auditClient,
+      account: auditAccount,
+      password: auditPassword,
+      label: "审计读取账号",
+    }))
+  ) {
+    return { failures };
+  }
   await verifyTrainingRecords(failures, {
     evidence,
     apiRoot,
-    token: patientToken,
-    fetchImpl,
+    client: patientClient,
   });
   await verifyAuditLogs(failures, {
     evidence,
     apiRoot,
-    token: auditToken,
-    fetchImpl,
+    client: auditClient,
   });
 
   return { failures };
+}
+
+function requireCredential(failures, value, field, label) {
+  if (typeof value !== "string" || !value.trim()) {
+    failures.push(`${field} 必须显式提供${label}。`);
+  }
+}
+
+async function loginReadSession(
+  failures,
+  { client, account, password, label },
+) {
+  try {
+    await client.login(account, password);
+    return true;
+  } catch (error) {
+    failures.push(`${label} Cookie 会话登录失败：${redactRequestError(error)}`);
+    return false;
+  }
+}
+
+function redactRequestError(error) {
+  const message = readErrorMessage(error);
+  const status = /^HTTP (\d+)/.exec(message)?.[1];
+  if (status) {
+    return `HTTP ${status}：响应体已隐藏，避免泄露密钥或训练载荷。`;
+  }
+  if (/password_reset_required/i.test(message)) {
+    return "password_reset_required，需先人工完成密码重置。";
+  }
+  if (/登录响应格式无效/.test(message)) {
+    return "Cookie 会话登录响应格式无效。";
+  }
+  if (/登录缺少 rehab_session cookie/.test(message)) {
+    return "Cookie 会话登录缺少 rehab_session cookie。";
+  }
+  if (/csrf|rehab_csrf/i.test(message)) {
+    return "Cookie/CSRF 会话无效。";
+  }
+  return "错误详情已隐藏，避免泄露账号口令、cookie、密钥或训练载荷。";
+}
+
+function readErrorMessage(error) {
+  try {
+    return typeof error?.message === "string" ? error.message : "";
+  } catch {
+    return "";
+  }
 }
 
 function verifyArtifactFiles(failures, evidence, evidencePath) {
@@ -87,7 +198,9 @@ function verifyArtifactFiles(failures, evidence, evidencePath) {
   for (const artifact of artifacts) {
     const rawPath = artifact?.path;
     if (typeof rawPath !== "string" || !rawPath.trim()) continue;
-    const absolutePath = isAbsolute(rawPath) ? rawPath : resolve(evidenceDir, rawPath);
+    const absolutePath = isAbsolute(rawPath)
+      ? rawPath
+      : resolve(evidenceDir, rawPath);
     if (!isPathInsideDirectory(absolutePath, evidenceDir)) {
       failures.push(`附件路径必须位于 evidence JSON 所在目录内：${rawPath}`);
       continue;
@@ -98,7 +211,9 @@ function verifyArtifactFiles(failures, evidence, evidencePath) {
     }
     const realArtifactPath = realpathSync(absolutePath);
     if (!isPathInsideDirectory(realArtifactPath, realEvidenceDir)) {
-      failures.push(`附件真实路径必须位于 evidence JSON 所在目录内：${rawPath}`);
+      failures.push(
+        `附件真实路径必须位于 evidence JSON 所在目录内：${rawPath}`,
+      );
       continue;
     }
     const stats = statSync(absolutePath);
@@ -112,15 +227,19 @@ function verifyArtifactFiles(failures, evidence, evidencePath) {
   }
 }
 
-async function verifyTrainingRecords(failures, { evidence, apiRoot, token, fetchImpl }) {
+async function verifyTrainingRecords(failures, { evidence, apiRoot, client }) {
   const patientId = evidence.patient.patientId;
   const trainingData = await fetchJson(failures, {
     url: `${apiRoot}/patients/${encodeURIComponent(patientId)}/training-records`,
-    token,
-    fetchImpl,
+    client,
     label: "训练记录 API",
   });
-  if (!trainingData) return;
+  if (!isObject(trainingData)) {
+    failures.push(
+      "训练记录 API 返回值必须是对象，不能是 2xx 空体、null 或其他错误 shape。",
+    );
+    return;
+  }
 
   if (!Array.isArray(trainingData.sessions)) {
     failures.push("训练记录 API 返回的 sessions 必须是数组。");
@@ -143,6 +262,7 @@ async function verifyTrainingRecords(failures, { evidence, apiRoot, token, fetch
     planItemId: evidence.rehabPlan.planItemId,
     gameContentId: evidence.gameContent.gameContentId,
     gameRunId: evidence.trainingSession.gameRunId,
+    collectionBatchId: evidence.trainingSession.collectionBatchId,
     deviceCode: evidence.trainingSession.deviceCode,
     calibrationStatus: evidence.trainingSession.calibrationStatus,
     sessionStatus: evidence.trainingSession.sessionStatus,
@@ -170,6 +290,7 @@ async function verifyTrainingRecords(failures, { evidence, apiRoot, token, fetch
       id: evidence.trainingResult.resultId,
       source: evidence.trainingResult.source,
       gameRunId: evidence.trainingResult.gameRunId,
+      collectionBatchId: evidence.trainingResult.collectionBatchId,
       gameVersion: evidence.trainingResult.gameVersion,
       bridgeProtocolVersion: evidence.trainingResult.bridgeProtocolVersion,
       rawPayloadHash: evidence.trainingResult.rawPayloadHash,
@@ -184,13 +305,19 @@ async function verifyTrainingRecords(failures, { evidence, apiRoot, token, fetch
       exerciseIntensity: evidence.trainingResult.exerciseIntensity,
     });
 
-    compareFields(failures, "trainingResult.metricsSummary", result.metricsSummary ?? {}, {
-      source: evidence.trainingResult.source,
-      gameRunId: evidence.trainingResult.gameRunId,
-      gameVersion: evidence.trainingResult.gameVersion,
-      protocolVersion: evidence.trainingResult.bridgeProtocolVersion,
-      rawPayloadHash: evidence.trainingResult.rawPayloadHash,
-    });
+    compareFields(
+      failures,
+      "trainingResult.metricsSummary",
+      result.metricsSummary ?? {},
+      {
+        source: evidence.trainingResult.source,
+        gameRunId: evidence.trainingResult.gameRunId,
+        collectionBatchId: evidence.trainingResult.collectionBatchId,
+        gameVersion: evidence.trainingResult.gameVersion,
+        protocolVersion: evidence.trainingResult.bridgeProtocolVersion,
+        rawPayloadHash: evidence.trainingResult.rawPayloadHash,
+      },
+    );
   }
 
   verifyMotionMetrics(failures, evidence, session.motionMetrics);
@@ -202,15 +329,21 @@ function verifyMotionMetrics(failures, evidence, apiMetrics) {
     return;
   }
 
-  const byType = new Map(apiMetrics.map((metric) => [metric?.metricType, metric]));
   for (const metric of evidence.motionMetrics) {
-    const apiMetric = byType.get(metric.metricType);
+    const apiMetric = apiMetrics.find(
+      (item) =>
+        item?.metricType === metric.metricType &&
+        item?.collectionBatchId === metric.collectionBatchId,
+    );
     if (!apiMetric) {
-      failures.push(`训练记录 API 缺少动作指标 ${metric.metricType}。`);
+      failures.push(
+        `motionMetrics.${metric.metricType}.collectionBatchId 与 evidence 不一致或缺少同批次动作指标。`,
+      );
       continue;
     }
     compareFields(failures, `motionMetrics.${metric.metricType}`, apiMetric, {
       gameRunId: evidence.trainingSession.gameRunId,
+      collectionBatchId: metric.collectionBatchId,
       source: evidence.trainingResult.source,
       metricValue: metric.metricValue,
       unit: metric.unit,
@@ -223,7 +356,7 @@ function verifyMotionMetrics(failures, evidence, apiMetrics) {
   }
 }
 
-async function verifyAuditLogs(failures, { evidence, apiRoot, token, fetchImpl }) {
+async function verifyAuditLogs(failures, { evidence, apiRoot, client }) {
   for (const query of requiredAuditQueries) {
     const url = new URL(`${apiRoot}/admin/audit-logs`);
     url.searchParams.set("action", query.action);
@@ -234,18 +367,26 @@ async function verifyAuditLogs(failures, { evidence, apiRoot, token, fetchImpl }
 
     const logs = await fetchJson(failures, {
       url: url.toString(),
-      token,
-      fetchImpl,
+      client,
       label: `${query.action} 审计 API`,
     });
-    if (!logs) continue;
     if (!Array.isArray(logs)) {
-      failures.push(`${query.action} 审计 API 返回值必须是数组。`);
+      failures.push(
+        `${query.action} 审计 API 返回值必须是数组，不能是 2xx 空体、null 或其他错误 shape。`,
+      );
       continue;
     }
 
+    logs.forEach((log, index) => {
+      validateAuditMetadataSafe(
+        failures,
+        log?.metadata,
+        `${query.action} 审计候选[${index}].metadata`,
+      );
+    });
+
     const expectedIds = new Set(evidence.auditEvidence.auditLogIds);
-    const matched = logs.find(
+    const matched = logs.filter(
       (log) =>
         expectedIds.has(log?.id) &&
         log.action === query.action &&
@@ -253,48 +394,24 @@ async function verifyAuditLogs(failures, { evidence, apiRoot, token, fetchImpl }
         log.targetId === evidence.trainingSession.sessionId &&
         log.result === "success",
     );
-    if (!matched) {
+    if (matched.length !== 1) {
       failures.push(
-        `auditEvidence.auditLogIds 未匹配到 ${query.action} 的成功审计日志。`,
+        `auditEvidence.auditLogIds 匹配到的 ${query.action} 成功审计日志候选数量必须严格等于 1。`,
       );
     }
   }
 }
 
-async function fetchJson(failures, { url, token, fetchImpl, label }) {
-  let response;
+async function fetchJson(failures, { url, client, label }) {
   try {
-    response = await fetchImpl(url, {
-      method: "GET",
+    return await client.request(url, {
       headers: {
         Accept: "application/json",
-        Authorization: `Bearer ${token}`,
       },
     });
   } catch (error) {
-    failures.push(`${label} 请求失败：${error.message}`);
+    failures.push(`${label} 请求失败：${redactRequestError(error)}`);
     return null;
-  }
-
-  if (!response.ok) {
-    const body = await safeReadBody(response);
-    failures.push(`${label} 返回 HTTP ${response.status}：${body}`);
-    return null;
-  }
-
-  try {
-    return await response.json();
-  } catch (error) {
-    failures.push(`${label} 返回内容不是有效 JSON：${error.message}`);
-    return null;
-  }
-}
-
-async function safeReadBody(response) {
-  try {
-    return await response.text();
-  } catch {
-    return "";
   }
 }
 
@@ -303,10 +420,119 @@ function compareFields(failures, label, actual, expected) {
     const actualValue = actual?.[field];
     if (!valuesEqual(actualValue, expectedValue)) {
       failures.push(
-        `${label}.${field} 与 evidence 不一致：API=${formatValue(actualValue)} evidence=${formatValue(expectedValue)}`,
+        formatMismatchMessage({ label, field, actualValue, expectedValue }),
       );
     }
   }
+}
+
+function validateAuditMetadataSafe(
+  failures,
+  metadata,
+  label = "审计 metadata",
+) {
+  if (metadata === null || metadata === undefined) return;
+  if (!isObject(metadata)) {
+    failures.push("审计 metadata 必须是对象或空值。");
+    return;
+  }
+  const unsafePaths = [];
+  collectUnsafeMetadataPaths(metadata, label, unsafePaths);
+  for (const path of unsafePaths) {
+    failures.push(
+      `${path} 包含敏感字段、演示/手工标记或原始载荷，不能作为正式体感验收审计记录。`,
+    );
+  }
+}
+
+function collectUnsafeMetadataPaths(value, path, paths) {
+  if (Array.isArray(value)) {
+    value.forEach((item, index) =>
+      collectUnsafeMetadataPaths(item, `${path}[${index}]`, paths),
+    );
+    return;
+  }
+  if (!isObject(value)) return;
+  for (const [key, nested] of Object.entries(value)) {
+    const nestedPath = `${path}.${key}`;
+    if (isSafeHashMetadataField(key, nested)) continue;
+    if (sensitiveMetadataKeys.has(normalizeKey(key))) {
+      paths.push(nestedPath);
+      continue;
+    }
+    if (typeof nested === "string" && isUnsafeText(nested)) {
+      paths.push(nestedPath);
+      continue;
+    }
+    collectUnsafeMetadataPaths(nested, nestedPath, paths);
+  }
+}
+
+function isSafeHashMetadataField(key, value) {
+  return (
+    /hash$/i.test(normalizeKey(key)) &&
+    typeof value === "string" &&
+    isHashDigestText(value)
+  );
+}
+
+function formatMismatchMessage({ label, field, actualValue, expectedValue }) {
+  return `${label}.${field} 与 evidence 不一致：值已隐藏，避免泄露 token、密钥、身份标识或训练载荷。`;
+}
+
+function isUnsafeText(value) {
+  if (isHashDigestText(value)) return false;
+  return (
+    containsForbiddenMarker(value) ||
+    bearerTokenPattern().test(value) ||
+    secretLikePattern().test(value) ||
+    base64LikePattern().test(value)
+  );
+}
+
+function isHashDigestText(value) {
+  return /^(?:sha1|sha256|sha384|sha512):[a-f0-9]{40,128}$/i.test(value);
+}
+
+function containsForbiddenMarker(value) {
+  const normalized = normalizeTextForMarkerScan(value);
+  return forbiddenMarkers.some((marker) => normalized.includes(marker));
+}
+
+function normalizeTextForMarkerScan(value) {
+  return decodeTextRepeatedly(String(value ?? ""))
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+}
+
+function decodeTextRepeatedly(value) {
+  let current = value;
+  for (let index = 0; index < 3; index += 1) {
+    try {
+      const decoded = decodeURIComponent(current);
+      if (decoded === current) return current;
+      current = decoded;
+    } catch {
+      return current;
+    }
+  }
+  return current;
+}
+
+function normalizeKey(key) {
+  return key.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function base64LikePattern() {
+  return /(?:[A-Za-z0-9+/]{40,}={0,2})/g;
+}
+
+function bearerTokenPattern() {
+  return /\bBearer\s+[A-Za-z0-9._~+/=-]{8,}\b/i;
+}
+
+function secretLikePattern() {
+  return /\b(?:sk|ak|api[_-]?key|secret|token)[_-]?[A-Za-z0-9._~+/=-]{8,}\b/i;
 }
 
 function valuesEqual(actual, expected) {
@@ -314,10 +540,6 @@ function valuesEqual(actual, expected) {
     return Math.abs(actual - expected) < 0.000001;
   }
   return actual === expected;
-}
-
-function formatValue(value) {
-  return typeof value === "string" ? value : JSON.stringify(value);
 }
 
 function normalizeApiRoot(apiBaseUrl) {
@@ -336,7 +558,15 @@ function validateHttpsUrl(value) {
 
 function isPathInsideDirectory(filePath, directoryPath) {
   const relativePath = relative(directoryPath, filePath);
-  return Boolean(relativePath) && !relativePath.startsWith("..") && !isAbsolute(relativePath);
+  return (
+    Boolean(relativePath) &&
+    !relativePath.startsWith("..") &&
+    !isAbsolute(relativePath)
+  );
+}
+
+function isObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 function readEvidenceFile(path) {
@@ -348,7 +578,7 @@ function readEvidenceFile(path) {
 }
 
 function readCliOptions(argv) {
-  const options = {};
+  const options = { failures: [] };
   const positional = [];
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -357,12 +587,9 @@ function readCliOptions(argv) {
       options.apiBaseUrl = argv[++index];
       continue;
     }
-    if (arg === "--patient-token") {
-      options.patientToken = argv[++index];
-      continue;
-    }
-    if (arg === "--audit-token") {
-      options.auditToken = argv[++index];
+    if (arg.startsWith("--")) {
+      options.failures.push(`不支持的参数：${arg}`);
+      if (argv[index + 1] && !argv[index + 1].startsWith("--")) index += 1;
       continue;
     }
     positional.push(arg);
@@ -373,6 +600,12 @@ function readCliOptions(argv) {
 
 async function cli() {
   const options = readCliOptions(process.argv.slice(2));
+  if (options.failures.length) {
+    console.error("浏览器体感实机只读验真失败：");
+    for (const failure of options.failures) console.error(`- ${failure}`);
+    process.exitCode = 1;
+    return;
+  }
   const evidencePath =
     options.evidencePath ?? process.env.BROWSER_POSE_EVIDENCE_FILE;
 
@@ -402,8 +635,10 @@ async function cli() {
     evidence: readResult.evidence,
     evidencePath: absolutePath,
     apiBaseUrl: options.apiBaseUrl ?? process.env.BROWSER_POSE_API_BASE_URL,
-    patientToken: options.patientToken ?? process.env.BROWSER_POSE_PATIENT_TOKEN,
-    auditToken: options.auditToken ?? process.env.BROWSER_POSE_AUDIT_TOKEN,
+    patientAccount: process.env.BROWSER_POSE_PATIENT_ACCOUNT,
+    patientPassword: process.env.BROWSER_POSE_PATIENT_PASSWORD,
+    auditAccount: process.env.BROWSER_POSE_AUDIT_ACCOUNT,
+    auditPassword: process.env.BROWSER_POSE_AUDIT_PASSWORD,
   });
 
   if (result.failures.length) {

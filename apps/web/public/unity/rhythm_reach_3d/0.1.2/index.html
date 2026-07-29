@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Rhythm Reach 3D</title>
+    <script src="/unity/rehab-unity-bridge.js"></script>
+    <style>
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        background: #111827;
+        color: #f9fafb;
+        font-family: Arial, Helvetica, sans-serif;
+      }
+
+      #unity-container {
+        width: 100%;
+        height: 100%;
+      }
+
+      #unity-canvas {
+        width: 100%;
+        height: 100%;
+        display: block;
+        background: #111827;
+      }
+
+      #unity-error {
+        display: none;
+        min-height: 100%;
+        box-sizing: border-box;
+        padding: 32px;
+        align-items: center;
+        justify-content: center;
+        color: #fecaca;
+        background: #1f2937;
+        font-size: 18px;
+        line-height: 1.5;
+        text-align: center;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="unity-error"></div>
+    <div id="unity-container">
+      <canvas id="unity-canvas" tabindex="-1"></canvas>
+    </div>
+    <script>
+      (function () {
+        var errorElement = document.getElementById("unity-error");
+        var containerElement = document.getElementById("unity-container");
+
+        function showError(message) {
+          containerElement.style.display = "none";
+          errorElement.textContent = message;
+          errorElement.style.display = "flex";
+        }
+
+        if (!window.RehabUnityBridge) {
+          showError("Missing required Unity bridge: /unity/rehab-unity-bridge.js");
+          throw new Error("window.RehabUnityBridge is required.");
+        }
+
+        if (!window.RehabTrainingRuntimeConfig) {
+          showError("Missing required RehabTrainingRuntimeConfig.");
+          throw new Error("window.RehabTrainingRuntimeConfig is required.");
+        }
+
+        var requiredConfigFields = [
+          "resultContractVersion",
+          "sessionId",
+          "clientStartedAt",
+          "gameRunId",
+          "gameCode",
+          "gameVersion",
+          "deviceCode",
+          "bridgeProtocolVersion",
+          "runtimeConfigMethod",
+          "startMethod",
+          "reachHitMethod",
+          "difficultyMethod"
+        ];
+        for (var index = 0; index < requiredConfigFields.length; index += 1) {
+          var fieldName = requiredConfigFields[index];
+          if (!window.RehabTrainingRuntimeConfig[fieldName]) {
+            showError("Missing required RehabTrainingRuntimeConfig." + fieldName + ".");
+            throw new Error("window.RehabTrainingRuntimeConfig." + fieldName + " is required.");
+          }
+        }
+
+        var buildUrl = "Build";
+        var loaderUrl = buildUrl + "/0.1.2.loader.js";
+        var config = {
+          dataUrl: buildUrl + "/0.1.2.data",
+          frameworkUrl: buildUrl + "/0.1.2.framework.js",
+          codeUrl: buildUrl + "/0.1.2.wasm",
+          companyName: "Rehab Platform",
+          productName: "Rhythm Reach 3D",
+          productVersion: "0.1.2"
+        };
+        var script = document.createElement("script");
+        script.src = loaderUrl;
+        script.onload = function () {
+          createUnityInstance(document.getElementById("unity-canvas"), config)
+            .then(function (unityInstance) {
+              var unityConfig = window.RehabTrainingRuntimeConfig;
+              if (!unityConfig.unitySessionObjectName) {
+                showError("Missing required RehabTrainingRuntimeConfig.unitySessionObjectName.");
+                throw new Error("window.RehabTrainingRuntimeConfig.unitySessionObjectName is required.");
+              }
+
+              unityInstance.SendMessage(
+                unityConfig.unitySessionObjectName,
+                unityConfig.runtimeConfigMethod,
+                JSON.stringify(unityConfig)
+              );
+
+              if (unityConfig.explicitDifficulty) {
+                unityInstance.SendMessage(
+                  unityConfig.unitySessionObjectName,
+                  unityConfig.difficultyMethod,
+                  unityConfig.explicitDifficulty
+                );
+              }
+
+              window.RehabRhythmReachUnity = {
+                startConfiguredSession: function () {
+                  unityInstance.SendMessage(
+                    unityConfig.unitySessionObjectName,
+                    unityConfig.startMethod
+                  );
+                },
+                receiveWebGlReachHit: function (payload) {
+                  unityInstance.SendMessage(
+                    unityConfig.unitySessionObjectName,
+                    unityConfig.reachHitMethod,
+                    JSON.stringify(payload)
+                  );
+                }
+              };
+            })
+            .catch(function (error) {
+              showError("Failed to initialize Unity WebGL runtime: " + error.message);
+              throw error;
+            });
+        };
+        script.onerror = function () {
+          showError("Failed to load Unity WebGL loader.");
+          throw new Error("Failed to load Unity WebGL loader.");
+        };
+        document.body.appendChild(script);
+      })();
+    </script>
+  </body>
+</html>

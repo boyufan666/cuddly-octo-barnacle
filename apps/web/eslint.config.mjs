@@ -11,6 +11,8 @@ const eslintConfig = defineConfig([
     ".next/**",
     "out/**",
     "build/**",
+    "public/mediapipe/**",
+    "public/unity/rhythm_reach_3d/**",
     "next-env.d.ts",
   ]),
 ]);

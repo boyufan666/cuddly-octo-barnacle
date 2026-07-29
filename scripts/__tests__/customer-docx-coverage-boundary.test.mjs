@@ -60,7 +60,10 @@ test("customer DOCX coverage matrix documents required evidence per row", async 
 
   for (const row of rows) {
     assert.ok(row.customerWording, `missing customer wording in ${row.id}`);
-    assert.ok(row.implementationTarget, `missing implementation target in ${row.id}`);
+    assert.ok(
+      row.implementationTarget,
+      `missing implementation target in ${row.id}`,
+    );
     assert.match(
       row.proofKey,
       /^PROOF-[A-Z0-9-]+$/,
@@ -92,9 +95,13 @@ test("top-level delivery docs reference the customer DOCX coverage matrix", asyn
   for (const source of [acceptanceSource, boundarySource]) {
     assert.match(source, /docs\/customer-docx-coverage-matrix\.md/);
     assert.match(source, /DOCX-USER-LOGIN/);
+    assert.match(source, /DOCX-SOCIAL-SQUARE/);
     assert.match(source, /No fallback allowed/);
     assert.match(source, /不得.*兜底|必须阻断/);
-    assert.doesNotMatch(source, /失败后(?:可|可以|自动|默认).{0,24}(?:兜底|fallback|mock|demo|默认)/i);
+    assert.doesNotMatch(
+      source,
+      /失败后(?:可|可以|自动|默认).{0,24}(?:兜底|fallback|mock|demo|默认)/i,
+    );
     assert.doesNotMatch(
       source,
       /(?:允许|可|可以|自动|默认|使用|采用)(?:兜底|fallback|mock|demo|默认).{0,24}(?:通过验收|计为正式|作为正式)/i,
@@ -158,7 +165,10 @@ test("software delivery closure marks implemented DOCX rows done while preservin
     assert.equal(row.deliveryStatus, "done", `${row.id} should be done`);
   }
 
-  assert.match(source, /Customer-Gated Items Not Counted Complete By Source Code Alone/);
+  assert.match(
+    source,
+    /Customer-Gated Items Not Counted Complete By Source Code Alone/,
+  );
   assert.match(source, /Wearable physiological data/);
   assert.match(source, /Production deployment/);
   assert.match(source, /Formal AI\/STT\/TTS production use/);
@@ -169,7 +179,10 @@ function parseCoverageRows(source) {
     .split("\n")
     .filter((line) => /^\| DOCX-[A-Z-]+ \|/.test(line))
     .map((line) => {
-      const cells = line.split("|").slice(1, -1).map((cell) => cell.trim());
+      const cells = line
+        .split("|")
+        .slice(1, -1)
+        .map((cell) => cell.trim());
       assert.equal(cells.length, 6, `expected 6 cells in row: ${line}`);
       const [
         id,

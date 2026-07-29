@@ -1,0 +1,9 @@
+{
+  "releaseStatus": "source_only_not_built",
+  "gameCode": "rhythm_reach_3d",
+  "gameVersion": "0.1.2",
+  "bridgeProtocolVersion": "1.0.0",
+  "unityVersion": "6000.0.75f1",
+  "buildTarget": "WebGL",
+  "artifacts": []
+}

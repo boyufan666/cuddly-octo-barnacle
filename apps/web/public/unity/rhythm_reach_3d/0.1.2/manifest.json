@@ -1,0 +1,61 @@
+{
+  "releaseStatus": "released",
+  "gameCode": "rhythm_reach_3d",
+  "gameName": "Rhythm Reach 3D",
+  "gameVersion": "0.1.2",
+  "bridgeProtocolVersion": "1.0.0",
+  "unityVersion": "6000.0.75f1",
+  "buildTarget": "WebGL",
+  "generatedAt": "2026-07-21T11:44:52.515Z",
+  "runtime": {
+    "unitySessionObjectName": "RhythmReachSession",
+    "runtimeConfigMethod": "SetRuntimeConfigJson",
+    "startMethod": "StartConfiguredSession",
+    "reachHitMethod": "ReceiveWebGlReachHit",
+    "difficultyMethod": "SetExplicitDifficulty"
+  },
+  "build": {
+    "loaderUrl": "/unity/rhythm_reach_3d/0.1.2/Build/0.1.2.loader.js?hash=58eff50fa6baa685110f9e898e6c54548b6e42e2d8abd14ca0966a582370efdd",
+    "dataUrl": "/unity/rhythm_reach_3d/0.1.2/Build/0.1.2.data?hash=f38b47f37613d2e79cac37689b14ea3edf2e075a6b44d37e0a0ba033a9680782",
+    "frameworkUrl": "/unity/rhythm_reach_3d/0.1.2/Build/0.1.2.framework.js?hash=e2216b24d36a3407e48f588aa11ebeabe3dba04b00624a44f1784aa84c3505b4",
+    "codeUrl": "/unity/rhythm_reach_3d/0.1.2/Build/0.1.2.wasm?hash=14bf8d8ff53d6dc27c532fa8753a801b72404074a07378acd396b1c446b27cdc"
+  },
+  "runtimeRequirements": {
+    "cameraRequired": true,
+    "microphoneRequired": false,
+    "supportedInputModes": ["camera_pose"]
+  },
+  "requiredResultMetrics": [
+    { "metricType": "reaction_time_ms", "unit": "ms", "min": 0, "max": 60000 },
+    { "metricType": "target_hit_rate", "unit": "ratio", "min": 0, "max": 1 },
+    { "metricType": "arm_raise_accuracy", "unit": "ratio", "min": 0, "max": 1 },
+    { "metricType": "duration_seconds", "unit": "seconds", "min": 1, "max": 3600 },
+    { "metricType": "difficulty_level", "unit": "level", "min": 1, "max": 3 }
+  ],
+  "artifacts": [
+    {
+      "path": "Build/0.1.2.loader.js",
+      "url": "/unity/rhythm_reach_3d/0.1.2/Build/0.1.2.loader.js?hash=58eff50fa6baa685110f9e898e6c54548b6e42e2d8abd14ca0966a582370efdd",
+      "sha256": "sha256:58eff50fa6baa685110f9e898e6c54548b6e42e2d8abd14ca0966a582370efdd",
+      "sizeBytes": 26454
+    },
+    {
+      "path": "Build/0.1.2.framework.js",
+      "url": "/unity/rhythm_reach_3d/0.1.2/Build/0.1.2.framework.js?hash=e2216b24d36a3407e48f588aa11ebeabe3dba04b00624a44f1784aa84c3505b4",
+      "sha256": "sha256:e2216b24d36a3407e48f588aa11ebeabe3dba04b00624a44f1784aa84c3505b4",
+      "sizeBytes": 377266
+    },
+    {
+      "path": "Build/0.1.2.data",
+      "url": "/unity/rhythm_reach_3d/0.1.2/Build/0.1.2.data?hash=f38b47f37613d2e79cac37689b14ea3edf2e075a6b44d37e0a0ba033a9680782",
+      "sha256": "sha256:f38b47f37613d2e79cac37689b14ea3edf2e075a6b44d37e0a0ba033a9680782",
+      "sizeBytes": 6525797
+    },
+    {
+      "path": "Build/0.1.2.wasm",
+      "url": "/unity/rhythm_reach_3d/0.1.2/Build/0.1.2.wasm?hash=14bf8d8ff53d6dc27c532fa8753a801b72404074a07378acd396b1c446b27cdc",
+      "sha256": "sha256:14bf8d8ff53d6dc27c532fa8753a801b72404074a07378acd396b1c446b27cdc",
+      "sizeBytes": 27942270
+    }
+  ]
+}

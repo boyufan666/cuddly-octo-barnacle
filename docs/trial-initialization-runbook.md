@@ -4,7 +4,7 @@
 
 ## 初始化范围
 
-`pnpm db:seed:trial` 只允许创建或更新以下数据：
+`pnpm db:seed:trial` 只允许创建以下数据：
 
 - 系统角色定义：患者、家属、医师、平台管理、超级管理员、普通运营、只读审计。
 - 试点机构：机构编码、名称、类型和启用状态。
@@ -20,6 +20,8 @@
 
 ```text
 DATABASE_URL
+SENSITIVE_DATA_KEY_REF
+SENSITIVE_DATA_KEY
 TRIAL_ORG_CODE
 TRIAL_ORG_NAME
 TRIAL_ORG_TYPE
@@ -32,6 +34,12 @@ TRIAL_DOCTOR_INITIAL_PASSWORD
 TRIAL_DOCTOR_TITLE
 TRIAL_DOCTOR_DEPARTMENT
 ```
+
+敏感数据密钥要求：
+
+- `SENSITIVE_DATA_KEY_REF` 必须是非空且无首尾空格的精确密钥引用。
+- `SENSITIVE_DATA_KEY` 必须是 canonical base64，解码后恰好为 32 bytes。
+- 两个变量必须与目标环境 API 运行时使用的密钥完全一致；任一变量缺失或格式错误时，脚本会在任何数据库写入前直接失败。
 
 可选变量：
 
@@ -50,9 +58,10 @@ TRIAL_DOCTOR_MOBILE_PHONE
 
 1. 确认目标数据库为空库或已经完成正式迁移，且不是开发验收库。
 2. 确认任意目录下的 `.env*` 文件、部署平台变量或 CI/CD Secret 中未使用本地开发凭证。
-3. 确认 `JWT_SECRET`、`WEB_ORIGIN`、`NEXT_PUBLIC_API_BASE_URL`、`REDIS_URL` 已按目标环境配置。
-4. 确认没有执行 `pnpm db:seed`，该命令只用于本地开发和自动化验收。
-5. 确认本次初始化账号由客户或项目负责人书面确认，账号名称不使用测试人员个人临时账号。
+3. 确认 `JWT_SECRET`、`WEB_ORIGIN`、`NEXT_PUBLIC_API_BASE_URL` 已按目标环境配置。
+4. 确认 `SENSITIVE_DATA_KEY_REF` 和 `SENSITIVE_DATA_KEY` 与 API 运行时配置完全一致。
+5. 确认没有执行 `pnpm db:seed`，该命令只用于本地开发和自动化验收。
+6. 确认本次初始化账号由客户或项目负责人书面确认，账号名称不使用测试人员个人临时账号。
 
 ## 执行步骤
 
@@ -84,7 +93,7 @@ pnpm dev
 访问：
 
 - Web：`http://localhost:3000`
-- API 健康检查：`http://localhost:4000/health`
+- API 存活检查：`http://localhost:4000/health/live`
 
 部署到试点或生产环境时，应使用对应部署方式启动服务，并访问正式域名，不使用 localhost 作为验收地址。
 

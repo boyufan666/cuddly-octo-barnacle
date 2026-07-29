@@ -5,7 +5,7 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const expectedEvidenceVersion = "browser-pose-field-acceptance/v1";
-const expectedRuntimeType = "browser_pose_game";
+const expectedRuntimeType = "browser_pose_canvas";
 const expectedBridgeProtocolVersion = "1.0.0";
 const requiredMetricTypes = [
   "reaction_time_ms",
@@ -17,6 +17,24 @@ const requiredAuditActions = [
   "training_session.start",
   "training_result.submit",
 ];
+const forbiddenMarkers = ["mock", "demo", "seed", "fallback", "fixed", "manual"];
+const sensitiveEvidenceKeys = new Set([
+  "accesstoken",
+  "apikey",
+  "authorization",
+  "audiobase64",
+  "contentbase64",
+  "imagebase64",
+  "key",
+  "payload",
+  "raw",
+  "rawpayload",
+  "rawpayloadbase64",
+  "requestbody",
+  "responsebody",
+  "secret",
+  "token",
+]);
 
 export function validateBrowserPoseEvidence(evidence) {
   const failures = [];
@@ -45,6 +63,8 @@ export function validateBrowserPoseEvidence(evidence) {
   validateAuditEvidence(failures, evidence.auditEvidence);
   validateArtifacts(failures, evidence.artifacts);
   validateCrossReferences(failures, evidence);
+  validateNoDemoMarkers(failures, evidence);
+  validateNoSensitiveEvidence(failures, evidence);
   validateNoPlaceholders(failures, evidence);
 
   return { failures };
@@ -80,6 +100,7 @@ function validateDevice(failures, device) {
   if (!isObject(device)) return;
   requireString(failures, device.deviceCode, "device.deviceCode");
   requireString(failures, device.cameraLabel, "device.cameraLabel");
+  validateCameraLabel(failures, device.cameraLabel);
   requireString(
     failures,
     device.cameraDeviceIdHash,
@@ -95,7 +116,7 @@ function validatePoseRuntime(failures, poseRuntime) {
     failures,
     poseRuntime.runtimeType,
     expectedRuntimeType,
-    "poseRuntime.runtimeType 必须是 browser_pose_game。",
+    "poseRuntime.runtimeType 必须是 browser_pose_canvas。",
   );
   requireString(failures, poseRuntime.modelName, "poseRuntime.modelName");
   requireString(failures, poseRuntime.modelVersion, "poseRuntime.modelVersion");
@@ -110,6 +131,14 @@ function validatePoseRuntime(failures, poseRuntime) {
     poseRuntime.averageVisibility,
     "poseRuntime.averageVisibility",
   );
+}
+
+function validateCameraLabel(failures, cameraLabel) {
+  const normalized = typeof cameraLabel === "string" ? cameraLabel.trim() : "";
+  if (!normalized) return;
+  if (normalized === "已授权摄像头") {
+    failures.push("device.cameraLabel 必须是浏览器返回的真实摄像头标签，不能使用通用授权文案。");
+  }
 }
 
 function validatePatient(failures, patient) {
@@ -129,7 +158,7 @@ function validateGameContent(failures, gameContent) {
     failures,
     gameContent.runtimeType,
     expectedRuntimeType,
-    "gameContent.runtimeType 必须是 browser_pose_game。",
+    "gameContent.runtimeType 必须是 browser_pose_canvas。",
   );
   requireString(failures, gameContent.gameVersion, "gameContent.gameVersion");
   requireEqual(
@@ -138,7 +167,12 @@ function validateGameContent(failures, gameContent) {
     expectedBridgeProtocolVersion,
     "gameContent.bridgeProtocolVersion 必须是 1.0.0。",
   );
-  requireString(failures, gameContent.releaseChannel, "gameContent.releaseChannel");
+  requireEqual(
+    failures,
+    gameContent.releaseChannel,
+    "production",
+    "gameContent.releaseChannel 必须是 production。",
+  );
   requireEqual(
     failures,
     gameContent.buildStatus,
@@ -165,6 +199,11 @@ function validateTrainingSession(failures, trainingSession) {
   if (!isObject(trainingSession)) return;
   requireString(failures, trainingSession.sessionId, "trainingSession.sessionId");
   requireString(failures, trainingSession.gameRunId, "trainingSession.gameRunId");
+  requireString(
+    failures,
+    trainingSession.collectionBatchId,
+    "trainingSession.collectionBatchId",
+  );
   requireString(failures, trainingSession.deviceCode, "trainingSession.deviceCode");
   requireEqual(
     failures,
@@ -203,12 +242,17 @@ function validateTrainingResult(failures, trainingResult) {
     failures,
     trainingResult.source,
     expectedRuntimeType,
-    "trainingResult.source 必须是 browser_pose_game。",
+    "trainingResult.source 必须是 browser_pose_canvas。",
   );
-  if (/demo|mock/i.test(String(trainingResult.source ?? ""))) {
-    failures.push("trainingResult.source 不能包含 demo/mock。");
+  if (containsForbiddenMarker(String(trainingResult.source ?? ""))) {
+    failures.push("trainingResult.source 不能包含 mock/demo/seed/fallback/fixed/manual。");
   }
   requireString(failures, trainingResult.gameRunId, "trainingResult.gameRunId");
+  requireString(
+    failures,
+    trainingResult.collectionBatchId,
+    "trainingResult.collectionBatchId",
+  );
   requireString(failures, trainingResult.gameVersion, "trainingResult.gameVersion");
   requireEqual(
     failures,
@@ -277,6 +321,11 @@ function validateMotionMetrics(failures, motionMetrics) {
       continue;
     }
     requireString(failures, metric.metricType, "motionMetrics.metricType");
+    requireString(
+      failures,
+      metric.collectionBatchId,
+      "motionMetrics.collectionBatchId",
+    );
     if (typeof metric.metricType === "string") {
       byType.set(metric.metricType, metric);
     }
@@ -334,6 +383,24 @@ function validateAuditEvidence(failures, auditEvidence) {
         failures.push(`auditEvidence.requiredActions 缺少 ${action}。`);
       }
     }
+    const extraActions = auditEvidence.requiredActions.filter(
+      (action) => !requiredAuditActions.includes(action),
+    );
+    if (
+      extraActions.length ||
+      auditEvidence.requiredActions.length !== requiredAuditActions.length
+    ) {
+      failures.push(
+        `auditEvidence.requiredActions 只能包含 ${requiredAuditActions.join("、")}；多余动作：${
+          extraActions.join("、") || "重复或数量不一致"
+        }。`,
+      );
+    }
+    if (auditEvidence.requiredActions.includes("training_result.review")) {
+      failures.push(
+        "正式浏览器体感现场验收只接受 valid 且无异常训练结果；training_result.review 属于异常训练复核契约，请使用 pnpm verify:contracts 验收。",
+      );
+    }
   }
 }
 
@@ -377,12 +444,36 @@ function validateCrossReferences(failures, evidence) {
       failures.push("trainingSession.gameRunId 与 trainingResult.gameRunId 必须一致。");
     }
     if (
+      session.collectionBatchId &&
+      result.collectionBatchId &&
+      session.collectionBatchId !== result.collectionBatchId
+    ) {
+      failures.push(
+        "trainingSession.collectionBatchId 与 trainingResult.collectionBatchId 必须一致。",
+      );
+    }
+    if (
       session.deviceCode &&
       isObject(device) &&
       device.deviceCode &&
       session.deviceCode !== device.deviceCode
     ) {
       failures.push("trainingSession.deviceCode 与 device.deviceCode 必须一致。");
+    }
+  }
+
+  if (isObject(session) && Array.isArray(evidence.motionMetrics)) {
+    for (const metric of evidence.motionMetrics) {
+      if (
+        isObject(metric) &&
+        session.collectionBatchId &&
+        metric.collectionBatchId &&
+        session.collectionBatchId !== metric.collectionBatchId
+      ) {
+        failures.push(
+          `motionMetrics.${metric.metricType ?? "unknown"}.collectionBatchId 与 trainingSession.collectionBatchId 必须一致。`,
+        );
+      }
     }
   }
 
@@ -422,6 +513,119 @@ function validateNoPlaceholders(failures, evidence) {
   for (const path of paths) {
     failures.push(`${path} 仍包含占位符，必须替换为现场实机证据。`);
   }
+}
+
+function validateNoDemoMarkers(failures, evidence) {
+  const paths = [];
+  collectDemoMarkerPaths(evidence, "$", paths);
+  for (const path of paths) {
+    failures.push(`${path} 包含 mock/demo/seed/fallback/fixed/manual 标记，不能作为正式浏览器体感验收证据。`);
+  }
+}
+
+function collectDemoMarkerPaths(value, path, paths) {
+  if (typeof value === "string") {
+    if (containsForbiddenMarker(value)) paths.push(path);
+    return;
+  }
+
+  if (Array.isArray(value)) {
+    value.forEach((item, index) =>
+      collectDemoMarkerPaths(item, `${path}[${index}]`, paths),
+    );
+    return;
+  }
+
+  if (!isObject(value)) return;
+  for (const [key, nested] of Object.entries(value)) {
+    collectDemoMarkerPaths(nested, `${path}.${key}`, paths);
+  }
+}
+
+function validateNoSensitiveEvidence(failures, evidence) {
+  const paths = [];
+  collectSensitiveEvidencePaths(evidence, "$", paths);
+  for (const path of paths) {
+    failures.push(`${path} 包含敏感字段或原始载荷，不能写入正式浏览器体感 evidence。`);
+  }
+}
+
+function collectSensitiveEvidencePaths(value, path, paths) {
+  if (typeof value === "string") {
+    if (isUnsafeEvidenceText(value)) paths.push(path);
+    return;
+  }
+
+  if (Array.isArray(value)) {
+    value.forEach((item, index) =>
+      collectSensitiveEvidencePaths(item, `${path}[${index}]`, paths),
+    );
+    return;
+  }
+
+  if (!isObject(value)) return;
+  for (const [key, nested] of Object.entries(value)) {
+    const nestedPath = `${path}.${key}`;
+    if (sensitiveEvidenceKeys.has(normalizeKey(key))) {
+      paths.push(nestedPath);
+      continue;
+    }
+    collectSensitiveEvidencePaths(nested, nestedPath, paths);
+  }
+}
+
+function isUnsafeEvidenceText(value) {
+  if (isHashDigestText(value)) return false;
+  return (
+    bearerTokenPattern().test(value) ||
+    secretLikePattern().test(value) ||
+    base64LikePattern().test(value)
+  );
+}
+
+function isHashDigestText(value) {
+  return /^(?:sha1|sha256|sha384|sha512):[a-f0-9]{40,128}$/i.test(value);
+}
+
+function containsForbiddenMarker(value) {
+  const normalized = normalizeTextForMarkerScan(value);
+  return forbiddenMarkers.some((marker) => normalized.includes(marker));
+}
+
+function normalizeTextForMarkerScan(value) {
+  return decodeTextRepeatedly(String(value ?? ""))
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+}
+
+function decodeTextRepeatedly(value) {
+  let current = value;
+  for (let index = 0; index < 3; index += 1) {
+    try {
+      const decoded = decodeURIComponent(current);
+      if (decoded === current) return current;
+      current = decoded;
+    } catch {
+      return current;
+    }
+  }
+  return current;
+}
+
+function normalizeKey(key) {
+  return key.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function base64LikePattern() {
+  return /(?:[A-Za-z0-9+/]{40,}={0,2})/g;
+}
+
+function bearerTokenPattern() {
+  return /\bBearer\s+[A-Za-z0-9._~+/=-]{8,}\b/i;
+}
+
+function secretLikePattern() {
+  return /\b(?:sk|ak|api[_-]?key|secret|token)[_-]?[A-Za-z0-9._~+/=-]{8,}\b/i;
 }
 
 function collectPlaceholderPaths(value, path, paths) {
