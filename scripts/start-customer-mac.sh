@@ -203,6 +203,12 @@ is_positive_safe_integer() {
   (( 10#$value <= 9007199254740991 ))
 }
 
+is_tcp_port() {
+  local value="$1"
+  [[ "$value" =~ ^[1-9][0-9]*$ ]] || return 1
+  (( ${#value} <= 5 && 10#$value <= 65535 ))
+}
+
 is_canonical_base64_32_bytes() {
   local value="$1"
   [[ "$value" =~ ^[A-Za-z0-9+/]{42}[AEIMQUYcgkosw048]=$ ]]
@@ -219,6 +225,7 @@ validate_customer_configuration() {
   COOKIE_SECURE="$(read_env_value COOKIE_SECURE)"
   PUBLIC_CREDENTIAL_THROTTLE_LIMIT="$(read_env_value PUBLIC_CREDENTIAL_THROTTLE_LIMIT)"
   PUBLIC_CREDENTIAL_THROTTLE_TTL_MS="$(read_env_value PUBLIC_CREDENTIAL_THROTTLE_TTL_MS)"
+  DEFAULT_PATIENT_PASSWORD="$(read_env_value DEFAULT_PATIENT_PASSWORD)"
   SENSITIVE_DATA_KEY_REF="$(read_env_value SENSITIVE_DATA_KEY_REF)"
   SENSITIVE_DATA_KEY="$(read_env_value SENSITIVE_DATA_KEY)"
   POSTGRES_PASSWORD="$(read_env_value POSTGRES_PASSWORD)"
@@ -228,6 +235,12 @@ validate_customer_configuration() {
   ensure_not_placeholder "WEB_ORIGIN" "$WEB_ORIGIN"
   ensure_not_placeholder "PORT" "$API_PORT"
   ensure_not_placeholder "NEXT_PUBLIC_API_BASE_URL" "$NEXT_PUBLIC_API_BASE_URL"
+  ensure_not_placeholder "DEFAULT_PATIENT_PASSWORD" "$DEFAULT_PATIENT_PASSWORD"
+
+  is_tcp_port "$API_PORT" || \
+    fail "PORT 配置无效；请填写 1 到 65535 之间的正整数，客户 Mac 通常使用 PORT=4000。"
+  [[ "$API_PORT" != "$WEB_PORT" ]] || \
+    fail "PORT 配置冲突；Web 固定使用 3000，API 请改用其他端口（通常为 4000）。"
 
   [[ "$COOKIE_SECURE" == "true" || "$COOKIE_SECURE" == "false" ]] || \
     fail "COOKIE_SECURE 配置无效；请在项目 .env 中精确填写 COOKIE_SECURE=true 或 COOKIE_SECURE=false（本地 HTTP 可填 false）。"
@@ -243,6 +256,9 @@ validate_customer_configuration() {
     fail "SENSITIVE_DATA_KEY 配置无效；请在项目 .env 中填写 canonical base64 编码且解码后恰好为 32 bytes 的值。"
   [[ "$POSTGRES_PASSWORD" =~ [^[:space:]] ]] || \
     fail "POSTGRES_PASSWORD 配置无效，不得为空或纯空白；请在项目 .env 中显式填写数据库密码。"
+  if (( ${#DEFAULT_PATIENT_PASSWORD} < 8 || ${#DEFAULT_PATIENT_PASSWORD} > 128 )); then
+    fail "DEFAULT_PATIENT_PASSWORD 配置无效；初始患者密码长度必须在 8 到 128 位之间。"
+  fi
 
   export DATABASE_URL
   export JWT_SECRET
@@ -252,6 +268,7 @@ validate_customer_configuration() {
   export COOKIE_SECURE
   export PUBLIC_CREDENTIAL_THROTTLE_LIMIT
   export PUBLIC_CREDENTIAL_THROTTLE_TTL_MS
+  export DEFAULT_PATIENT_PASSWORD
   export SENSITIVE_DATA_KEY_REF
   export SENSITIVE_DATA_KEY
   export POSTGRES_PASSWORD

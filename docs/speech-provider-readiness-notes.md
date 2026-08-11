@@ -8,7 +8,7 @@
 
 | 能力 | 生产 provider | 平台接口 | 允许的 MiMo 协议 |
 | --- | --- | --- | --- |
-| 语音转写草稿 | `xiaomi-mimo-audio-understanding` | `POST /ai/assessment-speech-transcripts` | 客户批准的 MiMo `chat/completions` 音频理解 endpoint，使用 `input_audio` |
+| 语音转写草稿 | `xiaomi-mimo-audio-understanding` | `POST /ai/assessment-speech-transcripts` | MiMo `chat/completions` 语音识别 endpoint，使用 `mimo-v2.5-asr`、`input_audio` 和 `asr_options.language` |
 | 语音播报 | `xiaomi-mimo-tts` | `POST /ai/tts-speech-outputs` | 客户批准的 MiMo `chat/completions` TTS endpoint，模型为受批准的 `mimo-v2.5-tts*` |
 
 不得把未被客户批准的标准 `/v1/audio/transcriptions` 或 `/v1/audio/speech` 当作生产接口；也不得因为这些 endpoint 不可用而切换到浏览器朗读、静态音频、其他供应商、文本模型推断、固定转写或任何 fallback。
@@ -26,7 +26,7 @@ MIMO_API_KEY_FILE=/etc/secrets/mimo_api_key
 MIMO_ALLOWED_HOSTS=<approved-mimo-hosts>
 SPEECH_PROVIDER=xiaomi-mimo-audio-understanding
 SPEECH_TO_TEXT_ENDPOINT=https://<approved-mimo-host>/...
-SPEECH_MODEL_VERSION=<approved-model>
+SPEECH_MODEL_VERSION=mimo-v2.5-asr
 TTS_PROVIDER=xiaomi-mimo-tts
 TTS_ENDPOINT=https://<approved-mimo-host>/...
 TTS_MODEL_VERSION=mimo-v2.5-tts

@@ -175,9 +175,11 @@ function missingKeyEnvironment(databaseUrl: string): NodeJS.ProcessEnv {
   const environment: NodeJS.ProcessEnv = {
     ...process.env,
     DATABASE_URL: databaseUrl,
+    // Keep the keys defined so seed.ts cannot repopulate them from the
+    // developer's root .env while this negative test is running.
+    SENSITIVE_DATA_KEY_REF: "",
+    SENSITIVE_DATA_KEY: "",
   };
-  delete environment.SENSITIVE_DATA_KEY_REF;
-  delete environment.SENSITIVE_DATA_KEY;
   return environment;
 }
 
@@ -201,10 +203,13 @@ function trialEnvironment(databaseUrl: string): NodeJS.ProcessEnv {
 }
 
 function trialMissingKeyEnvironment(databaseUrl: string): NodeJS.ProcessEnv {
-  const environment = trialEnvironment(databaseUrl);
-  delete environment.SENSITIVE_DATA_KEY_REF;
-  delete environment.SENSITIVE_DATA_KEY;
-  return environment;
+  return {
+    ...trialEnvironment(databaseUrl),
+    // Keep the keys defined so seed-trial.ts cannot repopulate them from the
+    // developer's root .env while this negative test is running.
+    SENSITIVE_DATA_KEY_REF: "",
+    SENSITIVE_DATA_KEY: "",
+  };
 }
 
 async function migrate(databaseUrl: string) {

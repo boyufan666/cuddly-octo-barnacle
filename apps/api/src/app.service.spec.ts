@@ -14901,7 +14901,7 @@ describe('AppService assessment consent requirements', () => {
       process.env.SPEECH_PROVIDER_MAX_RESPONSE_BYTES = '1048576';
       process.env.STT_MAX_DECODED_AUDIO_BYTES = '10485760';
       process.env.STT_MAX_DURATION_SECONDS = '600';
-      process.env.SPEECH_MODEL_VERSION = 'mimo-v2.5';
+      process.env.SPEECH_MODEL_VERSION = 'mimo-v2.5-asr';
     }
 
     function clearSpeechEnv() {
@@ -15203,7 +15203,7 @@ describe('AppService assessment consent requirements', () => {
       expect(prisma.assessmentRecord.create).not.toHaveBeenCalled();
     });
 
-    it('returns a transcript from Xiaomi audio understanding without persisting assessment records', async () => {
+    it('returns a transcript from Xiaomi speech recognition without persisting assessment records', async () => {
       configureSpeechEnv();
       process.env.STT_MAX_DECODED_AUDIO_BYTES = String(
         Buffer.byteLength(speechTranscriptDto.audio.contentBase64, 'base64'),
@@ -15223,9 +15223,7 @@ describe('AppService assessment consent requirements', () => {
           choices: [
             {
               message: {
-                content: JSON.stringify({
-                  transcript: '今天是星期一，我记得三个词是苹果、桌子和硬币。',
-                }),
+                content: '今天是星期一，我记得三个词是苹果、桌子和硬币。',
               },
             },
           ],
@@ -15244,7 +15242,7 @@ describe('AppService assessment consent requirements', () => {
         transcript: '今天是星期一，我记得三个词是苹果、桌子和硬币。',
         speechEvidence: {
           provider: 'xiaomi-mimo-audio-understanding',
-          modelVersion: 'mimo-v2.5',
+          modelVersion: 'mimo-v2.5-asr',
           callId: 'mimo-audio-call-001',
           endpointRef:
             'https://token-plan-cn.xiaomimimo.com/v1/chat/completions',
@@ -15282,9 +15280,10 @@ describe('AppService assessment consent requirements', () => {
                 input_audio?: { data: string };
               }>;
         }>;
+        asr_options: { language: string };
       };
-      expect(requestBody.model).toBe('mimo-v2.5');
-      expect(requestBody.messages[1].content).toEqual(
+      expect(requestBody.model).toBe('mimo-v2.5-asr');
+      expect(requestBody.messages[0].content).toEqual(
         arrayContaining([
           objectContaining({
             type: 'input_audio',
@@ -15292,12 +15291,9 @@ describe('AppService assessment consent requirements', () => {
               data: `data:audio/wav;base64,${speechTranscriptDto.audio.contentBase64}`,
             }),
           }),
-          objectContaining({
-            type: 'text',
-            text: expect.stringContaining('逐字转写') as string,
-          }),
         ]),
       );
+      expect(requestBody.asr_options).toEqual({ language: 'zh' });
       expect(prisma.assessmentRecord.create).not.toHaveBeenCalled();
       expect(prisma.riskGradeRecord.create).not.toHaveBeenCalled();
       expect(prisma.aiAnalysisRecord.create).not.toHaveBeenCalled();
@@ -15311,7 +15307,7 @@ describe('AppService assessment consent requirements', () => {
           result: 'success',
           metadata: objectContaining({
             provider: 'xiaomi-mimo-audio-understanding',
-            modelVersion: 'mimo-v2.5',
+            modelVersion: 'mimo-v2.5-asr',
             callId: 'mimo-audio-call-001',
             source: 'provider_audio_understanding',
             calledAt: expect.any(String) as string,
@@ -15365,14 +15361,14 @@ describe('AppService assessment consent requirements', () => {
           result: 'failed',
           metadata: objectContaining({
             provider: 'xiaomi-mimo-audio-understanding',
-            modelVersion: 'mimo-v2.5',
+            modelVersion: 'mimo-v2.5-asr',
             failureStage: 'provider_call',
           }),
         }),
       });
     });
 
-    it('rejects malformed Xiaomi audio understanding output instead of returning placeholder transcript', async () => {
+    it('rejects empty Xiaomi speech recognition output instead of returning placeholder transcript', async () => {
       configureSpeechEnv();
       const { prisma, service } = createService();
       prisma.patientProfile.findUnique.mockResolvedValue({
@@ -15383,7 +15379,7 @@ describe('AppService assessment consent requirements', () => {
       jest.spyOn(globalThis, 'fetch').mockResolvedValue(
         providerJsonResponse({
           id: 'mimo-audio-call-002',
-          choices: [{ message: { content: '无法判断。' } }],
+          choices: [{ message: { content: '' } }],
         }),
       );
 
@@ -15407,7 +15403,7 @@ describe('AppService assessment consent requirements', () => {
           result: 'failed',
           metadata: objectContaining({
             provider: 'xiaomi-mimo-audio-understanding',
-            modelVersion: 'mimo-v2.5',
+            modelVersion: 'mimo-v2.5-asr',
             callId: 'mimo-audio-call-002',
             failureStage: 'provider_response_validation',
           }),

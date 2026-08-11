@@ -38,6 +38,7 @@ const validCustomerEnv = {
   COOKIE_SECURE: "false",
   PUBLIC_CREDENTIAL_THROTTLE_LIMIT: "7",
   PUBLIC_CREDENTIAL_THROTTLE_TTL_MS: "45000",
+  DEFAULT_PATIENT_PASSWORD: "customer-seed-password",
   SENSITIVE_DATA_KEY_REF: "secret-manager://rehab/customer-sensitive-key",
   SENSITIVE_DATA_KEY: Buffer.alloc(32, 7).toString("base64"),
   POSTGRES_PASSWORD: "customer-postgres-password",
@@ -1962,8 +1963,10 @@ test("customer launcher validates project .env before prerequisites, containers,
 
 for (const name of [
   "COOKIE_SECURE",
+  "PORT",
   "PUBLIC_CREDENTIAL_THROTTLE_LIMIT",
   "PUBLIC_CREDENTIAL_THROTTLE_TTL_MS",
+  "DEFAULT_PATIENT_PASSWORD",
   "SENSITIVE_DATA_KEY_REF",
   "SENSITIVE_DATA_KEY",
   "POSTGRES_PASSWORD",
@@ -2011,6 +2014,27 @@ for (const name of [
       );
     });
   }
+}
+
+for (const value of ["0", "3000", "65536", "4000x"]) {
+  test(`customer launcher rejects invalid API PORT=${JSON.stringify(value)}`, () => {
+    const result = runConfigurationPrefix({ overrides: { PORT: value } });
+    assert.notEqual(result.status, 0);
+    assert.match(combinedOutput(result), /PORT.*(无效|冲突)/);
+  });
+}
+
+for (const value of ["1234567", "x".repeat(129)]) {
+  test(`customer launcher rejects invalid DEFAULT_PATIENT_PASSWORD length`, () => {
+    const result = runConfigurationPrefix({
+      overrides: { DEFAULT_PATIENT_PASSWORD: value },
+    });
+    assert.notEqual(result.status, 0);
+    assert.match(
+      combinedOutput(result),
+      /DEFAULT_PATIENT_PASSWORD.*8 到 128 位/,
+    );
+  });
 }
 
 for (const value of ["", " leading-key-ref", "trailing-key-ref "]) {

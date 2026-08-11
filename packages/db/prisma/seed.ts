@@ -1672,6 +1672,23 @@ async function main() {
     );
   }
 
+  const rhythmGameVersion = rhythmGame.gameVersion;
+  const rhythmManifestUrl = rhythmGame.manifestUrl;
+  const rhythmBuildBaseUrl = rhythmGame.buildBaseUrl;
+  if (!rhythmGameVersion || !rhythmManifestUrl || !rhythmBuildBaseUrl) {
+    throw new Error(
+      "Seed training sample requires a released rhythm_reach_3d runtime manifest.",
+    );
+  }
+
+  const rhythmRuntime = {
+    gameCode: rhythmGame.code,
+    gameVersion: rhythmGameVersion,
+    manifestUrl: rhythmManifestUrl,
+    buildBaseUrl: rhythmBuildBaseUrl,
+    bridgeProtocolVersion: rhythmGame.bridgeProtocolVersion,
+  };
+
   const trainingSessionData = {
     patientId: patient.id,
     rehabPlanId: rehabPlan.id,
@@ -1689,14 +1706,10 @@ async function main() {
     calibrationStatus: "completed",
     runtimeConfigSnapshot: {
       source: "seed_import",
-      gameCode: "rhythm_reach_3d",
-      gameVersion: "0.1.0",
-      manifestUrl: "/unity/rhythm_reach_3d/0.1.0/manifest.json",
-      buildBaseUrl: "/unity/rhythm_reach_3d/0.1.0",
-      bridgeProtocolVersion: "1.0.0",
+      ...rhythmRuntime,
     },
-    unityBuildVersion: "0.1.0",
-    bridgeProtocolVersion: "1.0.0",
+    unityBuildVersion: rhythmRuntime.gameVersion,
+    bridgeProtocolVersion: rhythmRuntime.bridgeProtocolVersion,
   };
   const session = await prisma.trainingSession.upsert({
     where: {
@@ -1732,8 +1745,8 @@ async function main() {
     collectionBatchId: null,
     source: "unity_webgl",
     gameRunId: "seed-run-rhythm-001",
-    gameVersion: "0.1.0",
-    bridgeProtocolVersion: "1.0.0",
+    gameVersion: rhythmRuntime.gameVersion,
+    bridgeProtocolVersion: rhythmRuntime.bridgeProtocolVersion,
     submittedByUserId: patientUser.id,
     submittedAt: new Date("2026-04-27T02:08:05.000Z"),
     clientGeneratedAt: new Date("2026-04-27T02:08:00.000Z"),
@@ -1755,8 +1768,8 @@ async function main() {
     metricsSummary: {
       source: "unity_webgl",
       gameRunId: "seed-run-rhythm-001",
-      gameVersion: "0.1.0",
-      protocolVersion: "1.0.0",
+      gameVersion: rhythmRuntime.gameVersion,
+      protocolVersion: rhythmRuntime.bridgeProtocolVersion,
       rawPayloadHash: "seed-rhythm-result-001",
       validActions: 86,
       difficultyLevel: 2,

@@ -1,3 +1,4 @@
+import { isLoopbackHttpOrigin } from "./runtime-origin";
 import type { ConsentRecord } from "@/types/api";
 
 export type BrowserPoseCameraSelection = {
@@ -238,7 +239,8 @@ export function requireSecureDeviceContext() {
   }
   if (
     process.env.NODE_ENV === "production" &&
-    window.location.protocol !== "https:"
+    window.location.protocol !== "https:" &&
+    !isLoopbackHttpOrigin(window.location.origin)
   ) {
     throw new Error("生产训练必须通过 HTTPS 才能使用摄像头。");
   }

@@ -58,6 +58,15 @@ pnpm dev
 
 ## 客户 Mac 一键启动
 
+首次从 GitHub 克隆后，客户或运维先准备 Node.js `24.14.1`、pnpm `10.29.3`、Docker Desktop，并在项目根目录执行：
+
+```bash
+pnpm install --frozen-lockfile
+cp .env.example .env
+```
+
+然后填写本节列出的基础字段和完整 MiMo AI/STT/TTS 字段。新安装必须使用客户专用的空数据库，不得复用开发机的 `rehab_platform` 数据库。需要本地演示 seed 数据时，确认 `DEFAULT_PATIENT_PASSWORD` 后显式执行 `pnpm db:seed`；试点或正式环境改用 `pnpm db:seed:trial` 或受控 production bootstrap，启动器不会自动初始化账号或覆盖数据库。
+
 客户 Mac 使用项目根目录的 `一键启动康复平台.command`。双击启动前，必须由客户或运维在项目根目录的 `.env` 中显式填写以下字段：
 
 ```text
@@ -69,18 +78,23 @@ NEXT_PUBLIC_API_BASE_URL
 COOKIE_SECURE
 PUBLIC_CREDENTIAL_THROTTLE_LIMIT
 PUBLIC_CREDENTIAL_THROTTLE_TTL_MS
+DEFAULT_PATIENT_PASSWORD
 SENSITIVE_DATA_KEY_REF
 SENSITIVE_DATA_KEY
 POSTGRES_PASSWORD
 ```
 
 - `COOKIE_SECURE` 只能精确填写 `true` 或 `false`。HTTPS 填 `true`；本地 HTTP 可由用户显式填写 `COOKIE_SECURE=false`，启动器不会根据 URL 推断。
+- 客户 Mac 启动器的 Web 端口固定为 `3000`；`PORT` 是 API 端口，必须是 `1` 到 `65535` 的未占用端口，通常填写 `4000`，不能填写 `3000`。
 - `PUBLIC_CREDENTIAL_THROTTLE_LIMIT` 与 `PUBLIC_CREDENTIAL_THROTTLE_TTL_MS` 必须是 `1` 到 `9007199254740991` 之间、不带符号和前导零的 base-10 正安全整数。
+- `DEFAULT_PATIENT_PASSWORD` 必须是 8 到 128 位的客户自定义初始密码；启动器会在 Docker、迁移等启动步骤之前校验，不会生成或推断默认密码。新客户数据库还必须按试点或生产初始化流程单独创建账号。
 - `SENSITIVE_DATA_KEY_REF` 必须是非空且没有首尾空格的精确密钥引用。
 - `SENSITIVE_DATA_KEY` 必须是 canonical base64 编码，解码后恰好为 32 bytes。可由运维执行 `openssl rand -base64 32` 生成后显式填入。
 - `POSTGRES_PASSWORD` 必须显式非空；启动器校验通过后会将其导出给 Docker Compose 子进程。
 
 启动器不会生成默认值、不会修改 `.env`、不会兼容旧变量，也不会在缺失配置时继续执行。任一字段缺失或不合法时，会在 Docker、构建、进程启动和端口操作前给出中文修复提示。
+
+启动成功后访问 `http://localhost:3000`。若要确认 AI、语音识别和语音合成供应商配置，先执行 `pnpm verify:mimo:connectivity`；该命令只验证真实供应商响应，不产生患者临床记录。
 
 ## 本地初始化账号
 

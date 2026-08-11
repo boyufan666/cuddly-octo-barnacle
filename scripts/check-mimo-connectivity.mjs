@@ -71,13 +71,7 @@ export async function verifyMimoConnectivity({
     maxResponseBytes: config.stt.maxResponseBytes,
     body: {
       model: config.stt.model,
-      max_completion_tokens: 2048,
       messages: [
-        {
-          role: "system",
-          content:
-            "只返回 JSON，不要返回 Markdown。JSON 必须包含 transcript 字段。",
-        },
         {
           role: "user",
           content: [
@@ -87,13 +81,12 @@ export async function verifyMimoConnectivity({
                 data: `data:${audio.mimeType};base64,${audio.contentBase64}`,
               },
             },
-            {
-              type: "text",
-              text: "请逐字转写这段普通话音频，只输出包含 transcript 字段的 JSON。",
-            },
           ],
         },
       ],
+      asr_options: {
+        language: "zh",
+      },
     },
     fetchImpl,
   });
@@ -299,19 +292,8 @@ function requireTtsAudio(body, outputFormat) {
 
 function requireTranscript(body) {
   const content = requireMessageContent(body, "STT");
-  let payload;
-  try {
-    payload = JSON.parse(content);
-  } catch {
-    throw new Error("STT 消息内容不是 JSON。`transcript` 不会输出。");
-  }
-  if (
-    !payload ||
-    typeof payload !== "object" ||
-    typeof payload.transcript !== "string" ||
-    payload.transcript.trim().length < 2
-  ) {
-    throw new Error("STT JSON 缺少有效 transcript。`transcript` 不会输出。");
+  if (content.trim().length < 2) {
+    throw new Error("STT 消息内容缺少有效转写文本。");
   }
 }
 

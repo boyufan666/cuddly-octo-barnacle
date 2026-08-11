@@ -3,6 +3,39 @@ type SecurityHeader = {
   value: string;
 };
 
+const localHttpHostnames = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+function requireLocalHttpApiOrigin(environment: Partial<NodeJS.ProcessEnv>) {
+  const rawValue = environment.NEXT_PUBLIC_API_BASE_URL;
+  if (!rawValue || rawValue.trim() !== rawValue) {
+    throw new Error(
+      "本地 HTTP 模式的 NEXT_PUBLIC_API_BASE_URL 必须是精确的回环地址。",
+    );
+  }
+  let url: URL;
+  try {
+    url = new URL(rawValue);
+  } catch {
+    throw new Error(
+      "本地 HTTP 模式的 NEXT_PUBLIC_API_BASE_URL 必须是精确的回环地址。",
+    );
+  }
+  if (
+    url.protocol !== "http:" ||
+    !localHttpHostnames.has(url.hostname) ||
+    url.username ||
+    url.password ||
+    url.pathname !== "/" ||
+    url.search ||
+    url.hash
+  ) {
+    throw new Error(
+      "本地 HTTP 模式的 NEXT_PUBLIC_API_BASE_URL 必须是精确的回环地址。",
+    );
+  }
+  return url.origin;
+}
+
 function requireProductionApiOrigin(environment: Partial<NodeJS.ProcessEnv>) {
   const rawValue = environment.NEXT_PUBLIC_API_BASE_URL;
   if (!rawValue || rawValue.trim() !== rawValue) {
@@ -33,14 +66,10 @@ function requireProductionApiOrigin(environment: Partial<NodeJS.ProcessEnv>) {
   return url.origin;
 }
 
-export function getProductionSecurityHeaders(
-  environment: Partial<NodeJS.ProcessEnv> = process.env,
+function buildSecurityHeaders(
+  apiOrigin: string,
+  includeStrictTransport: boolean,
 ): SecurityHeader[] {
-  if (environment.NODE_ENV !== "production") {
-    return [];
-  }
-
-  const apiOrigin = requireProductionApiOrigin(environment);
   const contentSecurityPolicy = [
     "default-src 'self'",
     "base-uri 'self'",
@@ -62,10 +91,14 @@ export function getProductionSecurityHeaders(
       key: "Content-Security-Policy",
       value: contentSecurityPolicy,
     },
-    {
-      key: "Strict-Transport-Security",
-      value: "max-age=31536000; includeSubDomains",
-    },
+    ...(includeStrictTransport
+      ? [
+          {
+            key: "Strict-Transport-Security",
+            value: "max-age=31536000; includeSubDomains",
+          },
+        ]
+      : []),
     { key: "X-Content-Type-Options", value: "nosniff" },
     { key: "X-Frame-Options", value: "DENY" },
     { key: "Referrer-Policy", value: "no-referrer" },
@@ -74,4 +107,18 @@ export function getProductionSecurityHeaders(
       value: "camera=(self), microphone=(self), geolocation=(), payment=(), usb=()",
     },
   ];
+}
+
+export function getProductionSecurityHeaders(
+  environment: Partial<NodeJS.ProcessEnv> = process.env,
+): SecurityHeader[] {
+  if (environment.NODE_ENV !== "production") {
+    return [];
+  }
+
+  if (environment.COOKIE_SECURE === "false") {
+    return buildSecurityHeaders(requireLocalHttpApiOrigin(environment), false);
+  }
+
+  return buildSecurityHeaders(requireProductionApiOrigin(environment), true);
 }

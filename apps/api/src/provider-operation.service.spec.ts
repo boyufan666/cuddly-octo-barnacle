@@ -556,12 +556,12 @@ describe('ProviderOperationService', () => {
 
     expect(result.status).toBe('completed');
     expect(prisma.$transaction).not.toHaveBeenCalled();
-    expect(prisma.providerOperation.updateMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { id: operationId, status: 'dispatching' },
-        data: expect.objectContaining({ status: 'completed' }),
-      }),
-    );
+    const updateArgs = getOnlyMockCall(prisma.providerOperation.updateMany);
+    expect(updateArgs.where).toEqual({
+      id: operationId,
+      status: 'dispatching',
+    });
+    expect(updateArgs.data).toMatchObject({ status: 'completed' });
   });
 
   it('opens one explicit case and outbox event for an unknown provider outcome', async () => {

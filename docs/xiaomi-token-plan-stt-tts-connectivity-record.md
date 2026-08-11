@@ -6,7 +6,7 @@
 
 - Token Plan 文本大模型可用：`https://token-plan-cn.xiaomimimo.com/v1/chat/completions`，模型 `mimo-v2.5`。
 - Token Plan TTS 可用：同一 endpoint，模型 `mimo-v2.5-tts`，返回真实 WAV 音频，文件头为 `RIFF...WAVE`。
-- Token Plan 音频理解可用：同一 endpoint，模型 `mimo-v2.5`，可转写由 TTS 生成的 WAV 音频。
+- Token Plan 语音识别可用：同一 endpoint，模型 `mimo-v2.5-asr`，可转写由 TTS 生成的 WAV 音频。MiMo 官方当前语音识别协议要求使用该 ASR 模型，并在 `message.content` 返回纯转写文本。
 - 普通 `https://api.xiaomimimo.com/v1/chat/completions` 对当前 `tp-...` key 返回 `401 Invalid API Key`，不适合作为本项目当前本地联调 endpoint。
 
 ## 本地项目级验证
@@ -33,7 +33,7 @@ AI_MODEL_VERSION="mimo-v2.5"
 
 SPEECH_PROVIDER="xiaomi-mimo-audio-understanding"
 SPEECH_TO_TEXT_ENDPOINT="https://token-plan-cn.xiaomimimo.com/v1/chat/completions"
-SPEECH_MODEL_VERSION="mimo-v2.5"
+SPEECH_MODEL_VERSION="mimo-v2.5-asr"
 
 TTS_PROVIDER="xiaomi-mimo-tts"
 TTS_ENDPOINT="https://token-plan-cn.xiaomimimo.com/v1/chat/completions"

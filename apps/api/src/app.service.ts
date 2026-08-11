@@ -4787,7 +4787,6 @@ export class AppService {
     try {
       providerResponse = await this.callXiaomiAudioUnderstandingForTranscript(
         config,
-        assessmentType,
         audio,
       );
     } catch (error) {
@@ -13621,6 +13620,11 @@ export class AppService {
       process.env.SPEECH_MODEL_VERSION,
       '语音模型版本',
     );
+    if (modelVersion !== 'mimo-v2.5-asr') {
+      throw new BadRequestException(
+        '语音模型版本必须是小米 MiMo 当前支持的 mimo-v2.5-asr。',
+      );
+    }
     const apiKey = mimoSecret.key;
     const requestLimits = requireMimoProviderRequestLimits('speech');
     const inputLimits = requireSttInputLimits();
@@ -14003,7 +14007,6 @@ export class AppService {
 
   private async callXiaomiAudioUnderstandingForTranscript(
     config: SpeechRuntimeConfig,
-    assessmentType: string,
     audio: SpeechAudioInput,
   ) {
     const audioData = `data:${audio.mimeType};base64,${audio.contentBase64}`;
@@ -14018,13 +14021,7 @@ export class AppService {
       },
       body: JSON.stringify({
         model: config.modelVersion,
-        max_completion_tokens: 2048,
         messages: [
-          {
-            role: 'system',
-            content:
-              '你是认知康复平台的语音转写助手。只返回 JSON，不要返回 Markdown。JSON 必须包含 transcript 字段。',
-          },
           {
             role: 'user',
             content: [
@@ -14034,13 +14031,12 @@ export class AppService {
                   data: audioData,
                 },
               },
-              {
-                type: 'text',
-                text: `请逐字转写这段 ${assessmentType} 认知评估问答音频，只输出 JSON：{"transcript":"..."}`,
-              },
             ],
           },
         ],
+        asr_options: {
+          language: 'zh',
+        },
       }),
     });
     const { callId, message } = this.requireMimoProviderMessage(
@@ -14181,20 +14177,9 @@ export class AppService {
     callId: string;
     content: string;
   }) {
-    let payload: Prisma.JsonObject;
-    try {
-      payload = this.requiredJsonObject(
-        JSON.parse(providerResponse.content) as unknown,
-        '语音转写结果必须是 JSON 对象。',
-      );
-    } catch {
-      throw new BadRequestException(
-        '语音转写模型未返回有效 JSON，不能生成转写。',
-      );
-    }
     const transcript = this.requiredString(
-      payload.transcript,
-      '语音转写模型缺少转写文本。',
+      providerResponse.content,
+      '语音转写模型响应内容不能为空。',
     );
     if (transcript.length < 2) {
       throw new BadRequestException('语音转写文本过短，不能生成转写。');

@@ -117,6 +117,32 @@ test("camera detection requests permission before requiring a real device id", a
   }
 });
 
+test("production camera access allows an exact local HTTP origin", async () => {
+  const mutableEnv = process.env as Record<string, string | undefined>;
+  const previousNodeEnv = mutableEnv.NODE_ENV;
+  mutableEnv.NODE_ENV = "production";
+  synchronizeBrowserPoseCameraConsent(cameraConsent);
+  const restoreNavigator = installMediaDevices({
+    enumerateDevices: async () => [videoDevice("camera-local", "Local camera")],
+    getUserMedia: async () => fakeMediaStream("camera-local"),
+  });
+  const restoreWindow = installWindow({
+    isSecureContext: true,
+    location: { origin: "http://localhost:3300", protocol: "http:" },
+  });
+
+  try {
+    const opened = await openBrowserPoseCamera();
+    assert.equal(opened.deviceId, "camera-local");
+    opened.stream.getTracks().forEach((track) => track.stop());
+  } finally {
+    restoreWindow();
+    restoreNavigator();
+    if (previousNodeEnv === undefined) delete mutableEnv.NODE_ENV;
+    else mutableEnv.NODE_ENV = previousNodeEnv;
+  }
+});
+
 test("formal training captures the complete authorized camera selection", async () => {
   synchronizeBrowserPoseCameraConsent(cameraConsent);
   const restoreNavigator = installMediaDevices({

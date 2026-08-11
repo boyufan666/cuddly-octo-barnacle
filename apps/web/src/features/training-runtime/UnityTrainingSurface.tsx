@@ -32,6 +32,7 @@ import {
   type UnityTrainingResultBridgeEvent,
 } from "@/lib/unity-training-bridge";
 import { cn } from "@/lib/utils";
+import { isLoopbackHttpOrigin } from "@/lib/runtime-origin";
 import type {
   RehabPlan,
   SubmitTrainingResultRequest,
@@ -288,7 +289,8 @@ export function UnityTrainingSurface(props: UnityTrainingSurfaceProps) {
           manifestUrl,
           game,
           origin: window.location.origin,
-          allowInsecureOrigin: process.env.NODE_ENV !== "production",
+          allowInsecureOrigin: process.env.NODE_ENV !== "production" ||
+            isLoopbackHttpOrigin(window.location.origin),
         });
         const runtime = readUnityRuntime(manifest);
         if (runtimeAttemptBlocked()) return;

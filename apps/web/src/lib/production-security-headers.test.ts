@@ -54,6 +54,39 @@ test("production headers fail closed without one exact HTTPS API origin", () => 
   }
 });
 
+test("local HTTP mode accepts only a loopback API origin and omits HSTS", () => {
+  const headers = getProductionSecurityHeaders(
+    productionEnvironment({
+      COOKIE_SECURE: "false",
+      NEXT_PUBLIC_API_BASE_URL: "http://localhost:4000",
+    }),
+  );
+  const byName = new Map(headers.map((header) => [header.key, header.value]));
+
+  assert.match(
+    byName.get("Content-Security-Policy") ?? "",
+    /connect-src 'self' http:\/\/localhost:4000/,
+  );
+  assert.equal(byName.has("Strict-Transport-Security"), false);
+
+  for (const value of [
+    "http://api.example.com",
+    "http://localhost:4000/v1",
+    "http://user:password@localhost:4000",
+  ]) {
+    assert.throws(
+      () =>
+        getProductionSecurityHeaders(
+          productionEnvironment({
+            COOKIE_SECURE: "false",
+            NEXT_PUBLIC_API_BASE_URL: value,
+          }),
+        ),
+      /本地 HTTP 模式.*回环地址/,
+    );
+  }
+});
+
 test("development does not report production-only headers", () => {
   assert.deepEqual(
     getProductionSecurityHeaders({

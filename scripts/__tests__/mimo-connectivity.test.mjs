@@ -45,9 +45,7 @@ test("MiMo connectivity checks the AI, TTS, and STT contracts without exposing p
     },
     {
       id: "stt-call",
-      choices: [
-        { message: { content: JSON.stringify({ transcript: "训练开始" }) } },
-      ],
+      choices: [{ message: { content: "训练开始" } }],
     },
   ];
   const result = await verifyMimoConnectivity({
@@ -71,6 +69,8 @@ test("MiMo connectivity checks the AI, TTS, and STT contracts without exposing p
   assert.match(calls[0].init.headers.Authorization, /^Bearer /);
   assert.equal(calls[1].init.headers["api-key"], "test-mimo-key");
   assert.match(calls[2].init.body, /data:audio\/wav;base64,/);
+  assert.match(calls[2].init.body, /"model":"mimo-v2\.5-asr"/);
+  assert.match(calls[2].init.body, /"asr_options":\{"language":"zh"\}/);
 });
 
 test("MiMo connectivity rejects non-HTTPS endpoints before making a request", async () => {
