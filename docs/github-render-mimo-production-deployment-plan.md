@@ -309,7 +309,7 @@ Render Secret Files 在运行时可用，并可通过环境组受控共享；密
 
 ### 6.1 API 服务
 
-- Build：`corepack enable && pnpm install --frozen-lockfile --prod=false && pnpm --filter @rehab-platform/api build`
+- Build：`corepack enable && pnpm install --frozen-lockfile --prod=false && pnpm db:generate && pnpm --filter @rehab-platform/api build`
 - Pre-deploy：新增 `pnpm db:migrate:deploy`，内部使用 `prisma migrate deploy`
 - Start：`pnpm --filter @rehab-platform/api start:prod`
 - Health check：`/health/ready`

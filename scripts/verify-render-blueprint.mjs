@@ -17,7 +17,7 @@ const keyValueServiceName = "rehab-platform-kv-prod";
 const databaseName = "rehab-platform-db-prod";
 
 const apiBuildCommand =
-  "corepack enable && pnpm install --frozen-lockfile --prod=false && pnpm --filter @rehab-platform/api build";
+  "corepack enable && pnpm install --frozen-lockfile --prod=false && pnpm db:generate && pnpm --filter @rehab-platform/api build";
 const webBuildCommand =
   "corepack enable && pnpm install --frozen-lockfile --prod=false && pnpm --filter @rehab-platform/web build";
 

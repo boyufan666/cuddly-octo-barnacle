@@ -604,7 +604,7 @@ log "Generating Prisma client..."
 pnpm db:generate >>"$START_LOG" 2>&1
 
 log "Applying database migrations..."
-if ! pnpm --filter @rehab-platform/db exec prisma migrate deploy >>"$START_LOG" 2>&1; then
+if ! pnpm db:migrate:deploy >>"$START_LOG" 2>&1; then
   fail "数据库迁移失败；请检查 $START_LOG，修复迁移问题后重新启动。"
 fi
 

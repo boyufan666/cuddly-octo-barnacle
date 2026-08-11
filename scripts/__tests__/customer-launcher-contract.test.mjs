@@ -727,7 +727,7 @@ pnpm() {
       record_launcher_event "compose-password:$POSTGRES_PASSWORD"
       return 0
       ;;
-    "db:generate"|"--filter @rehab-platform/db exec prisma migrate deploy")
+    "db:generate"|"db:migrate:deploy")
       return 0
       ;;
     "--filter @rehab-platform/api build")
@@ -1729,7 +1729,7 @@ test("complete customer launcher process migrates after infrastructure and befor
   const requiredOrder = [
     "pnpm:infra:up",
     "pnpm:db:generate",
-    "pnpm:--filter @rehab-platform/db exec prisma migrate deploy",
+    "pnpm:db:migrate:deploy",
     "pnpm:--filter @rehab-platform/api build",
     "pnpm:--filter @rehab-platform/web build",
     "start:api",

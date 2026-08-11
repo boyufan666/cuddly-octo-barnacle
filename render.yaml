@@ -22,7 +22,7 @@ services:
     region: singapore
     plan: starter
     autoDeployTrigger: "off"
-    buildCommand: corepack enable && pnpm install --frozen-lockfile --prod=false && pnpm --filter @rehab-platform/api build
+    buildCommand: corepack enable && pnpm install --frozen-lockfile --prod=false && pnpm db:generate && pnpm --filter @rehab-platform/api build
     preDeployCommand: pnpm db:migrate:deploy
     startCommand: pnpm --filter @rehab-platform/api start:prod
     healthCheckPath: /health/ready
@@ -174,7 +174,7 @@ services:
     region: singapore
     autoDeployTrigger: "off"
     schedule: "17 3 * * *"
-    buildCommand: corepack enable && pnpm install --frozen-lockfile --prod=false && pnpm --filter @rehab-platform/api build
+    buildCommand: corepack enable && pnpm install --frozen-lockfile --prod=false && pnpm db:generate && pnpm --filter @rehab-platform/api build
     startCommand: pnpm --filter @rehab-platform/api telemetry:retention
     envVars:
       - key: NODE_ENV

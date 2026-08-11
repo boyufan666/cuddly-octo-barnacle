@@ -29,6 +29,20 @@ test("parses and validates the production Render Blueprint with Ruby Psych", () 
   }
   assert.deepEqual(validateRenderBlueprint(parsed), []);
   assert.deepEqual(verifyRenderBlueprint(), parsed);
+
+  for (const name of [
+    "rehab-platform-api-prod",
+    "rehab-platform-provider-telemetry-retention-prod",
+  ]) {
+    const service = parsed.services.find((entry) => entry.name === name);
+    assert.ok(service);
+    const generateIndex = service.buildCommand.indexOf("pnpm db:generate");
+    const buildIndex = service.buildCommand.indexOf(
+      "pnpm --filter @rehab-platform/api build",
+    );
+    assert.ok(generateIndex >= 0, `${name} must generate Prisma Client`);
+    assert.ok(generateIndex < buildIndex, `${name} must generate before build`);
+  }
 });
 
 test("fails instead of falling back when Ruby Psych rejects malformed YAML", () => {
