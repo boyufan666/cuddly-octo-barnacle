@@ -18,6 +18,19 @@ const RENDER_SECRET_DIRECTORY = "/etc/secrets";
 const PRODUCTION_BOOTSTRAP_LOCK = "rehab-platform-production-bootstrap-v1";
 const ACCOUNT_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{2,63}$/;
 const ORGANIZATION_CODE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{2,63}$/;
+const PRODUCTION_ROLE_DEFINITIONS: Array<{
+  code: RoleCode;
+  name: string;
+  level: number;
+}> = [
+  { code: "patient", name: "患者", level: 10 },
+  { code: "caregiver", name: "家属", level: 20 },
+  { code: "doctor", name: "医师", level: 30 },
+  { code: "admin", name: "管理员", level: 40 },
+  { code: "admin_super", name: "超级管理员", level: 43 },
+  { code: "admin_operator", name: "普通运营", level: 41 },
+  { code: "admin_auditor", name: "只读审计", level: 40 },
+];
 
 export type ProductionBootstrapConfig = {
   organization: {
@@ -28,12 +41,12 @@ export type ProductionBootstrapConfig = {
   administrator: {
     account: string;
     displayName: string;
-    mobilePhone: string;
+    mobilePhone: string | null;
   };
   doctor: {
     account: string;
     displayName: string;
-    mobilePhone: string;
+    mobilePhone: string | null;
     title: string;
     department: string;
   };
@@ -170,7 +183,9 @@ function parsePerson(
   const result = {
     account,
     displayName: requireText(person.displayName, `${label}.displayName`),
-    mobilePhone: requireText(person.mobilePhone, `${label}.mobilePhone`, 32),
+    mobilePhone: person.mobilePhone === null
+      ? null
+      : requireText(person.mobilePhone, `${label}.mobilePhone`, 32),
   };
   if (label === "doctor") {
     return {
@@ -310,10 +325,9 @@ async function ensureProductionUser(
       mobilePhoneLookup: true,
     },
   });
-  const mobilePhoneLookup = createPhoneLookupHmac(
-    input.mobilePhone,
-    encryptionKey.key,
-  );
+  const mobilePhoneLookup = input.mobilePhone === null
+    ? null
+    : createPhoneLookupHmac(input.mobilePhone, encryptionKey.key);
   if (existing) {
     if (
       existing.accountStatus !== "active" ||
@@ -349,7 +363,7 @@ async function ensureProductionUser(
       id,
       account: input.account,
       identityEnvelope: encryptSensitiveJson(
-        { displayName: input.displayName },
+        { displayName: input.displayName, mobilePhone: input.mobilePhone },
         { tableName: "user", recordId: id, fieldName: "identityEnvelope" },
         encryptionKey,
       ),
@@ -420,16 +434,9 @@ export async function bootstrapProduction(
       "SELECT pg_advisory_xact_lock(hashtext($1))",
       PRODUCTION_BOOTSTRAP_LOCK,
     );
-    await ensureRoleDefinition(transaction, {
-      code: "admin_super",
-      name: "超级管理员",
-      level: 43,
-    });
-    await ensureRoleDefinition(transaction, {
-      code: "doctor",
-      name: "医师",
-      level: 30,
-    });
+    for (const role of PRODUCTION_ROLE_DEFINITIONS) {
+      await ensureRoleDefinition(transaction, role);
+    }
 
     const organization = await transaction.organization.upsert({
       where: { code: input.config.organization.code },

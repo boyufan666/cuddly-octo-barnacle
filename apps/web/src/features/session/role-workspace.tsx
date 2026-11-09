@@ -112,6 +112,8 @@ import {
 } from "@/features/session/role-navigation";
 import {
   adminWorkspaceFromNavId,
+  canRecommendRehabPlan,
+  canUsePatientAiAssessment,
   caregiverWorkspaceSectionFromNavId,
   doctorWorkspaceFromNavId,
   gameBuildStatusLabel,
@@ -119,6 +121,8 @@ import {
   hasAdminPermission,
   isPatientWorkspaceScreen,
   mergeCollectionConditions,
+  resolveAiAssessmentRoute,
+  resolveRoleWorkspaceAiAssessmentRoute,
   roleLabel,
   upsertCollectionCondition,
 } from "@/features/session/role-workspace-model";
@@ -167,8 +171,6 @@ import { ApiError, api } from "@/lib/api";
 import {
   applyAiAssessmentDraftToForm,
   applySpeechAiAssessmentDraftToForm,
-  buildAd8AssessmentSubmission,
-  buildAssessmentSubmission,
   createStagedAiAssessmentDraft,
   isStagedAiAssessmentDraftForRequest,
   type Ad8AssessmentFormState,
@@ -203,6 +205,7 @@ import {
 } from "@/features/session/action-status";
 import { createRoleWorkspaceFormUpdaters } from "@/features/session/role-workspace-form-updaters";
 import { deriveRoleWorkspaceTrainingContext } from "@/features/session/role-workspace-training-context";
+import { createAiConversationActions } from "@/features/session/ai-conversation-actions";
 import {
   requestAiAssessmentDraft,
   requestAiConversationMessage,
@@ -248,6 +251,32 @@ export {
 };
 export type { PatientTrainingLifecycleClaim };
 
+type InteractiveTtsSpeechScenario =
+  | "assessment_prompt"
+  | "training_encouragement";
+
+const interactiveTtsSpeechOutputCopy = {
+  assessment_prompt: {
+    consentRequiredMessage:
+      "请先签署评估数据处理授权，再生成题目播报语音。",
+    label: "题目播报",
+    playedMessage: "题目播报语音已播放，可继续完成评估。",
+  },
+  training_encouragement: {
+    consentRequiredMessage:
+      "请先签署智能服务数据处理授权，再生成训练鼓励语音。",
+    label: "训练鼓励",
+    playedMessage: "训练鼓励语音已播放，请继续按屏幕提示完成训练。",
+  },
+} satisfies Record<
+  InteractiveTtsSpeechScenario,
+  {
+    consentRequiredMessage: string;
+    label: string;
+    playedMessage: string;
+  }
+>;
+
 export function RoleWorkspace() {
   const [active, setActiveScreen] = useState<ScreenId>("login");
   const [activeRoleNavId, setActiveRoleNavId] =
@@ -266,8 +295,9 @@ export function RoleWorkspace() {
     useState<AssessmentFormState>(emptyAssessmentForm);
   const [aiConversationForm, setAiConversationForm] =
     useState<AiConversationFormState>(emptyAiConversationForm);
-  const [ad8AssessmentForm, setAd8AssessmentForm] =
-    useState<Ad8AssessmentFormState>(emptyAd8AssessmentForm);
+  const [, setAd8AssessmentForm] = useState<Ad8AssessmentFormState>(
+    emptyAd8AssessmentForm,
+  );
   const [registrationRequestForm, setRegistrationRequestForm] =
     useState<RegistrationRequestFormState>(emptyRegistrationRequestForm);
   const [caregiverAccountForm, setCaregiverAccountForm] =
@@ -654,6 +684,23 @@ export function RoleWorkspace() {
       setDataError,
     );
 
+  const {
+    handleCreateAssessmentFromAiConversation,
+    handleReviewAiConversationFromDoctor,
+  } = createAiConversationActions({
+    aiConversations: data.aiConversations,
+    captureRoleActionIdentity,
+    handleRequestError,
+    isRoleActionIdentityCurrent,
+    patient: data.patient,
+    primaryRole,
+    reloadRoleData,
+    session,
+    setActionStatus,
+    setDataError,
+    setDataStatus,
+  });
+
   function handleRoleNavigationChange(
     screen: ScreenId,
     navId: RoleNavigationId,
@@ -674,7 +721,10 @@ export function RoleWorkspace() {
     activePatientIdRef.current = patientId;
     setSelectedPatientId(patientId);
     clearPatientScopedState();
-    await reloadRoleData(session, patientId);
+    setActionStatus("正在加载患者临床资料");
+    if (await reloadRoleData(session, patientId)) {
+      setActionStatus("患者已选中，临床摘要和相关资料已刷新。");
+    }
   }
 
   const formUpdaters = createRoleWorkspaceFormUpdaters({
@@ -704,6 +754,15 @@ export function RoleWorkspace() {
     value: string,
   ) {
     formUpdaters.updateAssessmentForm(field, value);
+  }
+
+  function requireCurrentAiAssessmentRoute(form: AssessmentFormState) {
+    return resolveRoleWorkspaceAiAssessmentRoute({
+      formAssessmentType: form.assessmentType,
+      formRiskLevel: form.riskLevel || undefined,
+      assessments: data.assessments,
+      patientRiskGrades: data.patient?.riskGrades,
+    });
   }
 
   async function handleRefreshAuditLogs(filters: AuditLogFilters) {
@@ -912,89 +971,6 @@ export function RoleWorkspace() {
     }
   }
 
-  async function handleCreateAssessment(form: AssessmentFormState) {
-    if (!session || !data.patient) return;
-    const actionIdentity = captureRoleActionIdentity();
-
-    let payload: ReturnType<typeof buildAssessmentSubmission>;
-
-    try {
-      payload = buildAssessmentSubmission({
-        patientId: data.patient.id,
-        reviewerUserId: session.user.id,
-        reviewedAt: new Date().toISOString(),
-        form,
-      });
-    } catch (error) {
-      handleRequestError(error, "结构化评估写入失败");
-      return;
-    }
-
-    startBusyAction("assessment");
-    setDataError(null);
-    setActionStatus("正在写入结构化评估记录");
-
-    try {
-      await api.createAssessment(payload);
-      if (!isRoleActionIdentityCurrent(actionIdentity)) return;
-      if (!(await reloadRoleData(session, data.patient.id))) return;
-      setAssessmentForm(emptyAssessmentForm);
-      setAd8AssessmentForm(emptyAd8AssessmentForm);
-      setActionStatus(
-        form.aiDraftEvidence
-          ? "智能评估建议已由医生复核，并保存为正式评估记录。"
-          : "结构化评估已保存，风险评级与分析摘要已刷新。",
-      );
-      setActive("match");
-    } catch (error) {
-      if (!isRoleActionIdentityCurrent(actionIdentity)) return;
-      handleRequestError(error, "结构化评估写入失败");
-    } finally {
-      if (isRoleActionIdentityCurrent(actionIdentity)) {
-        finishBusyAction("assessment");
-      }
-    }
-  }
-
-  async function handleCreateAd8Assessment(form: Ad8AssessmentFormState) {
-    if (!session || !data.patient) return;
-    const actionIdentity = captureRoleActionIdentity();
-
-    let payload: ReturnType<typeof buildAd8AssessmentSubmission>;
-
-    try {
-      payload = buildAd8AssessmentSubmission({
-        patientId: data.patient.id,
-        form,
-      });
-    } catch (error) {
-      handleRequestError(error, "AD-8 评估写入失败");
-      return;
-    }
-
-    startBusyAction("assessment");
-    setDataError(null);
-    setActionStatus("正在保存 AD-8 照护者访谈记录");
-
-    try {
-      await api.createAssessment(payload);
-      if (!isRoleActionIdentityCurrent(actionIdentity)) return;
-      if (!(await reloadRoleData(session, data.patient.id))) return;
-      setAd8AssessmentForm(emptyAd8AssessmentForm);
-      setActionStatus(
-        "AD-8 照护者访谈已保存为正式筛查记录，风险评级与后续方案条件已刷新。",
-      );
-      setActive("match");
-    } catch (error) {
-      if (!isRoleActionIdentityCurrent(actionIdentity)) return;
-      handleRequestError(error, "AD-8 评估写入失败");
-    } finally {
-      if (isRoleActionIdentityCurrent(actionIdentity)) {
-        finishBusyAction("assessment");
-      }
-    }
-  }
-
   async function handleCreateAiAssessmentDraft(form: AssessmentFormState) {
     if (!session || !data.patient) return;
     const actionIdentity = captureRoleActionIdentity();
@@ -1006,9 +982,17 @@ export function RoleWorkspace() {
       );
       return;
     }
+    let assessmentType: ReturnType<typeof requireCurrentAiAssessmentRoute>;
+    try {
+      assessmentType = requireCurrentAiAssessmentRoute(form);
+    } catch (error) {
+      handleRequestError(error, "待复核评估建议生成失败");
+      return;
+    }
     const draftRequest = {
       patientId: data.patient.id,
-      assessmentType: "MMSE/CDR",
+      assessmentType,
+      physicalConditions: form.physicalConditions,
       transcript,
     };
     if (
@@ -1079,6 +1063,13 @@ export function RoleWorkspace() {
   }
   async function handleStartAiConversation() {
     if (!session || !data.patient) return;
+    let assessmentType: ReturnType<typeof requireCurrentAiAssessmentRoute>;
+    try {
+      assessmentType = requireCurrentAiAssessmentRoute(assessmentForm);
+    } catch (error) {
+      handleRequestError(error, "智能对话创建失败");
+      return;
+    }
     const actionIdentity = captureRoleActionIdentity();
     startBusyAction("aiConversation");
     setDataError(null);
@@ -1086,9 +1077,19 @@ export function RoleWorkspace() {
     try {
       const conversation = await api.startAiConversation({
         patientId: data.patient.id,
-        assessmentType: "MMSE/CDR",
+        assessmentType,
+        physicalConditions: assessmentForm.physicalConditions,
       });
       if (!isRoleActionIdentityCurrent(actionIdentity)) return;
+      if (
+        conversation.patientId !== data.patient.id ||
+        resolveAiAssessmentRoute({
+          assessmentType: conversation.assessmentType,
+        }) !== assessmentType
+      ) {
+        throw new Error("智能对话返回的患者或评估路径与启动请求不一致。");
+      }
+      setAssessmentForm((current) => ({ ...current, assessmentType }));
       setAiConversationForm((current) => ({
         ...current,
         sessionId: conversation.id,
@@ -1129,6 +1130,23 @@ export function RoleWorkspace() {
       setDataError("请输入本轮问答内容后再发送。");
       return;
     }
+    const conversation = data.aiConversations?.find(
+      (item) => item.id === conversationId,
+    );
+    if (!conversation) {
+      setDataStatus("智能对话记录缺失");
+      setDataError("当前 sessionId 没有对应的智能对话记录，已阻止发送。");
+      return;
+    }
+    let assessmentType: ReturnType<typeof resolveAiAssessmentRoute>;
+    try {
+      assessmentType = resolveAiAssessmentRoute({
+        assessmentType: conversation.assessmentType,
+      });
+    } catch (error) {
+      handleRequestError(error, "智能对话发送失败");
+      return;
+    }
     startBusyAction("aiConversation");
     setDataError(null);
     setActionStatus("正在发送本轮智能对话");
@@ -1137,6 +1155,8 @@ export function RoleWorkspace() {
         registry: highCostRequestRegistryRef.current,
         patientId: data.patient.id,
         conversationId,
+        assessmentType,
+        physicalConditions: assessmentForm.physicalConditions,
         content,
       });
       if (!isRoleActionIdentityCurrent(actionIdentity)) return;
@@ -1226,10 +1246,12 @@ export function RoleWorkspace() {
       setDataError(error.message);
       throw error;
     }
+    const assessmentType = requireCurrentAiAssessmentRoute(assessmentForm);
     const speechTranscriptRequest =
       await buildAssessmentSpeechTranscriptRequest({
         patientId: data.patient.id,
-        assessmentType: "MMSE/CDR",
+        assessmentType,
+        physicalConditions: assessmentForm.physicalConditions,
         audioBlob,
         startedAtMs,
         endedAtMs,
@@ -1286,10 +1308,12 @@ export function RoleWorkspace() {
       setDataError(error.message);
       throw error;
     }
+    const assessmentType = requireCurrentAiAssessmentRoute(assessmentForm);
     const speechTranscriptRequest =
       await buildAssessmentSpeechTranscriptRequest({
         patientId: data.patient.id,
-        assessmentType: "MMSE/CDR",
+        assessmentType,
+        physicalConditions: assessmentForm.physicalConditions,
         audioBlob,
         startedAtMs,
         endedAtMs,
@@ -1304,6 +1328,7 @@ export function RoleWorkspace() {
       | {
           patientId: string;
           assessmentType: string;
+          physicalConditions: typeof assessmentForm.physicalConditions;
           transcript: string;
         }
       | undefined;
@@ -1323,7 +1348,10 @@ export function RoleWorkspace() {
       setActionStatus("语音转写已回填表单，正在生成待复核评估建议。");
       const transcribedDraftRequest = {
         patientId: data.patient.id,
-        assessmentType: "MMSE/CDR",
+        assessmentType: resolveAiAssessmentRoute({
+          assessmentType: transcript.assessmentType,
+        }),
+        physicalConditions: assessmentForm.physicalConditions,
         transcript: transcribedForm.transcript,
       };
       draftRequest = transcribedDraftRequest;
@@ -1388,23 +1416,30 @@ export function RoleWorkspace() {
       }
     }
   }
-  async function handleCreateTtsSpeechOutput(text: string) {
+  async function handleCreateTtsSpeechOutput(
+    text: string,
+    scenario: InteractiveTtsSpeechScenario,
+  ) {
     if (!session || !data.patient) {
       throw new Error("缺少登录会话或患者档案，不能生成语音输出。");
     }
     const actionIdentity = captureRoleActionIdentity();
+    const copy = interactiveTtsSpeechOutputCopy[scenario];
     const consentState = summarizePatientConsents(data.patient);
     if (!consentState.ai_processing) {
-      const error = new Error("请先签署评估数据处理授权，再生成题目播报语音。");
+      const error = new Error(copy.consentRequiredMessage);
       setDataStatus("语音输出被阻断");
       setDataError(error.message);
       throw error;
+    }
+    if (scenario === "training_encouragement" && !text.trim()) {
+      throw new Error("训练鼓励文本不能为空。");
     }
     const speechText = parseRequiredTrimmedText(text, "题目播报文本");
     const ttsRequest = {
       patientId: data.patient.id,
       text: speechText,
-      scenario: "assessment_prompt" as const,
+      scenario,
     };
     if (
       isStagedTtsSpeechOutputForRequest(
@@ -1418,14 +1453,14 @@ export function RoleWorkspace() {
         await playTtsSpeechOutputAudio(staged.output);
         if (!isRoleActionIdentityCurrent(actionIdentity)) return;
         setDataError(null);
-        setDataStatus("题目播报语音已播放");
-        setActionStatus("题目播报语音已播放，未再次调用服务。");
+        setDataStatus(`${copy.label}语音已播放`);
+        setActionStatus(`${copy.label}语音已播放，未再次调用服务。`);
       } catch (error) {
         if (!isRoleActionIdentityCurrent(actionIdentity)) return;
         handleRetainedHighCostResultError(
           error,
-          "题目播报语音已生成，未再次调用服务。请检查浏览器播放权限后再次点击播放。",
-          "题目播报语音等待播放",
+          `${copy.label}语音已生成，未再次调用服务。请检查浏览器播放权限后再次点击播放。`,
+          `${copy.label}语音等待播放`,
         );
         throw error;
       }
@@ -1433,7 +1468,11 @@ export function RoleWorkspace() {
     }
     startBusyAction("ttsSpeechOutput");
     setDataError(null);
-    setActionStatus("正在生成题目播报语音");
+    if (scenario === "assessment_prompt") {
+      setActionStatus("正在生成题目播报语音");
+    } else {
+      setActionStatus("正在生成训练鼓励语音");
+    }
     try {
       const output = await requestTtsSpeechOutput({
         registry: highCostRequestRegistryRef.current,
@@ -1446,7 +1485,8 @@ export function RoleWorkspace() {
       );
       await playTtsSpeechOutputAudio(output);
       if (!isRoleActionIdentityCurrent(actionIdentity)) return;
-      setActionStatus("题目播报语音已播放，可继续完成评估。");
+      setDataStatus(`${copy.label}语音已播放`);
+      setActionStatus(copy.playedMessage);
     } catch (error) {
       if (!isRoleActionIdentityCurrent(actionIdentity)) return;
       if (
@@ -1457,12 +1497,12 @@ export function RoleWorkspace() {
       ) {
         handleRetainedHighCostResultError(
           error,
-          "题目播报语音已生成，未再次调用服务。请检查浏览器播放权限后再次点击播放。",
-          "题目播报语音等待播放",
+          `${copy.label}语音已生成，未再次调用服务。请检查浏览器播放权限后再次点击播放。`,
+          `${copy.label}语音等待播放`,
         );
         throw error;
       }
-      handleRequestError(error, "题目播报语音生成失败");
+      handleRequestError(error, `${copy.label}语音生成失败`);
       throw error;
     } finally {
       if (isRoleActionIdentityCurrent(actionIdentity)) {
@@ -1756,7 +1796,8 @@ export function RoleWorkspace() {
   }
 
   async function handleRecommendPlan() {
-    if (!session || !data.patient) return;
+    if (!session || !data.patient || !canRecommendRehabPlan(primaryRole))
+      return;
     const actionIdentity = captureRoleActionIdentity();
 
     const readiness = buildPlanPrerequisiteState(data.patient, pendingPlan);
@@ -2753,6 +2794,10 @@ export function RoleWorkspace() {
             }}
             renderTrainingStage={(onResultReady) => (
               <PatientTrainingRuntimeStage
+                isTtsBusy={busyActions.has("ttsSpeechOutput")}
+                onCreateTtsSpeechOutput={({ scenario, text }) =>
+                  handleCreateTtsSpeechOutput(text, scenario)
+                }
                 onResultReady={onResultReady}
                 planItem={activePlanItem}
                 trainingSession={activeTrainingSession}
@@ -2787,8 +2832,6 @@ export function RoleWorkspace() {
         {active === "assessment" && primaryRole !== "doctor" && (
           <AssessmentScreen
             assessments={data.assessments}
-            onCreateAssessment={handleCreateAssessment}
-            onCreateAd8Assessment={handleCreateAd8Assessment}
             onCreateAiAssessmentDraft={handleCreateAiAssessmentDraft}
             onCreateAssessmentSpeechTranscript={
               handleCreateAssessmentSpeechTranscript
@@ -2796,7 +2839,9 @@ export function RoleWorkspace() {
             onCreateSpeechAiAssessmentDraft={
               handleCreateSpeechAiAssessmentDraft
             }
-            onCreateTtsSpeechOutput={handleCreateTtsSpeechOutput}
+            onCreateTtsSpeechOutput={(text) =>
+              handleCreateTtsSpeechOutput(text, "assessment_prompt")
+            }
             aiConversations={data.aiConversations}
             aiConversationForm={aiConversationForm}
             onAiConversationFormChange={formUpdaters.updateAiConversationForm}
@@ -2804,9 +2849,10 @@ export function RoleWorkspace() {
             onAppendAiConversationMessage={handleAppendAiConversationMessage}
             onCompleteAiConversation={handleCompleteAiConversation}
             assessmentForm={assessmentForm}
-            ad8AssessmentForm={ad8AssessmentForm}
             onAssessmentFormChange={updateAssessmentForm}
-            onAd8AssessmentFormChange={formUpdaters.updateAd8AssessmentForm}
+            onAssessmentPhysicalConditionsChange={
+              formUpdaters.updateAssessmentPhysicalConditions
+            }
             hasMicrophoneConsent={
               data.patient
                 ? Boolean(
@@ -2814,17 +2860,16 @@ export function RoleWorkspace() {
                   )
                 : false
             }
-            isBusy={busyActions.has("assessment")}
             isDraftBusy={busyActions.has("aiAssessmentDraft")}
             isSpeechBusy={busyActions.has("assessmentSpeechTranscript")}
             isSpeechAiDraftBusy={busyActions.has("speechAiAssessmentDraft")}
             isTtsBusy={busyActions.has("ttsSpeechOutput")}
             isAiConversationBusy={busyActions.has("aiConversation")}
             showTechnicalEvidence={showTechnicalEvidence}
-            canEditAssessment={!patientLikeShell}
+            canUseAiAssessment={canUsePatientAiAssessment(primaryRole)}
           />
         )}
-        {active === "match" && (
+        {active === "match" && canRecommendRehabPlan(primaryRole) && (
           <PlanSuggestionPage
             patient={data.patient}
             pendingPlan={pendingPlan}
@@ -2867,6 +2912,7 @@ export function RoleWorkspace() {
             active === "result") && (
             <DoctorWorkspaceContainer
               activeWorkspace={doctorWorkspaceFromNavId(activeNavId, active)}
+              aiConversations={data.aiConversations}
               patients={data.patients}
               patient={data.patient}
               collectionProtocols={data.collectionProtocols}
@@ -2874,7 +2920,9 @@ export function RoleWorkspace() {
               selectedPatientId={selectedPatientId}
               onSelectPatient={handleSelectPatient}
               onConfirmRisk={handleConfirmRisk}
+              onCreateAssessment={handleCreateAssessmentFromAiConversation}
               onReturnAssessment={handleReturnAssessment}
+              onReviewAiConversation={handleReviewAiConversationFromDoctor}
               isConfirmingRisk={busyActions.has("confirmRisk")}
               collectionBatchForm={collectionBatchForm}
               onCollectionBatchFormChange={
@@ -2889,6 +2937,11 @@ export function RoleWorkspace() {
               onReviewFormChange={formUpdaters.updateTrainingReviewForm}
               onSubmitTrainingReview={handleSubmitTrainingReview}
               isReviewingTraining={busyActions.has("reviewTraining")}
+              isReviewingRegistrationRequest={busyActions.has(
+                "reviewRegistrationRequest",
+              )}
+              registrationRequests={data.registrationRequests}
+              onReviewRegistrationRequest={handleReviewRegistrationRequest}
               onConfirmPlan={handleConfirmPlan}
               isConfirmingPlan={busyActions.has("confirmPlan")}
             />

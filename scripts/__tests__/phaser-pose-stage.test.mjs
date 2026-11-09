@@ -29,7 +29,11 @@ test("training page requires Phaser stage readiness before Phaser games start", 
 
   assert.match(runtimeSource, /PhaserPoseStage as TrainingMotionStage/);
   assert.match(gameContainerBlock, /<TrainingMotionStage/);
-  assert.match(gameContainerBlock, /requiresEnhancedStage && !motionStageReady/);
+  assert.match(gameContainerBlock, /requiresEnhancedStage/);
+  assert.match(
+    gameContainerBlock,
+    /!isMotionStageReadyForTraining\(motionStageReady, motionStageReadyRef\)/,
+  );
   assert.match(gameContainerBlock, /训练画面尚未就绪，不能开始本次训练。/);
   assert.doesNotMatch(gameContainerBlock, /fallback/i);
 });

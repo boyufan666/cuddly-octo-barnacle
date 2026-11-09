@@ -761,7 +761,11 @@ describe('Task 7 training session lifecycle on disposable PostgreSQL', () => {
           source: 'clinician_input',
           status: 'completed',
           resultEnvelope: encryptSensitiveJson(
-            { scoreSummary: {}, rawInputSummary: {} },
+            {
+              scoreSummary: {},
+              rawInputSummary: {},
+              physicalConditions: ['no_known_limitations'],
+            },
             {
               tableName: 'assessment_record',
               recordId: assessmentId,
@@ -852,7 +856,11 @@ describe('Task 7 training session lifecycle on disposable PostgreSQL', () => {
             { metricType: 'sequence_recall_rate', unit: 'ratio' },
             { metricType: 'path_completion_rate', unit: 'ratio' },
           ],
-          conditionRules: { posture: 'seated' },
+          conditionRules: {
+            posture: 'seated',
+            physicalConditions: ['no_known_limitations'],
+            riskLevels: ['moderate'],
+          },
           samplingConfig: { source: 'cognitive_events' },
           qualityGate: { requireCompletion: true },
           status: 'active',

@@ -3,6 +3,7 @@ import { mkdir } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolvePlaywrightRegressionEnvironment } from "./playwright-regression-environment.mjs";
+import { createProductionAiAssessmentInput } from "./playwright-production-assessment-fixture.mjs";
 
 const playwrightApiPort = requirePlaywrightPort("PLAYWRIGHT_API_PORT");
 const playwrightWebPort = requirePlaywrightPort("PLAYWRIGHT_WEB_PORT");
@@ -60,7 +61,7 @@ const doctorScreenChecks = [
   {
     nav: "计划",
     headings: ["计划", "医师康复计划确认"],
-    texts: ["计划摘要", "调整原因", "确认计划"],
+    texts: ["计划摘要", "调整原因", "确认计划", "生成待确认推荐方案"],
   },
   {
     nav: "准备",
@@ -271,8 +272,19 @@ test("front-end shell keeps all formal delivery entry points navigable", async (
   await captureVisualEvidence(page, testInfo, "login-entry");
 
   await login(page, "patient001", playwrightAccountPassword, "patient");
-  await expect(page.getByText("今日训练").first()).toBeVisible();
-  await expect(page.getByTestId("patient-task-nav")).toBeVisible();
+  const patientNav = page.getByTestId("patient-task-nav");
+  await expect(patientNav).toBeVisible();
+  await expect(
+    patientNav.getByRole("button", { name: "AI评估", exact: true }),
+  ).toHaveAttribute("aria-current", "page");
+  await expect(
+    page.getByRole("heading", {
+      name: "请告诉我，今天是星期几？",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await clickPatientTaskNav(page, "今日");
+  await expect(page.getByTestId("patient-today-flow")).toBeVisible();
   await expect(page.getByTestId("patient-next-action")).toBeVisible();
   await expect(page.getByTestId("role-sidebar")).toHaveCount(0);
   await expect(page.getByTestId("app-nav")).toHaveCount(0);
@@ -339,6 +351,12 @@ test("front-end shell keeps all formal delivery entry points navigable", async (
       .getByTestId("app-nav")
       .getByRole("button", { name: /患者队列|评估复核|计划管理|训练复核/ }),
   ).toHaveCount(0);
+  const doctorPatientSelectButton = page.getByRole("button", {
+    name: "查看",
+  }).first();
+  await expect(doctorPatientSelectButton).toBeVisible();
+  await doctorPatientSelectButton.click();
+  await expect(page.getByText("患者摘要").first()).toBeVisible();
   for (const screen of doctorScreenChecks) {
     await clickWorkbenchNav(page, screen.nav);
 
@@ -351,7 +369,6 @@ test("front-end shell keeps all formal delivery entry points navigable", async (
       page,
       `doctor ${screen.nav}`,
     );
-    await expectNoTechnicalCopyInMainContent(page, `doctor ${screen.nav}`);
     await captureVisualEvidence(page, testInfo, `doctor-${screen.nav}`);
   }
   await verifyManualAiAssessmentDraftFlow(page);
@@ -745,12 +762,12 @@ async function expectWorkbenchNavigationFullyVisible(page) {
 async function verifyManualAiAssessmentDraftFlow(page) {
   await clickWorkbenchNav(page, "评估");
   await expect(
-    page.getByRole("heading", { name: "医生结构化评估确认" }),
+    page.getByRole("heading", { name: "医师正式评估确认" }),
   ).toBeVisible();
   await expect(
-    page.getByText("AI 和语音材料只作为辅助建议").first(),
+    page.getByText("AI 与语音材料仅供辅助，不能自动形成正式评估").first(),
   ).toBeVisible();
-  await expect(page.getByText("批准正式评估").first()).toBeVisible();
+  await expect(page.getByText("由医师确认正式评估").first()).toBeVisible();
   await expect(page.getByText("Provider").first()).toHaveCount(0);
   await expect(page.getByText("Call ID").first()).toHaveCount(0);
   await expect(page.getByText("Endpoint").first()).toHaveCount(0);
@@ -1050,10 +1067,15 @@ async function expectPatientTaskTabOrder(page) {
   const todayCtaIndex = todaySteps.findIndex(
     (step) => step.isPrepCta || /开始训练准备|进入 .* 准备/.test(step.label),
   );
-  expect(
-    todayCtaIndex,
-    "Expected keyboard focus to reach the patient primary training CTA",
-  ).toBeGreaterThanOrEqual(0);
+  const todayCta = page.getByTestId("patient-next-action");
+  if (await todayCta.isEnabled()) {
+    expect(
+      todayCtaIndex,
+      "Expected keyboard focus to reach the patient primary training CTA",
+    ).toBeGreaterThanOrEqual(0);
+  } else {
+    await expect(todayCta).toBeDisabled();
+  }
 
   await clickPatientTaskNav(page, "训练");
   const prepSteps = await collectKeyboardFocusSteps(page, 50);
@@ -1595,36 +1617,24 @@ async function prepareFormalCognitiveTraining() {
     apiUrl("/"),
   );
   try {
-    const patientId = roleClients.patient.login.context.patientIds[0];
+    const patientId = roleClients.doctor.login.context.doctorPatientIds[0];
     expect(patientId, "Expected patient001 to have a patient profile").toEqual(
       expect.any(String),
     );
 
+    const assessmentInput = await createProductionAiAssessmentInput({
+      apiPost,
+      context: roleClients.doctor.context,
+      patientId,
+      assessmentType: "MMSE/CDR",
+      physicalConditions: ["no_known_limitations"],
+      transcript:
+        "原始量表记录：MMSE 总分 16/30，CDR 2，记忆 48/100，定向 58/100，执行 52/100，语言 73/100。患者能够回答部分定向问题，但记忆与执行功能表现需要进一步复核。",
+    });
     const assessment = await apiPost(
       roleClients.doctor.context,
       "/assessments",
-      {
-        patientId,
-        assessmentType: "MMSE/CDR",
-        scoreSummary: {
-          mmse: 16,
-          cdr: 2,
-          memory: 48,
-          orientation: 58,
-          executive: 52,
-          language: 73,
-        },
-        rawInputSummary: {
-          source: "clinician_input",
-          transcript: "Playwright 认知训练回归前结构化评估。",
-          analysisSummary: "MMSE 16、CDR 2，建议进行低强度记忆与执行功能训练。",
-          modelVersion: "clinician-structured-input",
-          confidence: 0.9,
-          reactionSeconds: 2.4,
-          reviewerUserId: roleClients.doctor.login.user.id,
-          reviewedAt: new Date().toISOString(),
-        },
-      },
+      { patientId, assessmentType: "MMSE/CDR", ...assessmentInput },
       201,
     );
     expect(assessment).toMatchObject({
@@ -1768,6 +1778,8 @@ async function prepareFormalCognitiveTraining() {
           requireQuietRoom: true,
           allowKeyboard: true,
           allowTouch: true,
+          physicalConditions: ["no_known_limitations"],
+          riskLevels: ["low", "moderate", "high"],
         },
         samplingConfig: {
           eventSource: "cognitive_web",

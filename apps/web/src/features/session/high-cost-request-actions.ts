@@ -5,6 +5,7 @@ import {
   type CurrentPageHighCostRequestRegistry,
 } from "@/lib/high-cost-request-intent";
 import type {
+  AssessmentPhysicalCondition,
   CreateAiAssessmentDraftRequest,
   CreateAssessmentSpeechTranscriptRequest,
   CreateTtsSpeechOutputRequest,
@@ -35,7 +36,11 @@ export async function requestAiAssessmentDraft({
     intent: await deriveCurrentPageHighCostRequestIntent({
       operation: "ai_assessment_draft",
       patientId: draftRequest.patientId,
-      fields: [draftRequest.assessmentType ?? "", draftRequest.transcript],
+      fields: [
+        draftRequest.assessmentType ?? "",
+        ...(draftRequest.physicalConditions ?? []),
+        draftRequest.transcript,
+      ],
     }),
     request: (idempotencyKey) =>
       api.createAiAssessmentDraft({ ...draftRequest, idempotencyKey }),
@@ -46,11 +51,15 @@ export async function requestAiConversationMessage({
   registry,
   patientId,
   conversationId,
+  assessmentType,
+  physicalConditions,
   content,
 }: {
   registry: CurrentPageHighCostRequestRegistry;
   patientId: string;
   conversationId: string;
+  assessmentType: string;
+  physicalConditions: AssessmentPhysicalCondition[];
   content: string;
 }) {
   return executeCurrentPageHighCostRequest({
@@ -58,13 +67,19 @@ export async function requestAiConversationMessage({
     intent: await deriveCurrentPageHighCostRequestIntent({
       operation: "ai_conversation_message",
       patientId,
-      fields: [conversationId, content],
+      fields: [
+        conversationId,
+        assessmentType,
+        ...physicalConditions,
+        content,
+      ],
     }),
     request: (idempotencyKey) =>
       api.appendAiConversationMessage(conversationId, {
         content,
         contentSnapshot: {
-          assessmentType: "MMSE/CDR",
+          assessmentType,
+          physicalConditions,
           enteredAt: new Date().toISOString(),
         },
         idempotencyKey,

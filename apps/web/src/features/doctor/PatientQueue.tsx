@@ -34,7 +34,15 @@ export function PatientQueue({
             选择患者后查看临床摘要、评估证据、康复计划和训练结果复核。
           </p>
         </div>
-        <StatusBadge status={patientsUnavailable ? "review" : loadedPatients.length ? "ready" : "review"}>
+        <StatusBadge
+          status={
+            patientsUnavailable
+              ? "review"
+              : loadedPatients.length
+                ? "ready"
+                : "review"
+          }
+        >
           {patientsUnavailable
             ? "患者列表未加载"
             : loadedPatients.length
@@ -177,14 +185,17 @@ export function PatientQueue({
 }
 
 function currentRisk(patient: PatientProfile): RiskGrade | undefined {
-  return patient.riskGrades.find((risk) => risk.isCurrent) ?? patient.riskGrades[0];
+  return patient.riskGrades.find((risk) => risk.isCurrent);
 }
 
 function currentPlan(patient: PatientProfile): RehabPlan | undefined {
   return (
-    patient.rehabPlans.find((plan) => plan.isCurrent) ??
-    patient.rehabPlans.find((plan) => plan.status === "pending_confirmation") ??
-    patient.rehabPlans[0]
+    patient.rehabPlans.find(
+      (plan) => plan.isCurrent && plan.status === "active",
+    ) ??
+    patient.rehabPlans.find(
+      (plan) => plan.status === "pending_confirm" && !plan.isCurrent,
+    )
   );
 }
 
@@ -203,9 +214,11 @@ function riskLabel(level?: RiskGrade["riskLevel"]) {
 }
 
 function planStatusLabel(status: string) {
-  if (status === "confirmed") return "已确认";
-  if (status === "pending_confirmation") return "待确认";
   if (status === "draft") return "草稿";
+  if (status === "pending_confirm") return "待医师确认";
+  if (status === "active") return "执行中";
+  if (status === "paused") return "已暂停";
+  if (status === "ended") return "已结束";
   return status;
 }
 

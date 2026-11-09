@@ -8,14 +8,23 @@ import type {
 } from "@/features/session/role-navigation";
 import type {
   AdminPermission,
+  AssessmentRecord,
   CollectionCondition,
+  RiskGrade,
   RoleCode,
 } from "@/types/api";
+import {
+  normalizeAiAssessmentType,
+  type SupportedAiAssessmentType,
+} from "@/lib/ai-assessment-draft";
 
 export function doctorWorkspaceFromNavId(
   navId: RoleNavigationId | null,
   activeScreen: ScreenId,
 ): DoctorWorkspaceId {
+  if (navId === "registrationReview") {
+    return "registration";
+  }
   if (navId === "assessmentReview" || activeScreen === "assessment") {
     return "assessment";
   }
@@ -63,6 +72,73 @@ export function isPatientWorkspaceScreen(
     active === "result" ||
     active === "profile"
   );
+}
+
+export function canUsePatientAiAssessment(role?: RoleCode) {
+  return role === "patient";
+}
+
+export function canRecommendRehabPlan(role?: RoleCode) {
+  return role === "doctor";
+}
+
+export const initialAiAssessmentType: SupportedAiAssessmentType = "MMSE/CDR";
+
+export function resolveAiAssessmentRoute({
+  assessmentType,
+  riskLevel,
+}: {
+  assessmentType?: string | null;
+  riskLevel?: RiskGrade["riskLevel"] | null;
+}): SupportedAiAssessmentType {
+  if (assessmentType?.trim()) {
+    return normalizeAiAssessmentType(assessmentType);
+  }
+  if (riskLevel === "high") return "AD-8";
+  if (riskLevel === "low" || riskLevel === "moderate") return "MMSE/CDR";
+  throw new Error(
+    "当前没有明确的 assessmentType 或风险等级，已阻止启动 AI 评估。",
+  );
+}
+
+export function resolveRoleWorkspaceAiAssessmentRoute({
+  formAssessmentType,
+  formRiskLevel,
+  assessments,
+  patientRiskGrades,
+}: {
+  formAssessmentType?: string | null;
+  formRiskLevel?: RiskGrade["riskLevel"] | null;
+  assessments?: AssessmentRecord[];
+  patientRiskGrades?: RiskGrade[];
+}): SupportedAiAssessmentType {
+  if (formRiskLevel) {
+    return resolveAiAssessmentRoute({ riskLevel: formRiskLevel });
+  }
+  if (formAssessmentType?.trim()) {
+    return resolveAiAssessmentRoute({ assessmentType: formAssessmentType });
+  }
+  const assessmentRisk = assessments
+    ?.flatMap((assessment) => assessment.riskGrades ?? [])
+    .find((risk) => risk.isCurrent);
+  if (assessmentRisk) {
+    return resolveAiAssessmentRoute({ riskLevel: assessmentRisk.riskLevel });
+  }
+  const patientRisk = patientRiskGrades?.find((risk) => risk.isCurrent);
+  if (patientRisk) {
+    return resolveAiAssessmentRoute({ riskLevel: patientRisk.riskLevel });
+  }
+  const typedAssessment = assessments?.find((assessment) =>
+    assessment.assessmentType.trim(),
+  );
+  if (typedAssessment) {
+    return resolveAiAssessmentRoute({
+      assessmentType: typedAssessment.assessmentType,
+    });
+  }
+  // 首次筛查没有历史风险或评估类型时，明确从 MMSE/CDR AI 初筛开始；
+  // 初筛返回高风险后，再由风险路由切换到 AD-8。
+  return initialAiAssessmentType;
 }
 
 export function upsertCollectionCondition(

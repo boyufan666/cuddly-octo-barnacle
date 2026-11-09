@@ -31,6 +31,14 @@ test("doctor workbench is split into focused clinical workspaces", async () => {
     join(rootDir, "apps/web/src/features/doctor/doctor-workbench-actions.ts"),
     "utf8",
   );
+  const aiConversationReviewSource = await readFile(
+    join(rootDir, "apps/web/src/features/doctor/AiConversationReviewPanel.tsx"),
+    "utf8",
+  );
+  const planEditorSource = await readFile(
+    join(rootDir, "apps/web/src/features/doctor/PlanEditor.tsx"),
+    "utf8",
+  );
   const doctorStatusSource = visibleStringLiterals(
     sliceBetween(
       workspaceSource,
@@ -104,8 +112,9 @@ test("doctor workbench is split into focused clinical workspaces", async () => {
   assert.match(patientsWorkspaceSlice, /<PatientClinicalSummary\b/);
   assert.doesNotMatch(
     patientsWorkspaceSlice,
-    /AssessmentReviewPanel|PlanEditor|DataCollectionReviewPanel|TrainingReviewQueue/,
+    /AiConversationReviewPanel|AssessmentReviewPanel|PlanEditor|DataCollectionReviewPanel|TrainingReviewQueue/,
   );
+  assert.match(assessmentWorkspaceSlice, /<AiConversationReviewPanel\b/);
   assert.match(assessmentWorkspaceSlice, /<AssessmentReviewPanel\b/);
   assert.doesNotMatch(
     assessmentWorkspaceSlice,
@@ -154,7 +163,44 @@ test("doctor workbench is split into focused clinical workspaces", async () => {
   assert.doesNotMatch(doctorContainerSource, /doctorWorkbenchActionState/);
   assert.match(doctorContainerSource, /buildDoctorWorkbenchModel/);
   assert.match(doctorActionSource, /buildDoctorTrainingReviewPayload/);
-  assert.match(doctorContainerSource, /buildDoctorPlanConfirmationPayload/);
+  assert.doesNotMatch(doctorContainerSource, /buildDoctorPlanConfirmationPayload/);
+  assert.match(planEditorSource, /export function buildPlanEditorConfirmationPayload/);
+  assert.match(
+    planEditorSource,
+    /onSubmit\(buildPlanEditorConfirmationPayload\(form, items\)\)/,
+  );
+  assert.match(
+    doctorContainerSource,
+    /aiConversations,\s*assessments: patient\?\.assessments,\s*patientId: patient\?\.id,\s*onCreateAssessment,\s*onReviewAiConversation/,
+  );
+  assert.match(
+    workspaceSource,
+    /onCreateAssessment=\{handleCreateAssessmentFromAiConversation\}/,
+  );
+  assert.match(
+    workspaceSource,
+    /onReviewAiConversation=\{handleReviewAiConversationFromDoctor\}/,
+  );
+  assert.match(
+    aiConversationReviewSource,
+    /session\.status === "pending_human_review"/,
+  );
+  assert.match(
+    aiConversationReviewSource,
+    /const assessment = await onCreateAssessment\(payload\)/,
+  );
+  assert.match(
+    aiConversationReviewSource,
+    /conclusion === "approved" && !isAssessmentSaved/,
+  );
+  assert.match(
+    aiConversationReviewSource,
+    /await onReviewAiConversation\(conversation\.id, \{/,
+  );
+  assert.match(
+    aiConversationReviewSource,
+    /正式评估仍需(?:使用下方既有评估复核按钮确认正式结论|在下方单独确认)/,
+  );
   assert.match(workspaceSource, /handleConfirmRisk/);
   assert.match(workspaceSource, /reviewAssessment/);
   assert.match(doctorActionSource, /buildDoctorAssessmentReviewPayload/);

@@ -64,7 +64,7 @@ test("local seed and patient API keep current plan selection deterministic", asy
   );
   const rehabPlanCurrentResetBlock = extractBlock(
     seedSource,
-    "await prisma.rehabPlan.updateMany({",
+    "await database.rehabPlan.updateMany({",
     "  const rehabPlanData = {",
   );
 

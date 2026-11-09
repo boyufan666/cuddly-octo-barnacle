@@ -1,4 +1,5 @@
 import { Prisma, PrismaClient, RoleCode } from "@prisma/client";
+import { hkdfSync, randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
@@ -12,6 +13,11 @@ import {
   encryptSensitiveJson,
   type SensitiveEncryptionKey,
 } from "../src/sensitive-encryption";
+import {
+  createProviderOperationRequestHmac,
+  createProviderOperationRequestIntentHmac,
+  createProviderOperationResponseHmac,
+} from "../src/provider-operation";
 
 const prisma = new PrismaClient();
 
@@ -21,6 +27,7 @@ const seedRiskGradeId = "6d8dfde7-6b95-4ca2-8d1a-2af98927b202";
 const seedAiAnalysisId = "6d8dfde7-6b95-4ca2-8d1a-2af98927b203";
 const seedTrainingResultId = "6d8dfde7-6b95-4ca2-8d1a-2af98927b204";
 const seedPatientProfileId = "6d8dfde7-6b95-4ca2-8d1a-2af98927b205";
+const seedProviderOperationId = "6d8dfde7-6b95-4ca2-8d1a-2af98927b206";
 const seedUserIds = {
   admin: "6d8dfde7-6b95-4ca2-8d1a-2af98927b101",
   operator001: "6d8dfde7-6b95-4ca2-8d1a-2af98927b102",
@@ -35,6 +42,126 @@ const seedCompletedAt = new Date("2026-04-27T01:40:00.000Z");
 const seedConfirmedAt = new Date("2026-04-27T01:45:00.000Z");
 const seedConsentGrantedAt = new Date("2026-04-27T01:00:00.000Z");
 const seedAuditCreatedAt = new Date("2026-04-27T02:10:00.000Z");
+const seedAssessmentSource = "production_ai_assessment" as const;
+const seedAssessmentTranscript = "今天是星期一。苹果、桌子、硬币。";
+const seedAssessmentAnalysisSummary =
+  "患者近记忆、反应和执行力存在波动，建议以近记忆、反应和执行力训练为主。";
+const seedAssessmentModelVersion = "mimo-v2.5";
+const seedAssessmentProvider = "xiaomi-mimo";
+const seedAssessmentEndpoint =
+  "https://token-plan-cn.xiaomimimo.com/v1/chat/completions";
+const seedAssessmentApiKeyRef = "secret-manager://rehab/mimo-api-key";
+const seedAssessmentPromptVersion = "cognitive-assessment-mimo-2026-07";
+const seedAssessmentProviderCallId = "ai-call-seed-20260824-001";
+const seedAssessmentProviderRequestKey = "seed-assessment-draft-001";
+const seedAssessmentProviderStartedAt = new Date(
+  "2026-04-27T01:32:00.000Z",
+);
+const seedAssessmentProviderRespondedAt = new Date(
+  "2026-04-27T01:33:00.000Z",
+);
+const seedAssessmentPhysicalConditions = ["no_known_limitations"];
+const seedAssessmentScoreSummary = {
+  mmse: 20,
+  cdr: 1,
+  memory: 48,
+  orientation: 58,
+  executive: 52,
+  language: 73,
+};
+const seedAssessmentConfidence = 0.84;
+const providerOperationHmacSalt = Buffer.from(
+  "rehab-provider-operation-hmac-v1",
+  "utf8",
+);
+const providerOperationRequestHmacInfo = Buffer.from(
+  "canonical-request-hmac",
+  "utf8",
+);
+const providerOperationIntentHmacInfo = Buffer.from(
+  "canonical-request-intent-hmac",
+  "utf8",
+);
+const providerOperationResponseHmacInfo = Buffer.from(
+  "canonical-response-hmac",
+  "utf8",
+);
+const seedProviderOperationOutboxEvents = [
+  "provider_operation_accepted",
+  "provider_operation_dispatching",
+  "provider_operation_finalized",
+] as const;
+const customerEmptyDatabaseConfirmation =
+  "I_UNDERSTAND_CUSTOMER_SEED_REQUIRES_A_NEW_EMPTY_DATABASE";
+const accountPattern = /^[A-Za-z0-9_.-]{4,32}$/;
+const organizationCodePattern = /^[A-Za-z0-9][A-Za-z0-9_-]{2,63}$/;
+
+type SeedMode = "main" | "customer";
+
+type SeedUserConfig = {
+  id: string;
+  account: string;
+  displayName: string;
+  mobilePhone: string;
+  passwordHash: string;
+};
+
+type SeedInitializationConfig = {
+  mode: SeedMode;
+  organization: {
+    code: string;
+    name: string;
+    type: string;
+  };
+  users: {
+    admin: SeedUserConfig;
+    operator: SeedUserConfig;
+    auditor: SeedUserConfig;
+    doctor: SeedUserConfig;
+    patient: SeedUserConfig;
+    caregiver: SeedUserConfig;
+  };
+  doctor: {
+    title: string;
+    department: string;
+  };
+  patient: {
+    id: string;
+    name: string;
+    gender: string;
+    age: number;
+    careDetails: Prisma.JsonObject;
+  };
+  caregiver: {
+    name: string;
+    relation: string;
+  };
+  authorization?: {
+    authorizedAt: Date;
+    consentGrantedAt: Date;
+    consentIds: Record<
+      | "privacy_policy"
+      | "ai_processing"
+      | "camera_capture"
+      | "microphone_capture"
+      | "caregiver_sharing",
+      string
+    >;
+    evidenceSnapshot: Prisma.JsonObject;
+  };
+};
+
+type CustomerInitializationInput = Omit<
+  SeedInitializationConfig,
+  "mode" | "users"
+> & {
+  users: {
+    [Key in keyof SeedInitializationConfig["users"]]: Omit<
+      SeedInitializationConfig["users"][Key],
+      "passwordHash"
+    > & { password: string };
+  };
+};
 
 const browserPoseRequiredMetrics = [
   { metricType: "reaction_time_ms", unit: "ms", min: 0, max: 60000 },
@@ -122,6 +249,372 @@ const formalCognitiveGameMetadata = {
   resultSchema: cognitiveResultSchema,
 };
 
+export function parseSeedMode(args: string[]): SeedMode {
+  if (args.length === 0) return "main";
+  if (args.length === 1 && args[0] === "--mode=customer") return "customer";
+  throw new Error(
+    "Unsupported seed arguments. Use the default main seed with no arguments or the customer entry with --mode=customer.",
+  );
+}
+
+function requireCustomerText(
+  environment: Record<string, string | undefined>,
+  name: string,
+  maximumLength = 128,
+) {
+  const value = environment[name];
+  if (!value || value.trim() !== value || value.length > maximumLength) {
+    throw new Error(
+      `${name} must be an exact non-empty value of at most ${maximumLength} characters.`,
+    );
+  }
+  return value;
+}
+
+function requireCustomerAccount(
+  environment: Record<string, string | undefined>,
+  name: string,
+) {
+  const value = requireCustomerText(environment, name, 32);
+  if (!accountPattern.test(value)) {
+    throw new Error(
+      `${name} must be 4-32 letters, numbers, underscores, dots, or hyphens.`,
+    );
+  }
+  return value;
+}
+
+function requireCustomerPassword(
+  environment: Record<string, string | undefined>,
+  name: string,
+) {
+  if (environment[name] === undefined) {
+    throw new Error(`Missing required environment variable: ${name}`);
+  }
+  return validateCredentialPassword(environment[name]);
+}
+
+export function requireCustomerInitializationInput(
+  environment: Record<string, string | undefined>,
+): CustomerInitializationInput {
+  if (
+    environment.CUSTOMER_SEED_CONFIRM_EMPTY_DATABASE !==
+    customerEmptyDatabaseConfirmation
+  ) {
+    throw new Error(
+      `Customer initialization requires CUSTOMER_SEED_CONFIRM_EMPTY_DATABASE=${customerEmptyDatabaseConfirmation}. It never merges into a populated database.`,
+    );
+  }
+
+  const organizationCode = requireCustomerText(
+    environment,
+    "CUSTOMER_ORG_CODE",
+    64,
+  );
+  if (!organizationCodePattern.test(organizationCode)) {
+    throw new Error("CUSTOMER_ORG_CODE has an unsupported format.");
+  }
+
+  const patientAgeValue = requireCustomerText(
+    environment,
+    "CUSTOMER_PATIENT_AGE",
+    3,
+  );
+  if (!/^(?:[1-9]|[1-9][0-9]|1[01][0-9]|120)$/.test(patientAgeValue)) {
+    throw new Error("CUSTOMER_PATIENT_AGE must be an integer from 1 to 120.");
+  }
+  const patientGender = requireCustomerText(
+    environment,
+    "CUSTOMER_PATIENT_GENDER",
+    16,
+  );
+  if (!new Set(["female", "male", "unspecified"]).has(patientGender)) {
+    throw new Error(
+      "CUSTOMER_PATIENT_GENDER must be female, male, or unspecified.",
+    );
+  }
+
+  const patientName = requireCustomerText(environment, "CUSTOMER_PATIENT_NAME");
+  const caregiverName = requireCustomerText(
+    environment,
+    "CUSTOMER_CAREGIVER_NAME",
+  );
+  const users = {
+    admin: {
+      id: randomUUID(),
+      account: requireCustomerAccount(environment, "CUSTOMER_ADMIN_ACCOUNT"),
+      displayName: requireCustomerText(
+        environment,
+        "CUSTOMER_ADMIN_DISPLAY_NAME",
+      ),
+      mobilePhone: requireCustomerText(
+        environment,
+        "CUSTOMER_ADMIN_MOBILE_PHONE",
+        32,
+      ),
+      password: requireCustomerPassword(
+        environment,
+        "CUSTOMER_ADMIN_INITIAL_PASSWORD",
+      ),
+    },
+    operator: {
+      id: randomUUID(),
+      account: requireCustomerAccount(environment, "CUSTOMER_OPERATOR_ACCOUNT"),
+      displayName: requireCustomerText(
+        environment,
+        "CUSTOMER_OPERATOR_DISPLAY_NAME",
+      ),
+      mobilePhone: requireCustomerText(
+        environment,
+        "CUSTOMER_OPERATOR_MOBILE_PHONE",
+        32,
+      ),
+      password: requireCustomerPassword(
+        environment,
+        "CUSTOMER_OPERATOR_INITIAL_PASSWORD",
+      ),
+    },
+    auditor: {
+      id: randomUUID(),
+      account: requireCustomerAccount(environment, "CUSTOMER_AUDITOR_ACCOUNT"),
+      displayName: requireCustomerText(
+        environment,
+        "CUSTOMER_AUDITOR_DISPLAY_NAME",
+      ),
+      mobilePhone: requireCustomerText(
+        environment,
+        "CUSTOMER_AUDITOR_MOBILE_PHONE",
+        32,
+      ),
+      password: requireCustomerPassword(
+        environment,
+        "CUSTOMER_AUDITOR_INITIAL_PASSWORD",
+      ),
+    },
+    doctor: {
+      id: randomUUID(),
+      account: requireCustomerAccount(environment, "CUSTOMER_DOCTOR_ACCOUNT"),
+      displayName: requireCustomerText(
+        environment,
+        "CUSTOMER_DOCTOR_DISPLAY_NAME",
+      ),
+      mobilePhone: requireCustomerText(
+        environment,
+        "CUSTOMER_DOCTOR_MOBILE_PHONE",
+        32,
+      ),
+      password: requireCustomerPassword(
+        environment,
+        "CUSTOMER_DOCTOR_INITIAL_PASSWORD",
+      ),
+    },
+    patient: {
+      id: randomUUID(),
+      account: requireCustomerAccount(environment, "CUSTOMER_PATIENT_ACCOUNT"),
+      displayName: patientName,
+      mobilePhone: requireCustomerText(
+        environment,
+        "CUSTOMER_PATIENT_MOBILE_PHONE",
+        32,
+      ),
+      password: requireCustomerPassword(
+        environment,
+        "CUSTOMER_PATIENT_INITIAL_PASSWORD",
+      ),
+    },
+    caregiver: {
+      id: randomUUID(),
+      account: requireCustomerAccount(
+        environment,
+        "CUSTOMER_CAREGIVER_ACCOUNT",
+      ),
+      displayName: caregiverName,
+      mobilePhone: requireCustomerText(
+        environment,
+        "CUSTOMER_CAREGIVER_MOBILE_PHONE",
+        32,
+      ),
+      password: requireCustomerPassword(
+        environment,
+        "CUSTOMER_CAREGIVER_INITIAL_PASSWORD",
+      ),
+    },
+  };
+
+  const accountValues = Object.values(users).map((user) => user.account);
+  if (new Set(accountValues).size !== accountValues.length) {
+    throw new Error("All CUSTOMER_*_ACCOUNT values must be different.");
+  }
+  const mobilePhoneValues = Object.values(users).map(
+    (user) => user.mobilePhone,
+  );
+  if (new Set(mobilePhoneValues).size !== mobilePhoneValues.length) {
+    throw new Error("All CUSTOMER_*_MOBILE_PHONE values must be different.");
+  }
+  const passwordValues = Object.values(users).map((user) => user.password);
+  if (new Set(passwordValues).size !== passwordValues.length) {
+    throw new Error(
+      "All CUSTOMER_*_INITIAL_PASSWORD values must be different.",
+    );
+  }
+
+  const medicalRecordNo = requireCustomerText(
+    environment,
+    "CUSTOMER_PATIENT_MEDICAL_RECORD_NO",
+    64,
+  );
+  return {
+    organization: {
+      code: organizationCode,
+      name: requireCustomerText(environment, "CUSTOMER_ORG_NAME"),
+      type: requireCustomerText(environment, "CUSTOMER_ORG_TYPE", 64),
+    },
+    users,
+    doctor: {
+      title: requireCustomerText(environment, "CUSTOMER_DOCTOR_TITLE"),
+      department: requireCustomerText(
+        environment,
+        "CUSTOMER_DOCTOR_DEPARTMENT",
+      ),
+    },
+    patient: {
+      id: randomUUID(),
+      name: patientName,
+      gender: patientGender,
+      age: Number(patientAgeValue),
+      careDetails: { healthMetrics: { medicalRecordNo } },
+    },
+    caregiver: {
+      name: caregiverName,
+      relation: requireCustomerText(
+        environment,
+        "CUSTOMER_CAREGIVER_RELATION",
+        64,
+      ),
+    },
+  };
+}
+
+function mainSeedInitializationConfig(
+  passwordHash: string,
+): SeedInitializationConfig {
+  return {
+    mode: "main",
+    organization: {
+      name: "大连理工康复示范中心",
+      code: "dlut-rehab",
+      type: "rehab_center",
+    },
+    users: {
+      admin: {
+        id: seedUserIds.admin,
+        account: "admin",
+        displayName: "平台超级管理员",
+        mobilePhone: "13900000000",
+        passwordHash,
+      },
+      operator: {
+        id: seedUserIds.operator001,
+        account: "operator001",
+        displayName: "运营管理员",
+        mobilePhone: "13900000002",
+        passwordHash,
+      },
+      auditor: {
+        id: seedUserIds.auditor001,
+        account: "auditor001",
+        displayName: "审计管理员",
+        mobilePhone: "13900000003",
+        passwordHash,
+      },
+      doctor: {
+        id: seedUserIds.doctor001,
+        account: "doctor001",
+        displayName: "王医生",
+        mobilePhone: "13900000001",
+        passwordHash,
+      },
+      patient: {
+        id: seedUserIds.patient001,
+        account: "patient001",
+        displayName: "李秀兰",
+        mobilePhone: "13800006721",
+        passwordHash,
+      },
+      caregiver: {
+        id: seedUserIds.caregiver001,
+        account: "caregiver001",
+        displayName: "李明",
+        mobilePhone: "13900008206",
+        passwordHash,
+      },
+    },
+    doctor: {
+      title: "主任康复治疗师",
+      department: "认知康复科",
+    },
+    patient: {
+      id: seedPatientProfileId,
+      name: "李秀兰",
+      gender: "female",
+      age: 72,
+      careDetails: {
+        healthMetrics: {
+          medicalRecordNo: seedMedicalRecordNo,
+          bloodPressure: "132/82",
+          heartRate: 76,
+          gaitRisk: "low",
+        },
+      },
+    },
+    caregiver: {
+      name: "李明",
+      relation: "儿子",
+    },
+    authorization: {
+      authorizedAt: new Date("2026-04-27T02:00:00.000Z"),
+      consentGrantedAt: seedConsentGrantedAt,
+      consentIds: {
+        privacy_policy: "seed-consent-privacy_policy",
+        ai_processing: "seed-consent-ai_processing",
+        camera_capture: "seed-consent-camera_capture",
+        microphone_capture: "seed-consent-microphone_capture",
+        caregiver_sharing: "seed-consent-caregiver_sharing",
+      },
+      evidenceSnapshot: {
+        source: "seed",
+        userAgent: "rehab-platform-seed",
+      },
+    },
+  };
+}
+
+async function customerSeedInitializationConfig(
+  input: CustomerInitializationInput,
+): Promise<SeedInitializationConfig> {
+  const [admin, operator, auditor, doctor, patient, caregiver] =
+    await Promise.all(
+      (
+        [
+          input.users.admin,
+          input.users.operator,
+          input.users.auditor,
+          input.users.doctor,
+          input.users.patient,
+          input.users.caregiver,
+        ] as const
+      ).map(async ({ password, ...user }) => ({
+        ...user,
+        passwordHash: await hashCredential(password),
+      })),
+    );
+  return {
+    ...input,
+    mode: "customer",
+    users: { admin, operator, auditor, doctor, patient, caregiver },
+  };
+}
+
 function loadRootEnv() {
   const envPath = resolve(__dirname, "../../..", ".env");
   if (!existsSync(envPath)) return;
@@ -164,6 +657,397 @@ export function seedEnvelope(
     ...envelope,
     aad: { ...envelope.aad },
   };
+}
+
+type SeedProviderOperationDatabase = Pick<
+  Prisma.TransactionClient,
+  "providerOperation" | "providerOperationOutbox"
+>;
+
+type SeedProviderOperationRow = {
+  id: string;
+  organizationId: string | null;
+  patientId: string | null;
+  actorUserId: string | null;
+  operation: string;
+  clientIdempotencyKey: string;
+  canonicalRequestHmac: string;
+  requestIntentHmac: string | null;
+  requestCiphertext: Prisma.JsonValue;
+  expectedBusinessObjectType: string | null;
+  expectedBusinessObjectId: string | null;
+  expectedBusinessObjectVersion: string | null;
+  provider: string;
+  modelVersion: string;
+  endpointHost: string;
+  apiKeyRef: string;
+  promptVersion: string | null;
+  providerCallId: string | null;
+  providerRequestId: string | null;
+  status: string;
+  responseCiphertext: Prisma.JsonValue | null;
+  responseHmac: string | null;
+  failureCategory: string | null;
+  providerStartedAt: Date | null;
+  providerRespondedAt: Date | null;
+  completedAt: Date | null;
+  finalizedAt: Date | null;
+};
+
+function providerOperationAad(
+  operationId: string,
+  fieldName: "requestCiphertext" | "responseCiphertext",
+) {
+  return {
+    tableName: "provider_operation",
+    recordId: operationId,
+    fieldName,
+  };
+}
+
+function deriveProviderOperationHmacKey(
+  encryptionKey: SensitiveEncryptionKey,
+  info: Buffer,
+) {
+  return Buffer.from(
+    hkdfSync(
+      "sha256",
+      encryptionKey.key,
+      providerOperationHmacSalt,
+      info,
+      32,
+    ),
+  );
+}
+
+function buildSeedAssessmentResultPayload(
+  reviewerUserId: string,
+): Prisma.JsonObject {
+  return {
+    scoreSummary: seedAssessmentScoreSummary,
+    physicalConditions: [...seedAssessmentPhysicalConditions],
+    rawInputSummary: {
+      source: seedAssessmentSource,
+      medicalRecordNo: seedMedicalRecordNo,
+      transcript: seedAssessmentTranscript,
+      analysisSummary: seedAssessmentAnalysisSummary,
+      modelVersion: seedAssessmentModelVersion,
+      confidence: seedAssessmentConfidence,
+      physicalConditions: [...seedAssessmentPhysicalConditions],
+      reactionDelaySeconds: 2.4,
+      evidence: {
+        provider: seedAssessmentProvider,
+        model: seedAssessmentModelVersion,
+        modelVersion: seedAssessmentModelVersion,
+        callId: seedAssessmentProviderCallId,
+        endpointRef: seedAssessmentEndpoint,
+        apiKeyRef: seedAssessmentApiKeyRef,
+        promptVersion: seedAssessmentPromptVersion,
+        calledAt: seedAssessmentProviderStartedAt.toISOString(),
+        humanReview: {
+          required: true,
+          reviewerUserId,
+          reviewedAt: seedConfirmedAt.toISOString(),
+          conclusion: "approved",
+        },
+      },
+    },
+  } as Prisma.JsonObject;
+}
+
+function buildSeedProviderOperationRequest(): Prisma.JsonObject {
+  return {
+    assessmentType: "MMSE/CDR",
+    transcript: seedAssessmentTranscript,
+    physicalConditions: [...seedAssessmentPhysicalConditions],
+  };
+}
+
+function buildSeedProviderOperationResponse(patientId: string): Prisma.JsonObject {
+  return {
+    providerContent: JSON.stringify({
+      scoreSummary: seedAssessmentScoreSummary,
+      analysisSummary: seedAssessmentAnalysisSummary,
+      confidence: seedAssessmentConfidence,
+      physicalConditions: seedAssessmentPhysicalConditions,
+    }),
+    result: {
+      patientId,
+      assessmentType: "MMSE/CDR",
+      status: "pending_human_review",
+      riskLevel: "moderate",
+      scoreSummary: seedAssessmentScoreSummary,
+      rawInputSummary: {
+        transcript: seedAssessmentTranscript,
+        analysisSummary: seedAssessmentAnalysisSummary,
+        modelVersion: seedAssessmentModelVersion,
+        confidence: seedAssessmentConfidence,
+        physicalConditions: [...seedAssessmentPhysicalConditions],
+      },
+      physicalConditions: [...seedAssessmentPhysicalConditions],
+    },
+  } as Prisma.JsonObject;
+}
+
+function buildSeedProviderOperation(
+  organizationId: string,
+  patientId: string,
+  actorUserId: string,
+  encryptionKey: SensitiveEncryptionKey,
+) {
+  const identity = {
+    organizationId,
+    patientId,
+    actorUserId,
+    operation: "assessment_draft" as const,
+    clientIdempotencyKey: seedAssessmentProviderRequestKey,
+  };
+  const request = buildSeedProviderOperationRequest();
+  const response = buildSeedProviderOperationResponse(patientId);
+  const requestCiphertext = encryptSensitiveJson(
+    request,
+    providerOperationAad(seedProviderOperationId, "requestCiphertext"),
+    encryptionKey,
+  );
+  const responseCiphertext = encryptSensitiveJson(
+    response,
+    providerOperationAad(seedProviderOperationId, "responseCiphertext"),
+    encryptionKey,
+  );
+
+  return {
+    id: seedProviderOperationId,
+    ...identity,
+    canonicalRequestHmac: createProviderOperationRequestHmac(
+      identity,
+      request,
+      deriveProviderOperationHmacKey(
+        encryptionKey,
+        providerOperationRequestHmacInfo,
+      ),
+    ),
+    requestIntentHmac: createProviderOperationRequestIntentHmac(
+      identity,
+      request,
+      deriveProviderOperationHmacKey(
+        encryptionKey,
+        providerOperationIntentHmacInfo,
+      ),
+    ),
+    requestCiphertext,
+    expectedBusinessObjectType: null,
+    expectedBusinessObjectId: null,
+    expectedBusinessObjectVersion: null,
+    provider: seedAssessmentProvider,
+    modelVersion: seedAssessmentModelVersion,
+    endpointHost: new URL(seedAssessmentEndpoint).host,
+    apiKeyRef: seedAssessmentApiKeyRef,
+    promptVersion: seedAssessmentPromptVersion,
+    providerCallId: seedAssessmentProviderCallId,
+    providerRequestId: null,
+    status: "completed",
+    responseCiphertext,
+    responseHmac: createProviderOperationResponseHmac(
+      seedProviderOperationId,
+      response,
+      deriveProviderOperationHmacKey(
+        encryptionKey,
+        providerOperationResponseHmacInfo,
+      ),
+    ),
+    failureCategory: null,
+    providerStartedAt: seedAssessmentProviderStartedAt,
+    providerRespondedAt: seedAssessmentProviderRespondedAt,
+    completedAt: seedAssessmentProviderRespondedAt,
+    finalizedAt: seedAssessmentProviderRespondedAt,
+  };
+}
+
+function assertSeedProviderOperationRow(
+  actual: SeedProviderOperationRow,
+  expected: ReturnType<typeof buildSeedProviderOperation>,
+  encryptionKey: SensitiveEncryptionKey,
+) {
+  for (const field of [
+    "id",
+    "organizationId",
+    "patientId",
+    "actorUserId",
+    "operation",
+    "clientIdempotencyKey",
+    "canonicalRequestHmac",
+    "requestIntentHmac",
+    "expectedBusinessObjectType",
+    "expectedBusinessObjectId",
+    "expectedBusinessObjectVersion",
+    "provider",
+    "modelVersion",
+    "endpointHost",
+    "apiKeyRef",
+    "promptVersion",
+    "providerCallId",
+    "providerRequestId",
+    "status",
+    "responseHmac",
+    "failureCategory",
+  ] as const) {
+    if (actual[field] !== expected[field]) {
+      throw new Error(`固定演示供应商账本字段 ${field} 不匹配，已拒绝覆盖。`);
+    }
+  }
+  for (const field of [
+    "providerStartedAt",
+    "providerRespondedAt",
+    "completedAt",
+    "finalizedAt",
+  ] as const) {
+    if (
+      actual[field]?.toISOString() !== expected[field]?.toISOString()
+    ) {
+      throw new Error(`固定演示供应商账本时间字段 ${field} 不匹配，已拒绝覆盖。`);
+    }
+  }
+
+  const request = decryptSensitiveJson(
+    actual.requestCiphertext,
+    providerOperationAad(seedProviderOperationId, "requestCiphertext"),
+    encryptionKey,
+  );
+  if (JSON.stringify(request) !== JSON.stringify(buildSeedProviderOperationRequest())) {
+    throw new Error("固定演示供应商账本请求证据不匹配，已拒绝覆盖。");
+  }
+  if (!actual.responseCiphertext || !actual.responseHmac) {
+    throw new Error("固定演示供应商账本响应证据缺失，已拒绝覆盖。");
+  }
+  const response = decryptSensitiveJson(
+    actual.responseCiphertext,
+    providerOperationAad(seedProviderOperationId, "responseCiphertext"),
+    encryptionKey,
+  );
+  if (
+    JSON.stringify(response) !==
+    JSON.stringify(buildSeedProviderOperationResponse(expected.patientId!))
+  ) {
+    throw new Error("固定演示供应商账本响应证据不匹配，已拒绝覆盖。");
+  }
+  const expectedResponseHmac = createProviderOperationResponseHmac(
+    seedProviderOperationId,
+    response,
+    deriveProviderOperationHmacKey(
+      encryptionKey,
+      providerOperationResponseHmacInfo,
+    ),
+  );
+  if (actual.responseHmac !== expectedResponseHmac) {
+    throw new Error("固定演示供应商账本响应 HMAC 不匹配，已拒绝覆盖。");
+  }
+}
+
+async function assertSeedProviderOperationOutbox(
+  database: SeedProviderOperationDatabase,
+) {
+  const events = await database.providerOperationOutbox.findMany({
+    where: { providerOperationId: seedProviderOperationId },
+    select: { eventType: true },
+  });
+  const actualEvents = new Set(events.map((event) => event.eventType));
+  for (const eventType of seedProviderOperationOutboxEvents) {
+    if (!actualEvents.has(eventType)) {
+      throw new Error(`固定演示供应商账本缺少 outbox 事件 ${eventType}。`);
+    }
+  }
+}
+
+async function ensureSeedProviderOperation(
+  database: SeedProviderOperationDatabase,
+  organizationId: string,
+  patientId: string,
+  actorUserId: string,
+  encryptionKey: SensitiveEncryptionKey,
+) {
+  const expected = buildSeedProviderOperation(
+    organizationId,
+    patientId,
+    actorUserId,
+    encryptionKey,
+  );
+  const existingByIdentity = await database.providerOperation.findFirst({
+    where: {
+      organizationId,
+      patientId,
+      actorUserId,
+      operation: "assessment_draft",
+      clientIdempotencyKey: seedAssessmentProviderRequestKey,
+    },
+    select: { id: true },
+  });
+  if (existingByIdentity && existingByIdentity.id !== seedProviderOperationId) {
+    throw new Error("固定演示供应商账本幂等键已绑定到其他记录，已拒绝覆盖。");
+  }
+  const existingByCall = await database.providerOperation.findMany({
+    where: {
+      patientId,
+      operation: "assessment_draft",
+      providerCallId: seedAssessmentProviderCallId,
+    },
+    select: { id: true },
+  });
+  if (
+    existingByCall.some((operation) => operation.id !== seedProviderOperationId)
+  ) {
+    throw new Error("固定演示供应商调用 ID 已绑定到其他记录，已拒绝覆盖。");
+  }
+
+  const existing = await database.providerOperation.findUnique({
+    where: { id: seedProviderOperationId },
+    select: {
+      id: true,
+      organizationId: true,
+      patientId: true,
+      actorUserId: true,
+      operation: true,
+      clientIdempotencyKey: true,
+      canonicalRequestHmac: true,
+      requestIntentHmac: true,
+      requestCiphertext: true,
+      expectedBusinessObjectType: true,
+      expectedBusinessObjectId: true,
+      expectedBusinessObjectVersion: true,
+      provider: true,
+      modelVersion: true,
+      endpointHost: true,
+      apiKeyRef: true,
+      promptVersion: true,
+      providerCallId: true,
+      providerRequestId: true,
+      status: true,
+      responseCiphertext: true,
+      responseHmac: true,
+      failureCategory: true,
+      providerStartedAt: true,
+      providerRespondedAt: true,
+      completedAt: true,
+      finalizedAt: true,
+    },
+  });
+  if (existing) {
+    assertSeedProviderOperationRow(existing, expected, encryptionKey);
+  } else {
+    await database.providerOperation.create({ data: expected });
+  }
+
+  for (const eventType of seedProviderOperationOutboxEvents) {
+    await database.providerOperationOutbox.upsert({
+      where: {
+        providerOperationId_eventType: {
+          providerOperationId: seedProviderOperationId,
+          eventType,
+        },
+      },
+      update: {},
+      create: { providerOperationId: seedProviderOperationId, eventType },
+    });
+  }
 }
 
 function verifySeedEnvelope(
@@ -294,7 +1178,52 @@ async function preflightExistingSeedEnvelopes(
   }
 }
 
+async function assertCustomerDatabaseIsEmpty(
+  database: Prisma.TransactionClient,
+) {
+  const tables = await database.$queryRaw<Array<{ tableName: string }>>`
+    SELECT tablename AS "tableName"
+      FROM pg_tables
+     WHERE schemaname = current_schema()
+       AND tablename <> '_prisma_migrations'
+     ORDER BY tablename
+  `;
+  for (const requiredTable of [
+    "role_definition",
+    "user",
+    "patient_profile",
+    "game_content",
+  ]) {
+    if (!tables.some((table) => table.tableName === requiredTable)) {
+      throw new Error(
+        `Customer initialization requires deployed Prisma migrations; missing table ${requiredTable}.`,
+      );
+    }
+  }
+
+  const populatedTables: string[] = [];
+  for (const { tableName } of tables) {
+    if (!/^[a-z][a-z0-9_]*$/.test(tableName)) {
+      throw new Error(
+        `Customer initialization cannot inspect unsupported table name: ${tableName}`,
+      );
+    }
+    const [row] = await database.$queryRawUnsafe<Array<{ hasRows: boolean }>>(
+      `SELECT EXISTS (SELECT 1 FROM "${tableName}" LIMIT 1) AS "hasRows"`,
+    );
+    if (row?.hasRows) populatedTables.push(tableName);
+  }
+  if (populatedTables.length > 0) {
+    throw new Error(
+      `Customer initialization requires a new empty database and will not merge, delete, or overwrite existing business data. Populated tables: ${populatedTables.join(
+        ", ",
+      )}`,
+    );
+  }
+}
+
 async function upsertEncryptedSeedUser(
+  database: Prisma.TransactionClient,
   input: {
     id: string;
     account: string;
@@ -304,7 +1233,7 @@ async function upsertEncryptedSeedUser(
   },
   encryptionKey: SensitiveEncryptionKey,
 ) {
-  const existing = await prisma.user.findUnique({
+  const existing = await database.user.findUnique({
     where: { account: input.account },
     select: { id: true },
   });
@@ -326,20 +1255,19 @@ async function upsertEncryptedSeedUser(
     passwordUpdatedAt: new Date(),
     passwordResetRequired: true,
   };
-  return prisma.user.upsert({
+  return database.user.upsert({
     where: { account: input.account },
     update: data,
     create: { id, account: input.account, ...data },
   });
 }
 
-async function main() {
-  loadRootEnv();
-  const encryptionKey = requireSensitiveBackfillKey(process.env);
-  const passwordHash = await hashCredential(requireSeedPassword());
-  await preflightExistingSeedEnvelopes(encryptionKey);
-
-  await prisma.roleDefinition.createMany({
+async function initializeSeed(
+  database: Prisma.TransactionClient,
+  config: SeedInitializationConfig,
+  encryptionKey: SensitiveEncryptionKey,
+) {
+  await database.roleDefinition.createMany({
     data: [
       { code: "patient", name: "患者", level: 10 },
       { code: "caregiver", name: "家属", level: 20 },
@@ -352,95 +1280,65 @@ async function main() {
     skipDuplicates: true,
   });
 
-  const organization = await prisma.organization.upsert({
-    where: { code: "dlut-rehab" },
+  const organization = await database.organization.upsert({
+    where: { code: config.organization.code },
     update: {},
-    create: {
-      name: "大连理工康复示范中心",
-      code: "dlut-rehab",
-      type: "rehab_center",
-    },
+    create: config.organization,
   });
 
   const adminUser = await upsertEncryptedSeedUser(
-    {
-      id: seedUserIds.admin,
-      account: "admin",
-      displayName: "平台超级管理员",
-      mobilePhone: "13900000000",
-      passwordHash,
-    },
+    database,
+    config.users.admin,
     encryptionKey,
   );
   const operatorUser = await upsertEncryptedSeedUser(
-    {
-      id: seedUserIds.operator001,
-      account: "operator001",
-      displayName: "运营管理员",
-      mobilePhone: "13900000002",
-      passwordHash,
-    },
+    database,
+    config.users.operator,
     encryptionKey,
   );
   const auditorUser = await upsertEncryptedSeedUser(
-    {
-      id: seedUserIds.auditor001,
-      account: "auditor001",
-      displayName: "审计管理员",
-      mobilePhone: "13900000003",
-      passwordHash,
-    },
+    database,
+    config.users.auditor,
     encryptionKey,
   );
   const doctorUser = await upsertEncryptedSeedUser(
-    {
-      id: seedUserIds.doctor001,
-      account: "doctor001",
-      displayName: "王医生",
-      mobilePhone: "13900000001",
-      passwordHash,
-    },
+    database,
+    config.users.doctor,
     encryptionKey,
   );
   const patientUser = await upsertEncryptedSeedUser(
-    {
-      id: seedUserIds.patient001,
-      account: "patient001",
-      displayName: "李秀兰",
-      mobilePhone: "13800006721",
-      passwordHash,
-    },
+    database,
+    config.users.patient,
     encryptionKey,
   );
   const caregiverUser = await upsertEncryptedSeedUser(
-    {
-      id: seedUserIds.caregiver001,
-      account: "caregiver001",
-      displayName: "李明",
-      mobilePhone: "13900008206",
-      passwordHash,
-    },
+    database,
+    config.users.caregiver,
     encryptionKey,
   );
 
-  const doctor = await prisma.doctorProfile.upsert({
+  const doctor = await database.doctorProfile.upsert({
     where: { userId: doctorUser.id },
     update: {},
     create: {
       userId: doctorUser.id,
       organizationId: organization.id,
-      title: "主任康复治疗师",
-      department: "认知康复科",
+      title: config.doctor.title,
+      department: config.doctor.department,
     },
   });
 
-  const existingPatient = await prisma.patientProfile.findUnique({
+  const existingPatient = await database.patientProfile.findUnique({
     where: { userId: patientUser.id },
     select: { id: true },
   });
-  const patientId = existingPatient?.id ?? seedPatientProfileId;
+  const patientId = existingPatient?.id ?? config.patient.id;
   const patientIdentityEnvelope = seedEnvelope(
-    { name: "李秀兰", gender: "female", age: 72 },
+    {
+      name: config.patient.name,
+      gender: config.patient.gender,
+      age: config.patient.age,
+    },
     "patient_profile",
     patientId,
     "identityEnvelope",
@@ -448,9 +1346,9 @@ async function main() {
   );
   const patientContactEnvelope = seedEnvelope(
     {
-      mobilePhone: "13800006721",
-      caregiverName: "李明",
-      caregiverPhone: "13900008206",
+      mobilePhone: config.users.patient.mobilePhone,
+      caregiverName: config.caregiver.name,
+      caregiverPhone: config.users.caregiver.mobilePhone,
     },
     "patient_profile",
     patientId,
@@ -458,20 +1356,13 @@ async function main() {
     encryptionKey,
   );
   const patientCareDetailsEnvelope = seedEnvelope(
-    {
-      healthMetrics: {
-        medicalRecordNo: seedMedicalRecordNo,
-        bloodPressure: "132/82",
-        heartRate: 76,
-        gaitRisk: "low",
-      },
-    },
+    config.patient.careDetails,
     "patient_profile",
     patientId,
     "careDetailsEnvelope",
     encryptionKey,
   );
-  const patient = await prisma.patientProfile.upsert({
+  const patient = await database.patientProfile.upsert({
     where: { userId: patientUser.id },
     update: {
       responsibleDoctorId: doctor.id,
@@ -530,7 +1421,7 @@ async function main() {
   ];
 
   for (const binding of roleBindings) {
-    await prisma.userRoleBinding.upsert({
+    await database.userRoleBinding.upsert({
       where: {
         userId_roleCode_relatedObjectId: {
           userId: binding.userId,
@@ -546,61 +1437,64 @@ async function main() {
     });
   }
 
-  await prisma.caregiverRelation.upsert({
-    where: {
-      caregiverUserId_patientId: {
+  if (config.authorization) {
+    // Only the isolated main seed carries demo authorization; customer setup
+    // must wait for real patient consent and caregiver authorization capture.
+    const authorization = config.authorization;
+    await database.caregiverRelation.upsert({
+      where: {
+        caregiverUserId_patientId: {
+          caregiverUserId: caregiverUser.id,
+          patientId: patient.id,
+        },
+      },
+      update: {},
+      create: {
         caregiverUserId: caregiverUser.id,
         patientId: patient.id,
-      },
-    },
-    update: {},
-    create: {
-      caregiverUserId: caregiverUser.id,
-      patientId: patient.id,
-      relation: "儿子",
-      authorizedAt: new Date("2026-04-27T02:00:00.000Z"),
-      scope: {
-        summary: true,
-        reminders: true,
-        progress: true,
-        rawAssessment: false,
-        planEdit: false,
-      },
-    },
-  });
-
-  for (const consentType of [
-    "privacy_policy",
-    "ai_processing",
-    "camera_capture",
-    "microphone_capture",
-    "caregiver_sharing",
-  ] as const) {
-    const consentData = {
-      patientId: patient.id,
-      subjectUserId: patientUser.id,
-      consentType,
-      consentVersion: "v1.2",
-      status: "granted" as const,
-      grantedAt: seedConsentGrantedAt,
-      revokedAt: null,
-      evidenceSnapshot: {
-        source: "seed",
-        userAgent: "rehab-platform-seed",
-      },
-    };
-    await prisma.consentRecord.upsert({
-      where: { id: `seed-consent-${consentType}` },
-      update: consentData,
-      create: {
-        id: `seed-consent-${consentType}`,
-        ...consentData,
+        relation: config.caregiver.relation,
+        authorizedAt: authorization.authorizedAt,
+        scope: {
+          summary: true,
+          reminders: true,
+          progress: true,
+          rawAssessment: false,
+          planEdit: false,
+        },
       },
     });
+
+    for (const consentType of [
+      "privacy_policy",
+      "ai_processing",
+      "camera_capture",
+      "microphone_capture",
+      "caregiver_sharing",
+    ] as const) {
+      const consentData = {
+        patientId: patient.id,
+        subjectUserId: patientUser.id,
+        consentType,
+        consentVersion: "v1.2",
+        status: "granted" as const,
+        grantedAt: authorization.consentGrantedAt,
+        revokedAt: null,
+        evidenceSnapshot: authorization.evidenceSnapshot,
+      };
+      const consentId = authorization.consentIds[consentType];
+      await database.consentRecord.upsert({
+        where: { id: consentId },
+        update: consentData,
+        create: {
+          id: consentId,
+          ...consentData,
+        },
+      });
+    }
   }
 
   const games = await Promise.all([
-    prisma.gameContent.upsert({
+    database.gameContent.upsert({
       where: { code: "rhythm_reach_3d" },
       update: {
         runtimeType: "unity_webgl",
@@ -693,7 +1587,7 @@ async function main() {
         status: "active",
       },
     }),
-    prisma.gameContent.upsert({
+    database.gameContent.upsert({
       where: { code: "garden_reach" },
       update: {
         runtimeType: "browser_pose_canvas",
@@ -754,7 +1648,7 @@ async function main() {
         ...formalBrowserPoseGameMetadata,
       },
     }),
-    prisma.gameContent.upsert({
+    database.gameContent.upsert({
       where: { code: "mirror_sequence" },
       update: {
         runtimeType: "browser_pose_canvas",
@@ -839,7 +1733,7 @@ async function main() {
         ...formalBrowserPoseGameMetadata,
       },
     }),
-    prisma.gameContent.upsert({
+    database.gameContent.upsert({
       where: { code: "nebula_sort" },
       update: {
         runtimeType: "browser_pose_canvas",
@@ -924,7 +1818,7 @@ async function main() {
         ...formalBrowserPoseGameMetadata,
       },
     }),
-    prisma.gameContent.upsert({
+    database.gameContent.upsert({
       where: { code: "balance_breath" },
       update: {
         runtimeType: "browser_pose_canvas",
@@ -1007,7 +1901,7 @@ async function main() {
         ...formalBrowserPoseGameMetadata,
       },
     }),
-    prisma.gameContent.upsert({
+    database.gameContent.upsert({
       where: { code: "bilateral_rhythm_sync" },
       update: {
         runtimeType: "browser_pose_canvas",
@@ -1086,7 +1980,7 @@ async function main() {
         ...formalBrowserPoseGameMetadata,
       },
     }),
-    prisma.gameContent.upsert({
+    database.gameContent.upsert({
       where: { code: "center_shift_bridge" },
       update: {
         runtimeType: "browser_pose_canvas",
@@ -1167,7 +2061,7 @@ async function main() {
         ...formalBrowserPoseGameMetadata,
       },
     }),
-    prisma.gameContent.upsert({
+    database.gameContent.upsert({
       where: { code: "orbital_trace_follow" },
       update: {
         runtimeType: "browser_pose_canvas",
@@ -1250,7 +2144,7 @@ async function main() {
         ...formalBrowserPoseGameMetadata,
       },
     }),
-    prisma.gameContent.upsert({
+    database.gameContent.upsert({
       where: { code: "memory_path" },
       update: {
         runtimeType: "cognitive_web",
@@ -1277,6 +2171,8 @@ async function main() {
           "路径完成",
           "低强度",
           "memory_sequence",
+          "safety:wheelchair_compatible",
+          "safety:upper_limb_limited_compatible",
         ],
         requiredMetrics: cognitiveRequiredMetrics,
         ...formalCognitiveGameMetadata,
@@ -1298,6 +2194,8 @@ async function main() {
           "路径完成",
           "低强度",
           "memory_sequence",
+          "safety:wheelchair_compatible",
+          "safety:upper_limb_limited_compatible",
         ],
         defaultDuration: 8,
         defaultDifficulty: "三步路径",
@@ -1315,137 +2213,270 @@ async function main() {
         ...formalCognitiveGameMetadata,
       },
     }),
-    prisma.gameContent.upsert({
-      where: { code: "memory_basket" },
-      update: {
-        runtimeType: "unity_webgl",
-        buildStatus: "pending_assets",
-        releaseChannel: "development",
-        supportsCamera: true,
-        supportsMicrophone: false,
-        supportedInputModes: ["camera_pose"],
-        trainingTargets: ["思维训练", "memory", "recognition"],
-        tags: [
-          "思维训练",
-          "purpose:risk_assessment",
-          "purpose:intervention",
-          "purpose:data_capture",
-          "风险评估辅助",
-          "干预训练",
-          "数据采集",
-          "近记忆",
-          "认知",
-          "低强度",
-        ],
-        requiredMetrics: [
-          { metricType: "selection_accuracy", unit: "ratio", min: 0, max: 1 },
-          { metricType: "memory_recall_rate", unit: "ratio", min: 0, max: 1 },
-        ],
-      },
-      create: {
-        code: "memory_basket",
-        name: "记忆果篮",
-        trainingTargets: ["思维训练", "memory", "recognition"],
-        tags: [
-          "思维训练",
-          "purpose:risk_assessment",
-          "purpose:intervention",
-          "purpose:data_capture",
-          "风险评估辅助",
-          "干预训练",
-          "数据采集",
-          "近记忆",
-          "认知",
-          "低强度",
-        ],
-        defaultDuration: 10,
-        defaultDifficulty: "4组",
-        runtimeType: "unity_webgl",
-        buildStatus: "pending_assets",
-        releaseChannel: "development",
-        supportsCamera: true,
-        supportsMicrophone: false,
-        supportedInputModes: ["camera_pose"],
-        requiredMetrics: [
-          { metricType: "selection_accuracy", unit: "ratio", min: 0, max: 1 },
-          { metricType: "memory_recall_rate", unit: "ratio", min: 0, max: 1 },
-        ],
-      },
-    }),
-    prisma.gameContent.upsert({
-      where: { code: "path_treasure" },
-      update: {
-        runtimeType: "unity_webgl",
-        buildStatus: "pending_assets",
-        releaseChannel: "development",
-        supportsCamera: true,
-        supportsMicrophone: false,
-        supportedInputModes: ["camera_pose"],
-        trainingTargets: ["思维训练", "executive", "planning"],
-        tags: [
-          "思维训练",
-          "purpose:risk_assessment",
-          "purpose:intervention",
-          "purpose:data_capture",
-          "风险评估辅助",
-          "干预训练",
-          "数据采集",
-          "执行力",
-          "路径规划",
-          "低强度",
-        ],
-        requiredMetrics: [
-          { metricType: "path_completion_rate", unit: "ratio", min: 0, max: 1 },
-          { metricType: "planning_latency_ms", unit: "ms", min: 0 },
-        ],
-      },
-      create: {
-        code: "path_treasure",
-        name: "路径寻宝",
-        trainingTargets: ["思维训练", "executive", "planning"],
-        tags: [
-          "思维训练",
-          "purpose:risk_assessment",
-          "purpose:intervention",
-          "purpose:data_capture",
-          "风险评估辅助",
-          "干预训练",
-          "数据采集",
-          "执行力",
-          "路径规划",
-          "低强度",
-        ],
-        defaultDuration: 6,
-        defaultDifficulty: "2级",
-        runtimeType: "unity_webgl",
-        buildStatus: "pending_assets",
-        releaseChannel: "development",
-        supportsCamera: true,
-        supportsMicrophone: false,
-        supportedInputModes: ["camera_pose"],
-        requiredMetrics: [
-          { metricType: "path_completion_rate", unit: "ratio", min: 0, max: 1 },
-          { metricType: "planning_latency_ms", unit: "ms", min: 0 },
-        ],
-      },
-    }),
+    ...(config.mode === "main"
+      ? [
+          database.gameContent.upsert({
+            where: { code: "memory_basket" },
+            update: {
+              runtimeType: "unity_webgl",
+              buildStatus: "pending_assets",
+              releaseChannel: "development",
+              supportsCamera: true,
+              supportsMicrophone: false,
+              supportedInputModes: ["camera_pose"],
+              trainingTargets: ["思维训练", "memory", "recognition"],
+              tags: [
+                "思维训练",
+                "purpose:risk_assessment",
+                "purpose:intervention",
+                "purpose:data_capture",
+                "风险评估辅助",
+                "干预训练",
+                "数据采集",
+                "近记忆",
+                "认知",
+                "低强度",
+              ],
+              requiredMetrics: [
+                {
+                  metricType: "selection_accuracy",
+                  unit: "ratio",
+                  min: 0,
+                  max: 1,
+                },
+                {
+                  metricType: "memory_recall_rate",
+                  unit: "ratio",
+                  min: 0,
+                  max: 1,
+                },
+              ],
+            },
+            create: {
+              code: "memory_basket",
+              name: "记忆果篮",
+              trainingTargets: ["思维训练", "memory", "recognition"],
+              tags: [
+                "思维训练",
+                "purpose:risk_assessment",
+                "purpose:intervention",
+                "purpose:data_capture",
+                "风险评估辅助",
+                "干预训练",
+                "数据采集",
+                "近记忆",
+                "认知",
+                "低强度",
+              ],
+              defaultDuration: 10,
+              defaultDifficulty: "4组",
+              runtimeType: "unity_webgl",
+              buildStatus: "pending_assets",
+              releaseChannel: "development",
+              supportsCamera: true,
+              supportsMicrophone: false,
+              supportedInputModes: ["camera_pose"],
+              requiredMetrics: [
+                {
+                  metricType: "selection_accuracy",
+                  unit: "ratio",
+                  min: 0,
+                  max: 1,
+                },
+                {
+                  metricType: "memory_recall_rate",
+                  unit: "ratio",
+                  min: 0,
+                  max: 1,
+                },
+              ],
+            },
+          }),
+          database.gameContent.upsert({
+            where: { code: "path_treasure" },
+            update: {
+              runtimeType: "unity_webgl",
+              buildStatus: "pending_assets",
+              releaseChannel: "development",
+              supportsCamera: true,
+              supportsMicrophone: false,
+              supportedInputModes: ["camera_pose"],
+              trainingTargets: ["思维训练", "executive", "planning"],
+              tags: [
+                "思维训练",
+                "purpose:risk_assessment",
+                "purpose:intervention",
+                "purpose:data_capture",
+                "风险评估辅助",
+                "干预训练",
+                "数据采集",
+                "执行力",
+                "路径规划",
+                "低强度",
+              ],
+              requiredMetrics: [
+                {
+                  metricType: "path_completion_rate",
+                  unit: "ratio",
+                  min: 0,
+                  max: 1,
+                },
+                { metricType: "planning_latency_ms", unit: "ms", min: 0 },
+              ],
+            },
+            create: {
+              code: "path_treasure",
+              name: "路径寻宝",
+              trainingTargets: ["思维训练", "executive", "planning"],
+              tags: [
+                "思维训练",
+                "purpose:risk_assessment",
+                "purpose:intervention",
+                "purpose:data_capture",
+                "风险评估辅助",
+                "干预训练",
+                "数据采集",
+                "执行力",
+                "路径规划",
+                "低强度",
+              ],
+              defaultDuration: 6,
+              defaultDifficulty: "2级",
+              runtimeType: "unity_webgl",
+              buildStatus: "pending_assets",
+              releaseChannel: "development",
+              supportsCamera: true,
+              supportsMicrophone: false,
+              supportedInputModes: ["camera_pose"],
+              requiredMetrics: [
+                {
+                  metricType: "path_completion_rate",
+                  unit: "ratio",
+                  min: 0,
+                  max: 1,
+                },
+                { metricType: "planning_latency_ms", unit: "ms", min: 0 },
+              ],
+            },
+          }),
+        ]
+      : []),
   ]);
 
-  const assessmentResultPayload = {
-    scoreSummary: {
-      mmse: 20,
-      cdr: 1,
-      memory: 48,
-      orientation: 58,
-      executive: 52,
-      language: 73,
+  const formalCollectionCondition = await database.collectionCondition.upsert({
+    where: { code: "standard_formal_collection" },
+    update: {
+      name: "标准正式训练采集条件",
+      description: "用于正式训练前的统一环境、设备与质量要求。",
+      environment: {
+        network: "online",
+        secureContext: true,
+        browserFamily: "chromium",
+      },
+      deviceRequirements: {
+        cameraForCameraGames: true,
+        microphone: false,
+      },
+      taskParameters: {
+        source: "clinician_approved_collection",
+        samplingWindowSeconds: 30,
+      },
+      qualityRules: {
+        minConfidence: 0.8,
+        invalidIfAbnormal: true,
+      },
+      status: "active",
+      createdByUserId: adminUser.id,
     },
-    rawInputSummary: {
-      medicalRecordNo: seedMedicalRecordNo,
-      transcript: "今天是星期一。苹果、桌子、硬币。",
-      reactionDelaySeconds: 2.4,
+    create: {
+      code: "standard_formal_collection",
+      name: "标准正式训练采集条件",
+      description: "用于正式训练前的统一环境、设备与质量要求。",
+      environment: {
+        network: "online",
+        secureContext: true,
+        browserFamily: "chromium",
+      },
+      deviceRequirements: {
+        cameraForCameraGames: true,
+        microphone: false,
+      },
+      taskParameters: {
+        source: "clinician_approved_collection",
+        samplingWindowSeconds: 30,
+      },
+      qualityRules: {
+        minConfidence: 0.8,
+        invalidIfAbnormal: true,
+      },
+      status: "active",
+      createdByUserId: adminUser.id,
     },
-  };
+  });
+
+  for (const game of games.filter(
+    (item) =>
+      item.status === "active" &&
+      item.buildStatus === "released" &&
+      item.releaseChannel === "production" &&
+      item.gameVersion,
+  )) {
+    const version = game.gameVersion as string;
+    const requiredConsentTypes = [
+      "privacy_policy",
+      "ai_processing",
+      ...(game.supportsCamera ? ["camera_capture"] : []),
+      ...(game.supportsMicrophone ? ["microphone_capture"] : []),
+    ];
+    const protocolData = {
+      conditionId: formalCollectionCondition.id,
+      gameContentId: game.id,
+      code: `formal-${game.code}`,
+      name: `${game.name}正式采集协议`,
+      version,
+      runtimeType: game.runtimeType,
+      requiredConsentTypes,
+      requiredInputModes: game.supportedInputModes,
+      requiredMetrics: (Array.isArray(game.requiredMetrics)
+        ? game.requiredMetrics
+        : []) as Prisma.InputJsonValue,
+      conditionRules: {
+        physicalConditions: ["no_known_limitations"],
+        riskLevels: ["low", "moderate", "high"],
+      },
+      samplingConfig: {
+        windowSeconds: 30,
+        minimumSamples: 1,
+      },
+      qualityGate: { minConfidence: 0.8 },
+      status: "active",
+      createdByUserId: adminUser.id,
+    };
+    await database.collectionProtocol.upsert({
+      where: {
+        code_version: {
+          code: protocolData.code,
+          version: protocolData.version,
+        },
+      },
+      update: protocolData,
+      create: protocolData,
+    });
+  }
+
+  if (config.mode === "customer") return;
+
+  await ensureSeedProviderOperation(
+    database,
+    organization.id,
+    patient.id,
+    doctorUser.id,
+    encryptionKey,
+  );
+
+  const assessmentResultPayload = buildSeedAssessmentResultPayload(
+    doctorUser.id,
+  );
   const assessmentResultEnvelope = seedEnvelope(
     assessmentResultPayload,
     "assessment_record",
@@ -1456,13 +2487,13 @@ async function main() {
   const assessmentData = {
     patientId: patient.id,
     assessmentType: "MMSE/CDR",
-    source: "seed_clinician_input",
-    status: "completed",
+    source: seedAssessmentSource,
+    status: "doctor_confirmed",
     resultEnvelope: assessmentResultEnvelope,
     startedAt: new Date("2026-04-27T01:30:00.000Z"),
     completedAt: seedCompletedAt,
   };
-  const assessment = await prisma.assessmentRecord.upsert({
+  const assessment = await database.assessmentRecord.upsert({
     where: { id: seedAssessmentId },
     update: assessmentData,
     create: {
@@ -1471,7 +2502,7 @@ async function main() {
     },
   });
 
-  await prisma.riskGradeRecord.updateMany({
+  await database.riskGradeRecord.updateMany({
     where: {
       patientId: patient.id,
       isCurrent: true,
@@ -1491,13 +2522,13 @@ async function main() {
     assessmentId: assessment.id,
     riskLevel: "moderate" as const,
     systemRiskLevel: "moderate" as const,
-    manualRiskLevel: null,
+    manualRiskLevel: "moderate" as const,
     isCurrent: true,
     reasonEnvelope: riskReasonEnvelope,
     confirmedById: doctorUser.id,
     confirmedAt: seedConfirmedAt,
   };
-  await prisma.riskGradeRecord.upsert({
+  await database.riskGradeRecord.upsert({
     where: { id: seedRiskGradeId },
     update: riskGradeData,
     create: {
@@ -1508,12 +2539,12 @@ async function main() {
 
   const aiInputSummary = {
     medicalRecordNo: seedMedicalRecordNo,
-    transcript: "今天是星期一。苹果、桌子、硬币。",
+    transcript: seedAssessmentTranscript,
     reactionDelaySeconds: 2.4,
   };
   const aiOutputSummary = {
     riskLevel: "moderate",
-    recommendation: "建议以近记忆、反应和执行力训练为主。",
+    recommendation: seedAssessmentAnalysisSummary,
   };
   const aiInputEnvelope = seedEnvelope(
     { inputSummary: aiInputSummary },
@@ -1534,12 +2565,12 @@ async function main() {
     assessmentId: assessment.id,
     trainingSessionId: null,
     analysisScene: "assessment_summary",
-    modelVersion: "Cog-MMSE-2026.04",
-    confidence: 0.84,
+    modelVersion: seedAssessmentModelVersion,
+    confidence: seedAssessmentConfidence,
     inputEnvelope: aiInputEnvelope,
     outputEnvelope: aiOutputEnvelope,
   };
-  await prisma.aiAnalysisRecord.upsert({
+  await database.aiAnalysisRecord.upsert({
     where: { id: seedAiAnalysisId },
     update: aiAnalysisData,
     create: {
@@ -1548,7 +2579,7 @@ async function main() {
     },
   });
 
-  await prisma.rehabPlan.updateMany({
+  await database.rehabPlan.updateMany({
     where: {
       patientId: patient.id,
       isCurrent: true,
@@ -1574,7 +2605,7 @@ async function main() {
       "依据 MMSE 反应和注意分项波动，训练优先覆盖上肢触达、反应速度与动作准确率。",
     confirmedAt: new Date("2026-04-27T01:50:00.000Z"),
   };
-  const rehabPlan = await prisma.rehabPlan.upsert({
+  const rehabPlan = await database.rehabPlan.upsert({
     where: { id: seedRehabPlanId },
     update: rehabPlanData,
     create: {
@@ -1592,7 +2623,7 @@ async function main() {
 
   const planItems = await Promise.all(
     releasedPlanGames.map((game, index) =>
-      prisma.rehabPlanItem.upsert({
+      database.rehabPlanItem.upsert({
         where: {
           rehabPlanId_gameContentId: {
             rehabPlanId: rehabPlan.id,
@@ -1649,7 +2680,7 @@ async function main() {
     adjustmentReason: "患者近期肩部不适，先降低上肢反应训练速度。",
     createdAt: new Date("2026-04-27T01:55:00.000Z"),
   };
-  await prisma.planAdjustmentRecord.upsert({
+  await database.planAdjustmentRecord.upsert({
     where: { id: seedPlanAdjustmentId },
     update: planAdjustmentData,
     create: {
@@ -1711,7 +2742,7 @@ async function main() {
     unityBuildVersion: rhythmRuntime.gameVersion,
     bridgeProtocolVersion: rhythmRuntime.bridgeProtocolVersion,
   };
-  const session = await prisma.trainingSession.upsert({
+  const session = await database.trainingSession.upsert({
     where: {
       patientId_idempotencyKey: {
         patientId: patient.id,
@@ -1725,7 +2756,7 @@ async function main() {
     },
   });
 
-  const existingTrainingResult = await prisma.trainingResult.findUnique({
+  const existingTrainingResult = await database.trainingResult.findUnique({
     where: { sessionId: session.id },
     select: { id: true },
   });
@@ -1775,7 +2806,7 @@ async function main() {
       difficultyLevel: 2,
     },
   };
-  await prisma.trainingResult.upsert({
+  await database.trainingResult.upsert({
     where: { sessionId: session.id },
     update: trainingResultData,
     create: { id: trainingResultId, ...trainingResultData },
@@ -1807,7 +2838,7 @@ async function main() {
       sampleCount: 86,
       rawSummary: { source: "seed_import" },
     };
-    await prisma.motionMetric.upsert({
+    await database.motionMetric.upsert({
       where: { id },
       update: metricData,
       create: {
@@ -1855,7 +2886,7 @@ async function main() {
     },
   ];
   for (const auditLog of auditLogs) {
-    await prisma.auditLog.upsert({
+    await database.auditLog.upsert({
       where: { id: auditLog.id },
       update: auditLog,
       create: auditLog,
@@ -1863,6 +2894,41 @@ async function main() {
   }
 
   console.log("Seed completed. Local initialization accounts are ready.");
+}
+
+async function main() {
+  loadRootEnv();
+  const mode = parseSeedMode(process.argv.slice(2));
+  const encryptionKey = requireSensitiveBackfillKey(process.env);
+
+  if (mode === "main") {
+    const passwordHash = await hashCredential(requireSeedPassword());
+    await preflightExistingSeedEnvelopes(encryptionKey);
+    await initializeSeed(
+      prisma,
+      mainSeedInitializationConfig(passwordHash),
+      encryptionKey,
+    );
+    return;
+  }
+
+  const config = await customerSeedInitializationConfig(
+    requireCustomerInitializationInput(process.env),
+  );
+  await prisma.$transaction(
+    async (database) => {
+      await assertCustomerDatabaseIsEmpty(database);
+      await initializeSeed(database, config, encryptionKey);
+    },
+    {
+      isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+      maxWait: 10_000,
+      timeout: 30_000,
+    },
+  );
+  console.log(
+    "Customer initialization completed on a new empty database. Accounts, patient profile, and the formal game library are ready; no patient consent or caregiver authorization was created, and no assessment, current risk, rehabilitation plan, or training record was created.",
+  );
 }
 
 if (require.main === module) {

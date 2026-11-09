@@ -13,6 +13,7 @@ import test from "node:test";
 import { resolvePlaywrightRegressionEnvironment } from "../playwright-regression-environment.mjs";
 import {
   cleanPlaywrightRegressionArtifacts,
+  collectPlaywrightProviderEnvironment,
   playwrightBusinessProjects,
   playwrightRegressionCommands,
   runPlaywrightRegression,
@@ -104,6 +105,7 @@ test("builds once and runs every browser project from an isolated reset and encr
     [
       "--filter @rehab-platform/web build",
       "--filter @rehab-platform/db build",
+      "--filter @rehab-platform/api build",
       ...playwrightBusinessProjects.flatMap((project) => [
         resetCommand,
         seedCommand,
@@ -118,7 +120,7 @@ test("builds once and runs every browser project from an isolated reset and encr
     playwrightBusinessProjects.length,
   );
   for (const [index, project] of playwrightBusinessProjects.entries()) {
-    const projectCommandIndex = 4 + index * 3;
+    const projectCommandIndex = 5 + index * 3;
     assert.equal(
       playwrightRegressionCommands[projectCommandIndex - 2].args.join(" "),
       resetCommand,
@@ -156,6 +158,25 @@ test("builds once and runs every browser project from an isolated reset and encr
     () => events.push("clean"),
   );
   assert.deepEqual(events, ["clean", ...playwrightRegressionCommands]);
+});
+
+test("passes configured provider runtime values to the Playwright API process", () => {
+  const environment = {
+    AI_REQUIRED_FOR_LAUNCH: "true",
+    AI_HUMAN_REVIEW_REQUIRED: "true",
+    AI_PROVIDER: "xiaomi-mimo",
+    MIMO_API_KEY_REF: "secret-manager://regression/mimo-key",
+    MIMO_API_KEY: "regression-runtime-secret",
+    UNRELATED_VALUE: "must-not-be-forwarded-by-this-helper",
+  };
+
+  assert.deepEqual(collectPlaywrightProviderEnvironment(environment), {
+    AI_REQUIRED_FOR_LAUNCH: "true",
+    AI_HUMAN_REVIEW_REQUIRED: "true",
+    AI_PROVIDER: "xiaomi-mimo",
+    MIMO_API_KEY_REF: "secret-manager://regression/mimo-key",
+    MIMO_API_KEY: "regression-runtime-secret",
+  });
 });
 
 test("stops on the first failed command", () => {

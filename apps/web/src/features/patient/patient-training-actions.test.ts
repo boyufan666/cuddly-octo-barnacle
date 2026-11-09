@@ -365,10 +365,11 @@ test("active session parsing hard-blocks missing and extra recovery context fiel
 test("active session parsing hard-blocks a non-current plan or mismatched runtime context", async () => {
   const { resolveActivePatientTrainingSession } =
     await import("./patient-training-actions");
-  for (const invalidPlan of [
+  const invalidPlans: RehabPlan[] = [
     { ...currentPlan, isCurrent: false },
-    { ...currentPlan, status: "confirmed" },
-  ]) {
+    { ...currentPlan, status: "paused" },
+  ];
+  for (const invalidPlan of invalidPlans) {
     const resolution = resolveActivePatientTrainingSession({
       currentPlan: invalidPlan,
       patientId: "patient-1",

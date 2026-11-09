@@ -1,16 +1,32 @@
 import type {
   AiAssessmentDraftResponse,
+  AssessmentPhysicalCondition,
   AssessmentSpeechTranscriptResponse,
 } from "@/types/api";
 import { applyAssessmentSpeechTranscriptToForm } from "./assessment-speech-transcript.ts";
 
 export type AssessmentDraftFormState = {
+  assessmentType: string;
+  riskLevel: AiAssessmentDraftResponse["riskLevel"] | "";
+  physicalConditions: AssessmentPhysicalCondition[];
+  informantName: string;
+  informantRelation: string;
+  assessmentSource: string;
   mmse: string;
   cdr: string;
   memory: string;
   orientation: string;
   executive: string;
   language: string;
+  ad8Total: string;
+  itemMemoryProblems: string;
+  itemReducedInterest: string;
+  itemRepeatsQuestions: string;
+  itemTroubleLearningTools: string;
+  itemForgetsMonthYear: string;
+  itemHandlesFinancesPoorly: string;
+  itemTroubleAppointments: string;
+  itemDailyThinkingMemoryProblems: string;
   transcript: string;
   reactionDelaySeconds: string;
   modelVersion: string;
@@ -57,8 +73,7 @@ export const ad8ItemFields = [
   "itemDailyThinkingMemoryProblems",
 ] as const;
 
-const requiredSubmissionFields = [
-  ...scoreFields,
+const commonRequiredSubmissionFields = [
   "transcript",
   "reactionDelaySeconds",
   "modelVersion",
@@ -66,9 +81,19 @@ const requiredSubmissionFields = [
   "analysisSummary",
 ] as const;
 
+const ad8InformantFields = [
+  "informantName",
+  "informantRelation",
+  "assessmentSource",
+] as const;
+
 export type AssessmentDraftFormField = Exclude<
   keyof AssessmentDraftFormState,
-  "aiDraftEvidence" | "speechEvidence"
+  | "assessmentType"
+  | "riskLevel"
+  | "physicalConditions"
+  | "aiDraftEvidence"
+  | "speechEvidence"
 >;
 
 export type Ad8AssessmentFormField = keyof Ad8AssessmentFormState;
@@ -76,19 +101,50 @@ export type Ad8AssessmentFormField = keyof Ad8AssessmentFormState;
 export type StagedAiAssessmentDraft = Readonly<{
   patientId: string;
   assessmentType: string;
+  physicalConditions: AssessmentPhysicalCondition[];
   transcript: string;
   draft: AiAssessmentDraftResponse;
 }>;
 
+export type SupportedAiAssessmentType = "MMSE/CDR" | "AD-8";
+
+export function normalizeAiAssessmentType(
+  value: string,
+): SupportedAiAssessmentType {
+  const normalized = value.trim().toUpperCase();
+  if (normalized === "AD8" || normalized === "AD-8") return "AD-8";
+  if (
+    normalized === "MMSE" ||
+    normalized === "CDR" ||
+    normalized === "MMSE/CDR" ||
+    normalized === "COMBINED"
+  ) {
+    return "MMSE/CDR";
+  }
+  throw new Error("AI 评估类型必须明确为 MMSE/CDR 或 AD-8。");
+}
+
 export function createStagedAiAssessmentDraft({
   patientId,
   assessmentType,
+  physicalConditions,
   transcript,
   draft,
 }: StagedAiAssessmentDraft): StagedAiAssessmentDraft {
+  const normalizedAssessmentType = normalizeAiAssessmentType(assessmentType);
+  if (
+    draft.patientId !== patientId ||
+    normalizeAiAssessmentType(draft.assessmentType) !==
+      normalizedAssessmentType ||
+    draft.rawInputSummary.transcript.trim() !== transcript.trim()
+  ) {
+    throw new Error("AI 评估草稿与本次患者、类型或转写请求不一致。");
+  }
   return {
     patientId,
-    assessmentType,
+    assessmentType: normalizedAssessmentType,
+    physicalConditions:
+      normalizeAssessmentPhysicalConditions(physicalConditions),
     transcript: transcript.trim(),
     draft,
   };
@@ -98,13 +154,18 @@ export function isStagedAiAssessmentDraftForRequest(
   staged: StagedAiAssessmentDraft | null,
   request: Pick<
     StagedAiAssessmentDraft,
-    "patientId" | "assessmentType" | "transcript"
+    "patientId" | "assessmentType" | "physicalConditions" | "transcript"
   >,
 ) {
   return (
     staged !== null &&
     staged.patientId === request.patientId &&
-    staged.assessmentType === request.assessmentType &&
+    staged.assessmentType ===
+      normalizeAiAssessmentType(request.assessmentType) &&
+    areAssessmentPhysicalConditionsEqual(
+      staged.physicalConditions,
+      request.physicalConditions,
+    ) &&
     staged.transcript === request.transcript.trim()
   );
 }
@@ -114,13 +175,24 @@ export function applyAiAssessmentDraftToForm(
   draft: AiAssessmentDraftResponse,
 ): AssessmentDraftFormState {
   const next = { ...current };
+  const assessmentType = normalizeAiAssessmentType(draft.assessmentType);
 
-  for (const field of scoreFields) {
-    const value = draft.scoreSummary[field];
-    if (typeof value !== "number" || !Number.isFinite(value)) {
-      throw new Error("AI 评估草稿缺少完整结构化评分，不能回填表单。");
+  if (assessmentType === "AD-8") {
+    const ad8Scores = readAd8ScoreSummary(draft.scoreSummary);
+    for (const field of ad8ItemFields) {
+      next[field] = String(ad8Scores[field]);
     }
-    next[field] = String(value);
+    next.ad8Total = String(ad8Scores.ad8Total);
+  } else {
+    for (const field of scoreFields) {
+      const value = draft.scoreSummary[field];
+      if (typeof value !== "number" || !Number.isFinite(value)) {
+        throw new Error(
+          "AI 评估草稿缺少完整 MMSE/CDR 结构化评分，不能回填表单。",
+        );
+      }
+      next[field] = String(value);
+    }
   }
 
   next.transcript = readRequiredText(
@@ -141,6 +213,8 @@ export function applyAiAssessmentDraftToForm(
   }
   next.confidence = String(confidence);
   next.aiDraftEvidence = draft.rawInputSummary.evidence;
+  next.assessmentType = assessmentType;
+  next.riskLevel = draft.riskLevel;
 
   return next;
 }
@@ -167,14 +241,21 @@ export function buildAssessmentSubmission({
   reviewedAt: string;
   form: AssessmentDraftFormState;
 }) {
-  const scoreSummary = {
-    mmse: parseRequiredNumber(form.mmse, "MMSE"),
-    cdr: parseRequiredNumber(form.cdr, "CDR"),
-    memory: parseRequiredNumber(form.memory, "记忆力"),
-    orientation: parseRequiredNumber(form.orientation, "定向力"),
-    executive: parseRequiredNumber(form.executive, "执行力"),
-    language: parseRequiredNumber(form.language, "语言表达"),
-  };
+  const assessmentType = normalizeAiAssessmentType(form.assessmentType);
+  const physicalConditions = normalizeAssessmentPhysicalConditions(
+    form.physicalConditions,
+  );
+  const scoreSummary: Record<string, number> =
+    assessmentType === "AD-8"
+      ? readAd8ScoreSummary(form)
+      : {
+          mmse: parseRequiredNumber(form.mmse, "MMSE"),
+          cdr: parseRequiredNumber(form.cdr, "CDR"),
+          memory: parseRequiredNumber(form.memory, "记忆力"),
+          orientation: parseRequiredNumber(form.orientation, "定向力"),
+          executive: parseRequiredNumber(form.executive, "执行力"),
+          language: parseRequiredNumber(form.language, "语言表达"),
+        };
   const transcript = readRequiredText(
     form.transcript,
     "请填写问答转写/评估摘要。",
@@ -195,10 +276,13 @@ export function buildAssessmentSubmission({
 
   return {
     patientId,
-    assessmentType: "MMSE/CDR",
+    assessmentType,
     scoreSummary,
+    physicalConditions,
     rawInputSummary: {
       source: resolveAssessmentSubmissionSource(form),
+      physicalConditions,
+      ...(assessmentType === "AD-8" ? buildAd8InformantSummary(form) : {}),
       transcript,
       analysisSummary,
       modelVersion,
@@ -237,11 +321,6 @@ export function buildAd8AssessmentSubmission({
     0,
   );
   const confidence = parseRequiredNumber(form.confidence, "分析置信度");
-  const interviewSource = readRequiredText(
-    form.assessmentSource,
-    "请填写 AD-8 评估来源。",
-  );
-
   return {
     patientId,
     assessmentType: "AD-8",
@@ -251,7 +330,7 @@ export function buildAd8AssessmentSubmission({
     },
     rawInputSummary: {
       source: "clinician_input",
-      interviewSource,
+      ...buildAd8InformantSummary(form),
       transcript: readRequiredText(form.summaryText, "请填写 AD-8 访谈摘要。"),
       analysisSummary: readRequiredText(
         form.clinicianConclusion,
@@ -259,15 +338,6 @@ export function buildAd8AssessmentSubmission({
       ),
       modelVersion: "ad8-clinician-structured-v1",
       confidence,
-      informant: {
-        name: readRequiredText(form.informantName, "请填写 AD-8 信息提供者。"),
-        relation: readRequiredText(
-          form.informantRelation,
-          "请填写 AD-8 信息提供者关系。",
-        ),
-      },
-      scaleVersion: "AD8-2005",
-      scoringRule: "yes=1,no=0,total=0-8",
       capturedAt: new Date().toISOString(),
     },
   };
@@ -281,6 +351,19 @@ export function updateAssessmentDraftFormField(
   return {
     ...current,
     [field]: value,
+    aiDraftEvidence: undefined,
+    speechEvidence: undefined,
+  };
+}
+
+export function updateAssessmentPhysicalConditions(
+  current: AssessmentDraftFormState,
+  physicalConditions: AssessmentPhysicalCondition[],
+): AssessmentDraftFormState {
+  return {
+    ...current,
+    physicalConditions:
+      normalizeAssessmentPhysicalConditions(physicalConditions),
     aiDraftEvidence: undefined,
     speechEvidence: undefined,
   };
@@ -300,8 +383,22 @@ export function updateAd8AssessmentFormField(
 export function isAssessmentSubmissionFormComplete(
   form: AssessmentDraftFormState,
 ) {
-  return requiredSubmissionFields.every(
-    (field) => form[field].trim().length > 0,
+  let assessmentType: SupportedAiAssessmentType;
+  try {
+    assessmentType = normalizeAiAssessmentType(form.assessmentType);
+  } catch {
+    return false;
+  }
+  const scoreSubmissionFields: readonly AssessmentDraftFormField[] =
+    assessmentType === "AD-8" ? ["ad8Total", ...ad8ItemFields] : scoreFields;
+  const requiredFields: readonly AssessmentDraftFormField[] = [
+    ...scoreSubmissionFields,
+    ...(assessmentType === "AD-8" ? ad8InformantFields : []),
+    ...commonRequiredSubmissionFields,
+  ];
+  return (
+    isAssessmentPhysicalConditionSelectionComplete(form.physicalConditions) &&
+    requiredFields.every((field) => form[field].trim().length > 0)
   );
 }
 
@@ -333,6 +430,29 @@ function resolveAssessmentSubmissionSource(form: AssessmentDraftFormState) {
     return "production_ai_assessment";
   }
   return "clinician_input";
+}
+
+function buildAd8InformantSummary(
+  form: Pick<
+    Ad8AssessmentFormState,
+    "informantName" | "informantRelation" | "assessmentSource"
+  >,
+) {
+  return {
+    interviewSource: readRequiredText(
+      form.assessmentSource,
+      "请填写 AD-8 评估来源。",
+    ),
+    informant: {
+      name: readRequiredText(form.informantName, "请填写 AD-8 信息提供者。"),
+      relation: readRequiredText(
+        form.informantRelation,
+        "请填写 AD-8 信息提供者关系。",
+      ),
+    },
+    scaleVersion: "AD8-2005",
+    scoringRule: "yes=1,no=0,total=0-8",
+  };
 }
 
 function buildAssessmentEvidence(
@@ -393,7 +513,82 @@ function readApprovedAiEvidence(
   };
 }
 
-function parseRequiredNumber(value: string, label: string) {
+function readAd8ScoreSummary(
+  value:
+    | Pick<
+        AssessmentDraftFormState,
+        "ad8Total" | (typeof ad8ItemFields)[number]
+      >
+    | AiAssessmentDraftResponse["scoreSummary"],
+) {
+  const itemScores = Object.fromEntries(
+    ad8ItemFields.map((field) => [
+      field,
+      parseAd8ItemScore(value[field], field),
+    ]),
+  ) as Record<(typeof ad8ItemFields)[number], number>;
+  const calculatedTotal = Object.values(itemScores).reduce(
+    (sum, score) => sum + score,
+    0,
+  );
+  const ad8Total = parseRequiredNumber(value.ad8Total, "AD-8 总分");
+  if (!Number.isInteger(ad8Total) || ad8Total < 0 || ad8Total > 8) {
+    throw new Error("AD-8 总分必须是 0 到 8 的整数。");
+  }
+  if (ad8Total !== calculatedTotal) {
+    throw new Error("AD-8 总分必须等于 8 个题项之和。");
+  }
+  return { ad8Total, ...itemScores };
+}
+
+export function normalizeAssessmentPhysicalConditions(
+  values: readonly AssessmentPhysicalCondition[],
+): AssessmentPhysicalCondition[] {
+  const supported = new Set<AssessmentPhysicalCondition>([
+    "no_known_limitations",
+    "wheelchair",
+    "upper_limb_limited",
+  ]);
+  const normalized = [...values];
+  if (!normalized.length) {
+    throw new Error("请明确选择身体情况后再继续。");
+  }
+  if (normalized.some((value) => !supported.has(value))) {
+    throw new Error("身体状况选项包含不受支持的值。");
+  }
+  if (new Set(normalized).size !== normalized.length) {
+    throw new Error("身体状况选项不能重复。");
+  }
+  if (normalized.includes("no_known_limitations") && normalized.length > 1) {
+    throw new Error("无上述特殊限制不能与其他身体限制同时选择。");
+  }
+  return normalized.sort();
+}
+
+export function isAssessmentPhysicalConditionSelectionComplete(
+  values: readonly AssessmentPhysicalCondition[],
+) {
+  try {
+    normalizeAssessmentPhysicalConditions(values);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function areAssessmentPhysicalConditionsEqual(
+  left: readonly AssessmentPhysicalCondition[],
+  right: readonly AssessmentPhysicalCondition[],
+) {
+  const normalizedLeft = normalizeAssessmentPhysicalConditions(left);
+  const normalizedRight = normalizeAssessmentPhysicalConditions(right);
+  return (
+    normalizedLeft.length === normalizedRight.length &&
+    normalizedLeft.every((value, index) => value === normalizedRight[index])
+  );
+}
+
+function parseRequiredNumber(value: unknown, label: string) {
   const numberValue = Number(value);
   if (!Number.isFinite(numberValue)) {
     throw new Error(`${label}必须是有效数字。`);
@@ -401,7 +596,7 @@ function parseRequiredNumber(value: string, label: string) {
   return numberValue;
 }
 
-function parseAd8ItemScore(value: string, field: string) {
+function parseAd8ItemScore(value: unknown, field: string) {
   const numberValue = parseRequiredNumber(value, field);
   if (numberValue !== 0 && numberValue !== 1) {
     throw new Error("AD-8 题项只能填写 0 或 1。");

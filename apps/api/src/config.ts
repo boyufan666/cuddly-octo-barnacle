@@ -356,6 +356,35 @@ function requireProductionKeyValueUrl(env: NodeJS.ProcessEnv) {
   const rawValue = loadMimoUsageGateConfig(env).url;
   const endpoint = new URL(rawValue);
   const host = endpoint.hostname.toLowerCase();
+  if (env.DEPLOYMENT_MODE !== undefined) {
+    if (env.DEPLOYMENT_MODE !== 'single-host') {
+      throw new Error('DEPLOYMENT_MODE must be single-host when configured.');
+    }
+    let password: string;
+    try {
+      password = decodeURIComponent(endpoint.password);
+    } catch {
+      throw new Error(
+        'MIMO_KEY_VALUE_URL contains an invalid password encoding.',
+      );
+    }
+    if (
+      endpoint.protocol !== 'redis:' ||
+      host !== '127.0.0.1' ||
+      endpoint.port !== '6379' ||
+      Buffer.byteLength(password, 'utf8') < 32 ||
+      password.trim() !== password ||
+      (endpoint.username !== '' && endpoint.username !== 'default') ||
+      !/^\/(?:0|[1-9]\d*)$|^$/.test(endpoint.pathname) ||
+      endpoint.search !== '' ||
+      endpoint.hash !== ''
+    ) {
+      throw new Error(
+        'MIMO_KEY_VALUE_URL in single-host mode must use redis://127.0.0.1:6379 with a password of at least 32 UTF-8 bytes and an optional numeric database.',
+      );
+    }
+    return rawValue;
+  }
   if (host === 'localhost' || host.endsWith('.local') || isIP(host) !== 0) {
     throw new Error(
       'MIMO_KEY_VALUE_URL must use an approved private Render Key Value host in production.',

@@ -1,4 +1,9 @@
-import { ConflictException, ForbiddenException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+} from '@nestjs/common';
+import { hkdfSync } from 'node:crypto';
 import { AppService } from './app.service';
 import type { RequestUser } from './current-user';
 import { PrismaService } from './prisma.service';
@@ -6,6 +11,7 @@ import {
   decryptSensitiveJson,
   encryptSensitiveJson,
 } from './sensitive-encryption';
+import { createProviderOperationResponseHmac } from './provider-operation';
 
 const testSensitiveEncryptionKey = {
   kid: 'secret-manager://rehab/unit-sensitive-key',
@@ -13,6 +19,7 @@ const testSensitiveEncryptionKey = {
 };
 
 const conversationId = '10873b82-c539-4692-9465-33f5b29ea022';
+const completedAssessmentId = 'a3f6b7d8-1c2e-4f90-8a6b-5d7e9f102938';
 const careCirclePostId = 'e825e886-2e32-44ab-ae1e-0588e82981f4';
 const trainingResultId = '4dc5c14f-c092-44ee-b86d-065d27ebf0d0';
 type SensitiveEnvelope = ReturnType<typeof encryptSensitiveJson>;
@@ -140,6 +147,25 @@ describe('Task 4 clinical authorization and atomic state machines', () => {
         },
         testSensitiveEncryptionKey,
       );
+      const formalAssessmentEnvelope = encryptSensitiveJson(
+        {
+          scoreSummary: {},
+          rawInputSummary: {
+            conversationEvidence: {
+              sessionId: conversationId,
+              patientId: 'patient-id',
+              assessmentType: 'MMSE/CDR',
+              status: 'pending_human_review',
+            },
+          },
+        },
+        {
+          tableName: 'assessment_record',
+          recordId: completedAssessmentId,
+          fieldName: 'resultEnvelope',
+        },
+        testSensitiveEncryptionKey,
+      );
       let reviewedEnvelope = pendingReviewEnvelope;
       const tx = {
         aiConversationSession: {
@@ -174,6 +200,7 @@ describe('Task 4 clinical authorization and atomic state machines', () => {
           findUnique: jest.fn().mockResolvedValue({
             id: conversationId,
             patientId: 'patient-id',
+            assessmentType: 'MMSE/CDR',
             status: 'pending_human_review',
             summaryEnvelope,
             reviewEnvelope: pendingReviewEnvelope,
@@ -193,6 +220,21 @@ describe('Task 4 clinical authorization and atomic state machines', () => {
           }),
         },
         auditLog: { create: jest.fn().mockResolvedValue({}) },
+        assessmentRecord: {
+          findMany: jest.fn().mockResolvedValue([
+            {
+              id: completedAssessmentId,
+              resultEnvelope: formalAssessmentEnvelope,
+            },
+          ]),
+        },
+        providerOperation: {
+          findFirst: jest.fn().mockResolvedValue({
+            provider: 'xiaomi-mimo',
+            modelVersion: 'MiMo-V2.5',
+            endpointHost: 'token-plan-cn.xiaomimimo.com',
+          }),
+        },
         $transaction: jest.fn(
           async (callback: (client: typeof tx) => Promise<unknown>) =>
             callback(tx),
@@ -275,6 +317,55 @@ describe('Task 4 clinical authorization and atomic state machines', () => {
       ).rejects.toBeInstanceOf(ConflictException);
 
       expect(tx.auditLog.create).not.toHaveBeenCalled();
+    });
+
+    it('allows returning an AI conversation without a saved formal assessment', async () => {
+      const { prisma, service } = createService();
+
+      await expect(
+        service.reviewAiConversation(responsibleDoctor, conversationId, {
+          conclusion: 'returned',
+          reviewNote: '请补充本次评估所需的对话信息。',
+        }),
+      ).resolves.toMatchObject({ status: 'reviewed' });
+
+      expect(prisma.assessmentRecord.findMany).not.toHaveBeenCalled();
+    });
+
+    it('requires an approved AI conversation to have a formal assessment linked to the same session', async () => {
+      const { prisma, service } = createService();
+      const unrelatedAssessmentId = '08c2d5e7-f91a-4b63-a6e2-3f4b5c6d7e8f';
+      prisma.assessmentRecord.findMany.mockResolvedValue([
+        {
+          id: unrelatedAssessmentId,
+          resultEnvelope: encryptSensitiveJson(
+            {
+              scoreSummary: {},
+              rawInputSummary: {
+                conversationEvidence: {
+                  sessionId: 'other-conversation-id',
+                  patientId: 'patient-id',
+                  assessmentType: 'MMSE/CDR',
+                  status: 'pending_human_review',
+                },
+              },
+            },
+            {
+              tableName: 'assessment_record',
+              recordId: unrelatedAssessmentId,
+              fieldName: 'resultEnvelope',
+            },
+            testSensitiveEncryptionKey,
+          ),
+        },
+      ]);
+
+      await expect(
+        service.reviewAiConversation(responsibleDoctor, conversationId, {
+          conclusion: 'approved',
+          reviewNote: '不能使用其他会话的评估。',
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
     });
 
     it('authorizes before revealing that an AI conversation was already reviewed', async () => {
@@ -370,6 +461,7 @@ describe('Task 4 clinical authorization and atomic state machines', () => {
       return {
         patientId: 'patient-id',
         assessmentType: 'MMSE/CDR',
+        physicalConditions: ['no_known_limitations'],
         scoreSummary: {
           mmse: 22,
           cdr: 1,
@@ -416,12 +508,53 @@ describe('Task 4 clinical authorization and atomic state machines', () => {
               patientId: 'patient-id',
             }),
         },
+        rehabPlan: {
+          updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+        },
         riskGradeRecord: {
           updateMany: jest.fn().mockResolvedValue({ count: 1 }),
           create: jest.fn().mockResolvedValue({ id: 'risk-id' }),
         },
         aiAnalysisRecord: { create: jest.fn().mockResolvedValue({}) },
         auditLog: { create: jest.fn().mockResolvedValue({}) },
+      };
+      const providerOperationId = '4c7d9e50-3d2a-4f6b-8c1e-7b9a2d5e6f10';
+      const assessment = productionAssessment();
+      const providerResponse = {
+        result: {
+          scoreSummary: assessment.scoreSummary,
+          rawInputSummary: {
+            transcript: assessment.rawInputSummary.transcript,
+            analysisSummary: assessment.rawInputSummary.analysisSummary,
+          },
+          physicalConditions: assessment.physicalConditions,
+        },
+      };
+      const responseHmacKey = Buffer.from(
+        hkdfSync(
+          'sha256',
+          testSensitiveEncryptionKey.key,
+          Buffer.from('rehab-provider-operation-hmac-v1', 'utf8'),
+          Buffer.from('canonical-response-hmac', 'utf8'),
+          32,
+        ),
+      );
+      const providerResponseEvidence = {
+        id: providerOperationId,
+        responseCiphertext: encryptSensitiveJson(
+          providerResponse,
+          {
+            tableName: 'provider_operation',
+            recordId: providerOperationId,
+            fieldName: 'responseCiphertext',
+          },
+          testSensitiveEncryptionKey,
+        ),
+        responseHmac: createProviderOperationResponseHmac(
+          providerOperationId,
+          providerResponse,
+          responseHmacKey,
+        ),
       };
       const prisma = {
         patientProfile: {
@@ -434,6 +567,14 @@ describe('Task 4 clinical authorization and atomic state machines', () => {
             .mockResolvedValueOnce({ id: 'ai-consent' }),
         },
         auditLog: { create: jest.fn().mockResolvedValue({}) },
+        providerOperation: {
+          findFirst: jest.fn().mockResolvedValue({
+            ...providerResponseEvidence,
+            provider: 'xiaomi-mimo',
+            modelVersion: 'MiMo-V2.5',
+            endpointHost: 'example.invalid',
+          }),
+        },
         $transaction: jest.fn(
           async (callback: (client: typeof tx) => Promise<unknown>) =>
             callback(tx),

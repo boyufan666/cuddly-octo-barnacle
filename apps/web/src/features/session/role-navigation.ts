@@ -48,6 +48,7 @@ export type NavigationSection = {
 export type RoleNavigationId =
   | ScreenId
   | "assessmentReview"
+  | "registrationReview"
   | "planManagement"
   | "preparationManagement"
   | "trainingReview"
@@ -173,14 +174,21 @@ export const screens: ScreenMeta[] = [
 ];
 
 export const patientTaskNavItems: RoleNavigationItem[] = [
+  { id: "assessment", label: "AI评估", screenId: "assessment" },
   { id: "today", label: "今日", screenId: "today" },
-  { id: "prep", label: "训练", screenId: "prep", activeScreenIds: ["prep", "game", "device"] },
-  { id: "result", label: "记录", screenId: "result", activeScreenIds: ["result", "assessment", "match"] },
+  {
+    id: "prep",
+    label: "训练",
+    screenId: "prep",
+    activeScreenIds: ["prep", "game", "device"],
+  },
+  { id: "result", label: "记录", screenId: "result" },
   { id: "profile", label: "我的", screenId: "profile" },
 ];
 
 export const doctorNavItems: RoleNavigationItem[] = [
   { id: "doctor", label: "患者", screenId: "doctor" },
+  { id: "registrationReview", label: "申请", screenId: "doctor" },
   { id: "assessmentReview", label: "评估", screenId: "assessment" },
   {
     id: "planManagement",
@@ -211,7 +219,7 @@ export const caregiverNavItems: RoleNavigationItem[] = [
 ];
 
 export const roleHome: Record<RoleCode, ScreenId> = {
-  patient: "today",
+  patient: "assessment",
   caregiver: "family",
   doctor: "doctor",
   admin: "admin",
@@ -259,7 +267,9 @@ export function roleNavigationItemMatchesScreen(
   item: RoleNavigationItem,
   active: ScreenId,
 ) {
-  return item.screenId === active || Boolean(item.activeScreenIds?.includes(active));
+  return (
+    item.screenId === active || Boolean(item.activeScreenIds?.includes(active))
+  );
 }
 
 export function buildNavigationSections(
@@ -267,7 +277,9 @@ export function buildNavigationSections(
   availableScreens: ScreenMeta[],
   roleItems: RoleNavigationItem[] | undefined,
 ): NavigationSection[] {
-  const availableById = new Map(availableScreens.map((screen) => [screen.id, screen]));
+  const availableById = new Map(
+    availableScreens.map((screen) => [screen.id, screen]),
+  );
   if (!role) {
     return [
       {
@@ -315,7 +327,9 @@ export function buildNavigationSections(
   ];
 }
 
-export function resolveRoleNavigationItems(role: RoleCode): RoleNavigationItem[] | undefined {
+export function resolveRoleNavigationItems(
+  role: RoleCode,
+): RoleNavigationItem[] | undefined {
   if (role === "patient") return patientTaskNavItems;
   if (role === "caregiver") return caregiverNavItems;
   if (role === "doctor") return doctorNavItems;
@@ -341,7 +355,11 @@ export function resolveAuthorizedRoleNavigationItems(
         return hasCaregiverPatientScope(session, selectedPatientId, "progress");
       }
       if (item.id === "familyAlerts") {
-        return hasCaregiverPatientScope(session, selectedPatientId, "reminders");
+        return hasCaregiverPatientScope(
+          session,
+          selectedPatientId,
+          "reminders",
+        );
       }
       return false;
     });

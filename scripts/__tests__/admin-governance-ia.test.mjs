@@ -106,7 +106,7 @@ test("admin governance focuses on account content export and audit operations", 
   assert.match(auditWorkspaceSlice, /canManageQualityEvidence/);
   assert.match(
     auditWorkspaceSlice,
-    /permissions\.canExportData\s*&&\s*permissions\.canReadAuditLogs\s*\?\s*\([\s\S]*DesensitizedExportPanel/,
+    /permissions\.canExportData\s*\?\s*\([\s\S]*DesensitizedExportPanel/,
   );
   assert.match(
     auditWorkspaceSlice,

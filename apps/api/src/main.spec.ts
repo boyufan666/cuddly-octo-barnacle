@@ -1,3 +1,4 @@
+import * as configuration from './config';
 import { json, urlencoded } from 'express';
 import { NestFactory } from '@nestjs/core';
 import {
@@ -134,5 +135,45 @@ describe('bootstrap authentication configuration', () => {
     expect(create).not.toHaveBeenCalled();
 
     create.mockRestore();
+  });
+});
+
+describe('single-host listener binding', () => {
+  it.each([
+    ['single-host', '127.0.0.1'],
+    [undefined, '0.0.0.0'],
+  ])('binds mode %s to %s', async (mode, host) => {
+    const previousMode = process.env.DEPLOYMENT_MODE;
+    const app = {
+      use: jest.fn(),
+      enableCors: jest.fn(),
+      listen: jest.fn().mockResolvedValue(undefined),
+    };
+    if (mode === undefined) delete process.env.DEPLOYMENT_MODE;
+    else process.env.DEPLOYMENT_MODE = mode;
+    jest
+      .spyOn(configuration, 'requireStrongJwtSecret')
+      .mockReturnValue('unit-secret');
+    jest.spyOn(configuration, 'requireCookieSecure').mockReturnValue(true);
+    jest.spyOn(configuration, 'requireSensitiveEncryptionKey').mockReturnValue({
+      kid: 'unit-test-key',
+      key: Buffer.alloc(32),
+    });
+    jest
+      .spyOn(configuration, 'validateProductionRuntimeConfiguration')
+      .mockImplementation(() => undefined);
+    jest
+      .spyOn(configuration, 'requireEnv')
+      .mockReturnValue('https://hd117.com');
+    jest.spyOn(configuration, 'requireListenPort').mockReturnValue(4000);
+    jest.spyOn(NestFactory, 'create').mockResolvedValue(app as never);
+    try {
+      await bootstrap();
+      expect(app.listen).toHaveBeenCalledWith(4000, host);
+    } finally {
+      jest.restoreAllMocks();
+      if (previousMode === undefined) delete process.env.DEPLOYMENT_MODE;
+      else process.env.DEPLOYMENT_MODE = previousMode;
+    }
   });
 });

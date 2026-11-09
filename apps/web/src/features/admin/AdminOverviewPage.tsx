@@ -208,21 +208,23 @@ export function AdminOverviewPage({
             <SectionHeader
               title="安全审计"
               description={
-                permissions.canExportData && permissions.canReadAuditLogs
-                  ? "查询审计日志、生成脱敏导出，并管理训练质控材料。"
+                permissions.canExportData
+                  ? permissions.canReadAuditLogs
+                    ? "查询审计日志、生成脱敏导出，并管理训练质控材料。"
+                    : "生成脱敏导出，并按权限管理训练质控材料。"
                   : "查询审计日志，并按权限管理训练质控材料。"
               }
             />
             <div className="mt-4 grid gap-4">
               <StatisticsQueryPanel dashboard={dashboard} />
-              {permissions.canExportData && permissions.canReadAuditLogs ? (
+              {permissions.canExportData ? (
                 <DesensitizedExportPanel
                   form={forms.dataExport}
                   onChange={formHandlers.onDataExportFormChange}
                   onExportData={actions.onExportData}
                   isExporting={busy.exportData}
-                  canExportAuditLogs={true}
-                  canExportData={true}
+                  canExportAuditLogs={permissions.canReadAuditLogs}
+                  canExportData={permissions.canExportData}
                 />
               ) : null}
               <SecurityAuditPage

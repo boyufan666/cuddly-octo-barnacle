@@ -190,6 +190,8 @@ test("high-cost API calls require and preserve caller-owned idempotency keys", a
 
   await api.createAiAssessmentDraft({
     patientId: "patient-id",
+    assessmentType: "AD-8",
+    physicalConditions: ["wheelchair", "upper_limb_limited"],
     transcript: "评估转写",
     idempotencyKey: "ai-draft-key",
   });
@@ -221,6 +223,10 @@ test("high-cost API calls require and preserve caller-owned idempotency keys", a
   assert.deepEqual(
     bodies.map((body) => body.idempotencyKey),
     ["ai-draft-key", "conversation-key", "speech-key", "tts-key"],
+  );
+  assert.deepEqual(
+    (bodies[0] as { physicalConditions?: string[] }).physicalConditions,
+    ["wheelchair", "upper_limb_limited"],
   );
 });
 

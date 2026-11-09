@@ -294,6 +294,14 @@ export const api = {
       method: "POST",
       body: requireHighCostIdempotencyKey(body),
     }),
+  aiConversationAssessmentDraft: (
+    conversationId: string,
+    context: ApiRequestContext = {},
+  ) =>
+    request<{ draft: AiAssessmentDraftResponse | null }>(
+      `/ai/conversations/${conversationId}/assessment-draft`,
+      context,
+    ).then((response) => response.draft),
   startAiConversation: (body: StartAiConversationRequest) =>
     request<AiConversationSession>("/ai/conversations", {
       method: "POST",

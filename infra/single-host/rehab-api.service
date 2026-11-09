@@ -1,0 +1,23 @@
+[Unit]
+Description=Rehabilitation platform API
+After=network-online.target docker.service
+Requires=docker.service
+
+[Service]
+User=rehab
+Group=rehab
+WorkingDirectory=/opt/rehab/current/apps/api
+EnvironmentFile=/etc/rehab/api.env
+ExecStart=/usr/local/bin/node --max-old-space-size=384 dist/main.js
+Restart=on-failure
+RestartSec=5
+MemoryMax=512M
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/rehab/shared
+
+[Install]
+WantedBy=multi-user.target

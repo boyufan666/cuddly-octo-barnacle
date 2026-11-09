@@ -201,6 +201,7 @@ export function BrowserPoseTrainingSurface(
   const mountedRef = useRef(false);
   const runTokenRef = useRef(0);
   const statsRef = useRef<BrowserPoseGameplayStats | null>(null);
+  const motionStageReadyRef = useRef(false);
   const [motionStageReady, setMotionStageReady] = useState(false);
   const [snapshot, setSnapshot] = useState<BrowserPoseGameSnapshot>({
     ...emptyBrowserPoseGameSnapshotStats,
@@ -260,7 +261,10 @@ export function BrowserPoseTrainingSurface(
       }));
       return;
     }
-    if (requiresEnhancedStage && !motionStageReady) {
+    if (
+      requiresEnhancedStage &&
+      !isMotionStageReadyForTraining(motionStageReady, motionStageReadyRef)
+    ) {
       setSnapshot((current) => ({
         ...current,
         phase: "error",
@@ -518,8 +522,12 @@ export function BrowserPoseTrainingSurface(
             gameName={game.name}
             profile={gameDefinition.scoringProfile}
             phase={snapshot.phase}
-            onReady={() => setMotionStageReady(true)}
+            onReady={() => {
+              motionStageReadyRef.current = true;
+              setMotionStageReady(true);
+            }}
             onError={() => {
+              motionStageReadyRef.current = false;
               setMotionStageReady(false);
               runTokenRef.current += 1;
               stopBrowserPoseRuntime(
@@ -613,6 +621,13 @@ export function BrowserPoseTrainingSurface(
       </div>
     </div>
   );
+}
+
+export function isMotionStageReadyForTraining(
+  motionStageReady: boolean,
+  motionStageReadyRef: Pick<MutableRefObject<boolean>, "current">,
+) {
+  return motionStageReady || motionStageReadyRef.current;
 }
 
 function PatientTrainingStat({

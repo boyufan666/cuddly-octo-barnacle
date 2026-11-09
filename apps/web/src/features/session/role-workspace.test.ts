@@ -240,6 +240,12 @@ test("patient switching invalidates action identity before changing patient scop
   assert.notEqual(invalidation, -1);
   assert.ok(invalidation < patientMutation);
   assert.ok(patientMutation < stateClear);
+  assert.ok(handlerSource.includes('setActionStatus("正在加载患者临床资料")'));
+  assert.ok(
+    handlerSource.includes(
+      'setActionStatus("患者已选中，临床摘要和相关资料已刷新。")',
+    ),
+  );
 });
 
 test("resume success applies the real response, selects its plan item, and enters game", async () => {
@@ -325,8 +331,6 @@ test("every async workspace action with deferred state writes captures and reche
     "handleCreateRegistrationRequest",
     "handleReviewRegistrationRequest",
     "handleCreateCaregiverAccount",
-    "handleCreateAssessment",
-    "handleCreateAd8Assessment",
     "handleCreateAiAssessmentDraft",
     "handleStartAiConversation",
     "handleAppendAiConversationMessage",
@@ -588,4 +592,28 @@ test("high-cost workspace calls use current-page stable identities and clear the
   assert.match(clearSource, /highCostRequestRegistryRef\.current\.clear\(\)/);
   assert.match(source, /recordingId/);
   assert.doesNotMatch(source, /localStorage|sessionStorage/);
+});
+
+test("AI assessment handlers route explicitly and preserve physical conditions", async () => {
+  const [source, requestActionsSource] = await Promise.all([
+    readFile(new URL("./role-workspace.tsx", import.meta.url), "utf8"),
+    readFile(new URL("./high-cost-request-actions.ts", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(source, /resolveRoleWorkspaceAiAssessmentRoute/);
+  assert.match(source, /resolveAiAssessmentRoute/);
+  assert.doesNotMatch(source, /assessmentType:\s*["']MMSE\/CDR["']/);
+  assert.match(
+    source,
+    /const draftRequest = \{[\s\S]*?assessmentType,[\s\S]*?physicalConditions: form\.physicalConditions/,
+  );
+  assert.match(
+    source,
+    /requestAiConversationMessage\(\{[\s\S]*?assessmentType,[\s\S]*?physicalConditions: assessmentForm\.physicalConditions/,
+  );
+  assert.match(requestActionsSource, /contentSnapshot:\s*\{[\s\S]*?assessmentType,[\s\S]*?physicalConditions/);
+  assert.match(
+    requestActionsSource,
+    /draftRequest\.physicalConditions/,
+  );
 });

@@ -234,47 +234,6 @@ export function useRoleData({
           });
         }
 
-        if (patientId && isAdminRole(role)) {
-          const [patient, assessments, trainingRecords] = await Promise.all([
-            api.patient(patientId, context),
-            api.assessments(patientId, context),
-            api.trainingRecords(patientId, context),
-          ]);
-          nextData.patients = [patient];
-          nextData.patient = patient;
-          nextData.assessments = assessments;
-          nextData.trainingRecords = trainingRecords;
-          optionalRequests.push(
-            {
-              panel: "rewards",
-              label: "康复奖励",
-              load: async () => ({
-                rewards: await api.patientRewards(patientId, context),
-              }),
-            },
-            {
-              panel: "collectionBatches",
-              label: "训练准备记录",
-              load: async () => ({
-                collectionBatches: await api.collectionBatches(
-                  patientId,
-                  context,
-                ),
-              }),
-            },
-            {
-              panel: "aiConversations",
-              label: "智能评估对话",
-              load: async () => ({
-                aiConversations: await api.patientAiConversations(
-                  patientId,
-                  context,
-                ),
-              }),
-            },
-          );
-        }
-
         if (isAdminRole(role)) {
           const canLoadRegistrationRequests =
             loginResponse.context.adminPermissions.includes("user.manage");
@@ -327,13 +286,22 @@ export function useRoleData({
         }
 
         if (role === "doctor") {
-          optionalRequests.push({
-            panel: "doctorDashboard",
-            label: "医师待办摘要",
-            load: async () => ({
-              adminDashboard: await api.adminDashboard(context),
-            }),
-          });
+          optionalRequests.push(
+            {
+              panel: "doctorDashboard",
+              label: "医师待办摘要",
+              load: async () => ({
+                adminDashboard: await api.adminDashboard(context),
+              }),
+            },
+            {
+              panel: "registrationRequests",
+              label: "患者账号开通申请",
+              load: async () => ({
+                registrationRequests: await api.registrationRequests(context),
+              }),
+            },
+          );
         }
 
         if (

@@ -1,5 +1,6 @@
 import { defineConfig, devices } from "@playwright/test";
 import { resolvePlaywrightRegressionEnvironment } from "./playwright-regression-environment.mjs";
+import { collectPlaywrightProviderEnvironment } from "./run-playwright-regression.mjs";
 
 const input = resolvePlaywrightRegressionEnvironment();
 const { apiPort, webPort } = input;
@@ -7,6 +8,7 @@ const webHost = "127.0.0.1";
 const apiHost = "127.0.0.1";
 const webBaseUrl = `http://${webHost}:${webPort}`;
 const apiBaseUrl = `http://${apiHost}:${apiPort}`;
+const providerEnvironment = collectPlaywrightProviderEnvironment();
 const businessTestMatch =
   /(?:web-playwright-regression|formal-ui-business-chain)\.spec\.mjs/;
 
@@ -28,7 +30,7 @@ export default defineConfig({
   },
   webServer: [
     {
-      command: "pnpm --filter @rehab-platform/api start:dev",
+      command: "pnpm --filter @rehab-platform/api exec node dist/main.js",
       url: `${apiBaseUrl}/health/live`,
       reuseExistingServer: false,
       timeout: 120_000,
@@ -43,6 +45,7 @@ export default defineConfig({
         PORT: String(apiPort),
         WEB_ORIGIN: webBaseUrl,
         PLAYWRIGHT_CONFIRM_DISPOSABLE: "YES",
+        ...providerEnvironment,
       },
     },
     {

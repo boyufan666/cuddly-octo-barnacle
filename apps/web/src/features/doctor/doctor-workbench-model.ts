@@ -26,9 +26,11 @@ type DoctorWorkbenchModelInput = {
 
 export type DoctorWorkbenchModel = {
   assessmentReview: ComponentProps<typeof AssessmentReviewPanel>;
+  confirmedPlan?: RehabPlan;
   currentAssessment?: AssessmentRecord;
   currentPlan?: RehabPlan;
   currentRisk?: RiskGrade;
+  planRecommendation: DoctorPlanRecommendationState;
   planEditorForm: DoctorPlanEditorFormState;
   collectionPreparation: Pick<
     ComponentProps<typeof DataCollectionReviewPanel>,
@@ -42,6 +44,15 @@ export type DoctorWorkbenchModel = {
   >;
 };
 
+export type DoctorPlanRecommendationState = {
+  assessmentConfirmed: boolean;
+  assessmentStatusLabel: string;
+  blockers: string[];
+  canRecommend: boolean;
+  riskConfirmed: boolean;
+  riskStatusLabel: string;
+};
+
 export function buildDoctorWorkbenchModel({
   patient,
   collectionBatches,
@@ -49,22 +60,38 @@ export function buildDoctorWorkbenchModel({
   collectionBatchForm,
   trainingRecords,
 }: DoctorWorkbenchModelInput): DoctorWorkbenchModel {
-  const currentPlan = resolvePendingPlan(patient) ?? resolveConfirmedCurrentPlan(patient);
+  const currentPlan = resolvePendingPlan(patient);
   const confirmedPlan = resolveConfirmedCurrentPlan(patient);
   const currentAssessment = patient?.assessments?.[0];
-  const currentRisk =
-    resolveAssessmentRisk(currentAssessment) ??
-    (currentAssessment ? undefined : resolveCurrentRisk(patient));
-  const assessmentReview = buildDoctorAssessmentReview(currentAssessment, currentRisk);
+  const currentRisk = resolveAssessmentRisk(currentAssessment);
+  const assessmentReview = buildDoctorAssessmentReview(
+    currentAssessment,
+    currentRisk,
+  );
+  const planRecommendation = buildDoctorPlanRecommendationState(
+    patient,
+    currentAssessment,
+    currentRisk,
+    currentPlan,
+  );
   const selectedPlanItem =
-    confirmedPlan?.items.find((item) => item.id === collectionBatchForm.planItemId) ??
-    resolvePreparedPlanItem(confirmedPlan, collectionBatches, collectionProtocols) ??
+    confirmedPlan?.items.find(
+      (item) => item.id === collectionBatchForm.planItemId,
+    ) ??
+    resolvePreparedPlanItem(
+      confirmedPlan,
+      collectionBatches,
+      collectionProtocols,
+    ) ??
     resolveNextPlanItem(confirmedPlan, trainingRecords) ??
     confirmedPlan?.items[0];
   const matchingProtocols = selectedPlanItem
     ? collectionProtocols === undefined
       ? undefined
-      : resolveCollectionProtocolsForPlanItem(collectionProtocols, selectedPlanItem)
+      : resolveCollectionProtocolsForPlanItem(
+          collectionProtocols,
+          selectedPlanItem,
+        )
     : [];
   const readyBatch =
     confirmedPlan && selectedPlanItem
@@ -79,9 +106,11 @@ export function buildDoctorWorkbenchModel({
 
   return {
     assessmentReview,
+    confirmedPlan,
     currentAssessment,
     currentPlan,
     currentRisk,
+    planRecommendation,
     planEditorForm: buildDoctorPlanEditorForm(currentPlan),
     collectionPreparation: {
       batchesAvailable: collectionBatches !== undefined,
@@ -122,18 +151,13 @@ export function buildDoctorPlanEditorForm(
 
 export function resolveConfirmedCurrentPlan(patient?: PatientProfile) {
   return patient?.rehabPlans.find(
-    (plan) =>
-      plan.isCurrent &&
-      (plan.status === "active" || plan.status === "confirmed"),
+    (plan) => plan.isCurrent && plan.status === "active",
   );
 }
 
 export function resolvePendingPlan(patient?: PatientProfile) {
   return patient?.rehabPlans.find(
-    (plan) =>
-      plan.status === "pending_confirm" ||
-      plan.status === "pending_confirmation" ||
-      plan.status === "draft",
+    (plan) => plan.status === "pending_confirm" && !plan.isCurrent,
   );
 }
 
@@ -142,10 +166,54 @@ export function resolveCurrentRisk(patient?: PatientProfile) {
 }
 
 export function resolveAssessmentRisk(assessment?: AssessmentRecord) {
-  return (
-    assessment?.riskGrades?.find((riskGrade) => riskGrade.isCurrent) ??
-    assessment?.riskGrades?.[0]
-  );
+  return assessment?.riskGrades?.find((riskGrade) => riskGrade.isCurrent);
+}
+
+export function buildDoctorPlanRecommendationState(
+  patient: PatientProfile | undefined,
+  assessment: AssessmentRecord | undefined,
+  risk: RiskGrade | undefined,
+  pendingPlan: RehabPlan | undefined,
+): DoctorPlanRecommendationState {
+  if (!patient) {
+    return {
+      assessmentConfirmed: false,
+      assessmentStatusLabel: "未选择患者",
+      blockers: ["请先选择患者，再检查正式评估与风险确认状态。"],
+      canRecommend: false,
+      riskConfirmed: false,
+      riskStatusLabel: "未选择患者",
+    };
+  }
+
+  const assessmentConfirmed = assessment?.status === "doctor_confirmed";
+  const riskConfirmed = isRiskConfirmed(risk);
+  const blockers: string[] = [];
+
+  if (!assessment) {
+    blockers.push("当前患者没有可用于方案生成的结构化评估记录。");
+  } else if (!assessmentConfirmed) {
+    blockers.push("当前评估尚未由医师确认为正式评估。");
+  }
+
+  if (!risk) {
+    blockers.push("当前评估没有关联的当前风险评级。");
+  } else if (!riskConfirmed) {
+    blockers.push("当前风险评级尚未由医师完整确认。");
+  }
+
+  if (pendingPlan) {
+    blockers.push("已有待确认推荐方案，请先调整并确认下发。");
+  }
+
+  return {
+    assessmentConfirmed,
+    assessmentStatusLabel: assessmentStatusLabel(assessment),
+    blockers,
+    canRecommend: blockers.length === 0,
+    riskConfirmed,
+    riskStatusLabel: riskConfirmationLabel(risk),
+  };
 }
 
 export function resolveCollectionProtocolsForPlanItem(
@@ -198,7 +266,7 @@ function resolvePreparedPlanItem(
   );
 }
 
-export function doctorTrainingCategoryLabel(targets: string[] = []) {
+export function doctorTrainingCategoryLabel(targets: string[]) {
   const combined = targets.join(" ");
   if (/运动|动作|上肢|下肢|平衡|姿态|pose|motion|reach/i.test(combined)) {
     return "运动训练";
@@ -210,42 +278,45 @@ function buildDoctorAssessmentReview(
   assessment: AssessmentRecord | undefined,
   risk: RiskGrade | undefined,
 ): ComponentProps<typeof AssessmentReviewPanel> {
-  const confirmed = isRiskConfirmed(risk);
+  const riskConfirmed = isRiskConfirmed(risk);
+  const confirmed = assessment?.status === "doctor_confirmed" && riskConfirmed;
+  const reviewable = assessment?.status === "completed";
   const canApprove = Boolean(
-    assessment && risk && hasRiskEvidence(risk) && !confirmed,
+    assessment && reviewable && risk && hasRiskEvidence(risk) && !riskConfirmed,
   );
-  const canReturn = Boolean(assessment && !confirmed);
+  const canReturn = Boolean(assessment && reviewable);
   return {
     clinicalSummaries: [
       {
         title: "评估摘要",
         value: assessment ? assessmentSummaryLabel(assessment) : "待补齐评估",
         helper: assessment
-          ? "已进入医生人工复核流程"
+          ? assessmentStatusLabel(assessment)
           : "患者完成结构化评估后可复核",
+        status: assessment ? "ready" : "blocked",
       },
       {
         title: "风险等级",
         value: riskLabel(risk?.riskLevel),
-        helper: risk?.reasonSummary || "待医生结合量表和训练情况确认",
+        helper: risk ? risk.reasonSummary : "当前评估没有关联的当前风险评级",
+        status: riskConfirmed ? "complete" : risk ? "pending" : "blocked",
       },
       {
         title: "医生结论",
         value: confirmed
-          ? "医生已确认"
-          : assessment
-            ? "待医生确认"
-            : "待形成建议",
-        helper: "AI 和语音材料只作为辅助建议",
+          ? "正式评估已由医师确认"
+          : reviewable
+            ? "待医师确认正式评估"
+            : assessmentStatusLabel(assessment),
+        helper: "AI 与语音材料仅供辅助，不能自动形成正式评估",
+        status: confirmed ? "complete" : reviewable ? "pending" : "blocked",
       },
     ],
     isApproveDisabled: !canApprove,
     isReturnDisabled: !canReturn,
     reviewStatusLabel: confirmed
-      ? "医生已确认"
-      : assessment
-        ? "待医生确认"
-        : "待补齐评估",
+      ? "正式评估已确认"
+      : assessmentReviewStatusLabel(assessment),
     scores: [
       {
         label: "MMSE",
@@ -267,20 +338,51 @@ function buildDoctorAssessmentReview(
 }
 
 function hasRiskEvidence(risk: RiskGrade) {
-  return Boolean(risk.riskLevel && risk.systemRiskLevel && risk.reasonSummary.trim());
+  return Boolean(
+    risk.riskLevel && risk.systemRiskLevel && risk.reasonSummary.trim(),
+  );
 }
 
 function isRiskConfirmed(risk?: RiskGrade) {
-  return Boolean(risk?.confirmedAt || risk?.confirmedById);
+  return Boolean(risk?.confirmedAt && risk?.confirmedById);
+}
+
+function assessmentStatusLabel(assessment?: AssessmentRecord) {
+  if (!assessment) return "无正式评估";
+  if (assessment.status === "doctor_confirmed") return "已由医师确认正式评估";
+  if (assessment.status === "completed") return "待医师确认正式评估";
+  if (assessment.status === "returned_for_review") return "已退回复核";
+  if (!assessment.status) return "评估状态缺失，不能作为正式评估";
+  return `评估状态 ${assessment.status}，不能作为正式评估`;
+}
+
+function assessmentReviewStatusLabel(assessment?: AssessmentRecord) {
+  if (!assessment) return "待补齐评估";
+  if (assessment.status === "completed") return "待医师确认";
+  if (assessment.status === "returned_for_review") return "已退回复核";
+  if (assessment.status === "doctor_confirmed") return "确认记录不完整";
+  return "当前状态不可确认";
+}
+
+function riskConfirmationLabel(risk?: RiskGrade) {
+  if (!risk) return "当前评估无当前风险评级";
+  if (isRiskConfirmed(risk)) return `${riskLabel(risk.riskLevel)} · 医师已确认`;
+  if (risk.confirmedAt || risk.confirmedById) return "风险确认记录不完整";
+  return `${riskLabel(risk.riskLevel)} · 待医师确认`;
 }
 
 function assessmentSummaryLabel(assessment: AssessmentRecord) {
-  const completedAt = formatDateTime(assessment.completedAt ?? assessment.createdAt);
+  const completedAt = formatDateTime(
+    assessment.completedAt ?? assessment.createdAt,
+  );
   const typeLabel =
     assessment.assessmentType === "ad8"
       ? "AD-8照护者访谈"
       : assessment.assessmentType.toUpperCase();
-  return `${typeLabel} · ${completedAt}`;
+  const physicalConditionLabel = assessment.physicalConditions?.length
+    ? ` · 身体状况：${assessment.physicalConditions.join("、")}`
+    : "";
+  return `${typeLabel} · ${completedAt}${physicalConditionLabel}`;
 }
 
 function riskLabel(level?: RiskGrade["riskLevel"]) {
@@ -328,12 +430,15 @@ export function readConditionSnapshot(
     code: snapshot.code,
     name: snapshot.name,
     description:
-      typeof snapshot.description === "string" ? snapshot.description : undefined,
+      typeof snapshot.description === "string"
+        ? snapshot.description
+        : undefined,
     environment: readRecord(snapshot.environment),
     deviceRequirements: readRecord(snapshot.deviceRequirements),
     taskParameters: readRecord(snapshot.taskParameters),
     qualityRules: readRecord(snapshot.qualityRules),
-    status: typeof snapshot.status === "string" ? snapshot.status : batch.status,
+    status:
+      typeof snapshot.status === "string" ? snapshot.status : batch.status,
     createdAt: batch.createdAt,
     updatedAt: batch.updatedAt,
   };

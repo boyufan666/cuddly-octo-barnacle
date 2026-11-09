@@ -24,6 +24,7 @@ const expectedFullOrder = [
   "db:generate",
   "db:validate",
   "db:typecheck",
+  "db:build",
   "db:contracts",
   "api:unit",
   "api:contracts",
@@ -112,6 +113,13 @@ function completeEnvironment() {
   };
 }
 
+function runOnNonProductionHost(options) {
+  return runRegression({
+    existsSync: () => false,
+    ...options,
+  });
+}
+
 test("full regression has one explicit fail-fast order across every required layer", () => {
   assert.deepEqual(
     regressionPlans.full.map(({ id }) => id),
@@ -124,11 +132,39 @@ test("full regression has one explicit fail-fast order across every required lay
   );
 });
 
+test("static, unit, and full build the generated database package before API consumers", () => {
+  for (const scope of ["static", "unit", "full"]) {
+    const plan = regressionPlans[scope];
+    const ids = plan.map(({ id }) => id);
+    const buildIndex = ids.indexOf("db:build");
+    assert.ok(ids.indexOf("db:generate") < buildIndex, scope);
+    assert.ok(buildIndex < ids.findIndex((id) => id.startsWith("api:")), scope);
+    assert.deepEqual(plan[buildIndex].args, [
+      "--filter", "@rehab-platform/db", "run", "build",
+    ]);
+    const calls = [];
+    assert.throws(
+      () => runOnNonProductionHost({
+        scope,
+        env: completeEnvironment(),
+        runStep(entry) {
+          calls.push(entry.id);
+          if (entry.id === "db:build") throw new Error("database build failed");
+        },
+      }),
+      /database build failed/,
+    );
+    assert.deepEqual(calls, ids.slice(0, buildIndex + 1));
+  }
+});
+
 test("scoped scripts keep unit tests separate from PostgreSQL write suites and API smoke", () => {
   const unitIds = regressionPlans.unit.map(({ id }) => id);
   const postgresIds = regressionPlans.postgres.map(({ id }) => id);
 
   assert.deepEqual(unitIds, [
+    "db:generate",
+    "db:build",
     "db:contracts",
     "api:unit",
     "api:contracts",
@@ -142,7 +178,7 @@ test("scoped scripts keep unit tests separate from PostgreSQL write suites and A
     false,
   );
   assert.equal(unitIds.includes("postgres:api-smoke"), false);
-  assert.deepEqual(postgresIds, expectedFullOrder.slice(19, 28));
+  assert.deepEqual(postgresIds, expectedFullOrder.slice(20, 29));
 });
 
 test("full and PostgreSQL scopes validate every database input before running a command", () => {
@@ -150,7 +186,7 @@ test("full and PostgreSQL scopes validate every database input before running a 
     const calls = [];
     assert.throws(
       () =>
-        runRegression({
+        runOnNonProductionHost({
           scope,
           env: {},
           runStep: (entry) => calls.push(entry.id),
@@ -184,7 +220,7 @@ test("static and full scopes require an explicit exact HTTPS API build origin", 
   const calls = [];
   assert.throws(
     () =>
-      runRegression({
+      runOnNonProductionHost({
         scope: "full",
         env: environment,
         runStep: (entry) => calls.push(entry.id),
@@ -228,7 +264,7 @@ test("full preflight rejects every unexpected database name before any child run
 
     assert.throws(
       () =>
-        runRegression({
+        runOnNonProductionHost({
           scope: "full",
           env: environment,
           runStep: (entry) => calls.push(entry.id),
@@ -298,7 +334,7 @@ test("full preflight rejects a shared API and Web port before any child runs", (
 
   assert.throws(
     () =>
-      runRegression({
+      runOnNonProductionHost({
         scope: "full",
         env: environment,
         runStep: (entry) => calls.push(entry.id),
@@ -313,18 +349,18 @@ test("validated PostgreSQL and full plans can be inspected without executing chi
   const postgresCalls = [];
   const fullCalls = [];
 
-  runRegression({
+  runOnNonProductionHost({
     scope: "postgres",
     env: environment,
     runStep: (entry) => postgresCalls.push(entry.id),
   });
-  runRegression({
+  runOnNonProductionHost({
     scope: "full",
     env: environment,
     runStep: (entry) => fullCalls.push(entry.id),
   });
 
-  assert.deepEqual(postgresCalls, expectedFullOrder.slice(19, 28));
+  assert.deepEqual(postgresCalls, expectedFullOrder.slice(20, 29));
   assert.deepEqual(fullCalls, expectedFullOrder);
 });
 
@@ -333,7 +369,7 @@ test("runner stops at the first failed child and never executes later commands",
 
   assert.throws(
     () =>
-      runRegression({
+      runOnNonProductionHost({
         scope: "unit",
         env: {},
         runStep(entry) {
@@ -343,7 +379,33 @@ test("runner stops at the first failed child and never executes later commands",
       }),
     /child failed/,
   );
-  assert.deepEqual(calls, ["db:contracts", "api:unit"]);
+  assert.deepEqual(calls, ["db:generate", "db:build", "db:contracts", "api:unit"]);
+});
+
+test("every scope stops before children when the single-host production config exists", () => {
+  for (const scope of Object.keys(regressionPlans)) {
+    const checkedPaths = [];
+    const childCalls = [];
+
+    assert.throws(
+      () =>
+        runRegression({
+          scope,
+          env: completeEnvironment(),
+          existsSync(path) {
+            checkedPaths.push(path);
+            return true;
+          },
+          runStep(entry) {
+            childCalls.push(entry.id);
+          },
+        }),
+      /Regression is blocked because \/etc\/rehab\/api\.env exists on this single-host production server.*independent Linux runner with dedicated test databases/,
+    );
+
+    assert.deepEqual(checkedPaths, ["/etc/rehab/api.env"]);
+    assert.deepEqual(childCalls, []);
+  }
 });
 
 test("API smoke and Playwright receive complete explicit runtime mappings", () => {

@@ -11,7 +11,7 @@ const rootDir = resolve(sessionDir, "../../../../..");
 const bundlePath = resolve(tmpdir(), "rehab-role-workspace-lifecycle.js");
 const noCameraConsentMessage = "请先完成有效的摄像头采集授权，再访问摄像头。";
 
-test.use({ channel: "chrome" });
+test.use({ browserName: "chromium" });
 
 test.beforeAll(() => {
   const pnpmModules = resolve(rootDir, "node_modules/.pnpm");

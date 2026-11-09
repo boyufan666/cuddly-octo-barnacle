@@ -30,6 +30,7 @@ export type RoleShellScreenId =
 export type RoleShellNavigationId =
   | RoleShellScreenId
   | "assessmentReview"
+  | "registrationReview"
   | "planManagement"
   | "preparationManagement"
   | "trainingReview"
@@ -154,7 +155,11 @@ export function RoleShell({
             </div>
           ) : null}
           {actionStatus ? (
-            <div className="mb-4 rounded-[8px] border border-[var(--success-line)] bg-[var(--success-soft)] px-5 py-4 font-bold text-[var(--success-strong)]">
+            <div
+              aria-live="polite"
+              className="mb-4 rounded-[8px] border border-[var(--success-line)] bg-[var(--success-soft)] px-5 py-4 font-bold text-[var(--success-strong)]"
+              role="status"
+            >
               {actionStatus}
             </div>
           ) : null}
@@ -235,7 +240,7 @@ function PatientTaskNavigation({
   return (
     <nav
       aria-label="患者任务导航"
-      className="z-40 grid shrink-0 grid-cols-4 gap-2 rounded-[8px] border border-[var(--line-subtle)] bg-[var(--surface-paper)] p-2 shadow-[var(--shadow-panel)]"
+      className="z-40 grid shrink-0 grid-cols-5 gap-2 rounded-[8px] border border-[var(--line-subtle)] bg-[var(--surface-paper)] p-2 shadow-[var(--shadow-panel)]"
       data-testid="patient-task-nav"
     >
       {items.map((item) => {

@@ -71,7 +71,9 @@ export async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   configureRequestBodyLimits(app);
   configureCors(app, requireEnv('WEB_ORIGIN'));
-  await app.listen(requireListenPort(), '0.0.0.0');
+  const listenHost =
+    process.env.DEPLOYMENT_MODE === 'single-host' ? '127.0.0.1' : '0.0.0.0';
+  await app.listen(requireListenPort(), listenHost);
 }
 
 if (require.main === module) {

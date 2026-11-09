@@ -11,6 +11,7 @@ import {
   decryptSensitiveJson,
   type SensitiveEncryptionKey,
 } from "../src/sensitive-encryption";
+import { verifyCredential } from "../src/credential-security";
 
 const prismaDirectory = __dirname;
 const repositoryRoot = resolve(prismaDirectory, "../../..");
@@ -153,6 +154,41 @@ function runSeed(
   return result;
 }
 
+function runCustomerSeed(environment: NodeJS.ProcessEnv, succeeds: boolean) {
+  const result = spawnSync(
+    "pnpm",
+    [
+      "--filter",
+      "@rehab-platform/db",
+      "exec",
+      "tsx",
+      "prisma/seed.ts",
+      "--mode=customer",
+    ],
+    {
+      cwd: repositoryRoot,
+      encoding: "utf8",
+      env: environment,
+      maxBuffer: 20 * 1024 * 1024,
+    },
+  );
+  if (result.error) throw result.error;
+  if (succeeds) {
+    assert.equal(
+      result.status,
+      0,
+      `customer seed failed\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
+    );
+  } else {
+    assert.notEqual(
+      result.status,
+      0,
+      `customer seed unexpectedly succeeded\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
+    );
+  }
+  return result;
+}
+
 function keyedEnvironment(databaseUrl: string): NodeJS.ProcessEnv {
   return {
     ...process.env,
@@ -199,6 +235,47 @@ function trialEnvironment(databaseUrl: string): NodeJS.ProcessEnv {
     TRIAL_DOCTOR_MOBILE_PHONE: "13700006102",
     TRIAL_DOCTOR_TITLE: "试点医生",
     TRIAL_DOCTOR_DEPARTMENT: "测试科室",
+  };
+}
+
+function customerEnvironment(databaseUrl: string): NodeJS.ProcessEnv {
+  return {
+    ...keyedEnvironment(databaseUrl),
+    CUSTOMER_SEED_CONFIRM_EMPTY_DATABASE:
+      "I_UNDERSTAND_CUSTOMER_SEED_REQUIRES_A_NEW_EMPTY_DATABASE",
+    CUSTOMER_ORG_CODE: "encrypted-seed-customer",
+    CUSTOMER_ORG_NAME: "PG客户康复中心唯一哨兵",
+    CUSTOMER_ORG_TYPE: "rehab_test",
+    CUSTOMER_ADMIN_ACCOUNT: "pg.customer.admin",
+    CUSTOMER_ADMIN_DISPLAY_NAME: "PG客户超级管理员唯一哨兵",
+    CUSTOMER_ADMIN_MOBILE_PHONE: "13720000001",
+    CUSTOMER_ADMIN_INITIAL_PASSWORD: "pg-customer-admin-password",
+    CUSTOMER_OPERATOR_ACCOUNT: "pg.customer.operator",
+    CUSTOMER_OPERATOR_DISPLAY_NAME: "PG客户运营管理员唯一哨兵",
+    CUSTOMER_OPERATOR_MOBILE_PHONE: "13720000002",
+    CUSTOMER_OPERATOR_INITIAL_PASSWORD: "pg-customer-operator-password",
+    CUSTOMER_AUDITOR_ACCOUNT: "pg.customer.auditor",
+    CUSTOMER_AUDITOR_DISPLAY_NAME: "PG客户审计管理员唯一哨兵",
+    CUSTOMER_AUDITOR_MOBILE_PHONE: "13720000003",
+    CUSTOMER_AUDITOR_INITIAL_PASSWORD: "pg-customer-auditor-password",
+    CUSTOMER_DOCTOR_ACCOUNT: "pg.customer.doctor",
+    CUSTOMER_DOCTOR_DISPLAY_NAME: "PG客户医师唯一哨兵",
+    CUSTOMER_DOCTOR_MOBILE_PHONE: "13720000004",
+    CUSTOMER_DOCTOR_INITIAL_PASSWORD: "pg-customer-doctor-password",
+    CUSTOMER_DOCTOR_TITLE: "客户主任医师",
+    CUSTOMER_DOCTOR_DEPARTMENT: "客户认知康复科",
+    CUSTOMER_PATIENT_ACCOUNT: "pg.customer.patient",
+    CUSTOMER_PATIENT_NAME: "PG客户患者唯一哨兵",
+    CUSTOMER_PATIENT_MOBILE_PHONE: "13720000005",
+    CUSTOMER_PATIENT_INITIAL_PASSWORD: "pg-customer-patient-password",
+    CUSTOMER_PATIENT_GENDER: "female",
+    CUSTOMER_PATIENT_AGE: "73",
+    CUSTOMER_PATIENT_MEDICAL_RECORD_NO: "CUSTOMER-PG-MRN-0001",
+    CUSTOMER_CAREGIVER_ACCOUNT: "pg.customer.caregiver",
+    CUSTOMER_CAREGIVER_NAME: "PG客户家属唯一哨兵",
+    CUSTOMER_CAREGIVER_MOBILE_PHONE: "13720000006",
+    CUSTOMER_CAREGIVER_INITIAL_PASSWORD: "pg-customer-caregiver-password",
+    CUSTOMER_CAREGIVER_RELATION: "女儿",
   };
 }
 
@@ -377,7 +454,7 @@ async function storedUserEnvelope(client: PrismaClient, id: string) {
 }
 
 test(
-  "main and trial seeds enforce encrypted PostgreSQL storage and reject unsafe reruns",
+  "main, customer, and trial seeds enforce encrypted PostgreSQL storage and reject unsafe reruns",
   { timeout: 240_000 },
   async (context) => {
     const baseUrl = requirePostgresUrl(disposableDatabaseUrl);
@@ -506,6 +583,219 @@ test(
         },
       );
       await main.client.$disconnect();
+
+      const customer = await createIsolatedClient("customer");
+      await context.test(
+        "customer seed requires explicit configuration before any write",
+        async () => {
+          const before = await dataRowCounts(customer.client);
+          const missingKeyFailure = runCustomerSeed(
+            {
+              ...customerEnvironment(customer.databaseUrl),
+              SENSITIVE_DATA_KEY_REF: "",
+              SENSITIVE_DATA_KEY: "",
+            },
+            false,
+          );
+          assert.match(missingKeyFailure.stderr, /requires an exact non-empty/);
+          assert.deepEqual(await dataRowCounts(customer.client), before);
+
+          const invalidKeyFailure = runCustomerSeed(
+            {
+              ...customerEnvironment(customer.databaseUrl),
+              SENSITIVE_DATA_KEY: "not-canonical-base64",
+            },
+            false,
+          );
+          assert.match(invalidKeyFailure.stderr, /requires canonical base64/);
+          assert.deepEqual(await dataRowCounts(customer.client), before);
+
+          const failure = runCustomerSeed(
+            {
+              ...customerEnvironment(customer.databaseUrl),
+              CUSTOMER_SEED_CONFIRM_EMPTY_DATABASE: "",
+            },
+            false,
+          );
+          assert.match(
+            failure.stderr,
+            /CUSTOMER_SEED_CONFIRM_EMPTY_DATABASE=I_UNDERSTAND_CUSTOMER_SEED_REQUIRES_A_NEW_EMPTY_DATABASE/,
+          );
+          assert.deepEqual(await dataRowCounts(customer.client), before);
+        },
+      );
+
+      await context.test(
+        "customer seed creates login-ready baseline without clinical history",
+        async () => {
+          const environment = customerEnvironment(customer.databaseUrl);
+          runCustomerSeed(environment, true);
+
+          assert.equal(await customer.client.organization.count(), 1);
+          assert.equal(await customer.client.user.count(), 6);
+          assert.equal(await customer.client.doctorProfile.count(), 1);
+          assert.equal(await customer.client.patientProfile.count(), 1);
+          assert.equal(await customer.client.caregiverRelation.count(), 0);
+          assert.equal(await customer.client.consentRecord.count(), 0);
+          assert.equal(await customer.client.gameContent.count(), 9);
+          assert.equal(
+            await customer.client.gameContent.count({
+              where: {
+                buildStatus: "released",
+                releaseChannel: "production",
+                publishedStatus: "published",
+                status: "active",
+              },
+            }),
+            9,
+          );
+
+          const emptyClinicalCounts = {
+            assessments: await customer.client.assessmentRecord.count(),
+            currentRisks: await customer.client.riskGradeRecord.count({
+              where: { isCurrent: true },
+            }),
+            aiAnalyses: await customer.client.aiAnalysisRecord.count(),
+            rehabPlans: await customer.client.rehabPlan.count(),
+            planItems: await customer.client.rehabPlanItem.count(),
+            planAdjustments: await customer.client.planAdjustmentRecord.count(),
+            trainingSessions: await customer.client.trainingSession.count(),
+            trainingResults: await customer.client.trainingResult.count(),
+            motionMetrics: await customer.client.motionMetric.count(),
+          };
+          assert.deepEqual(emptyClinicalCounts, {
+            assessments: 0,
+            currentRisks: 0,
+            aiAnalyses: 0,
+            rehabPlans: 0,
+            planItems: 0,
+            planAdjustments: 0,
+            trainingSessions: 0,
+            trainingResults: 0,
+            motionMetrics: 0,
+          });
+
+          const patient = await customer.client.patientProfile.findFirstOrThrow(
+            {
+              select: {
+                id: true,
+                identityEnvelope: true,
+                careDetailsEnvelope: true,
+              },
+            },
+          );
+          assert.deepEqual(
+            decryptSensitiveJson(
+              patient.identityEnvelope,
+              {
+                tableName: "patient_profile",
+                recordId: patient.id,
+                fieldName: "identityEnvelope",
+              },
+              encryptionKey,
+            ),
+            { name: "PG客户患者唯一哨兵", gender: "female", age: 73 },
+          );
+          assert.deepEqual(
+            decryptSensitiveJson(
+              patient.careDetailsEnvelope,
+              {
+                tableName: "patient_profile",
+                recordId: patient.id,
+                fieldName: "careDetailsEnvelope",
+              },
+              encryptionKey,
+            ),
+            {
+              healthMetrics: { medicalRecordNo: "CUSTOMER-PG-MRN-0001" },
+            },
+          );
+
+          const expectedPasswords = new Map([
+            ["pg.customer.admin", "pg-customer-admin-password"],
+            ["pg.customer.operator", "pg-customer-operator-password"],
+            ["pg.customer.auditor", "pg-customer-auditor-password"],
+            ["pg.customer.doctor", "pg-customer-doctor-password"],
+            ["pg.customer.patient", "pg-customer-patient-password"],
+            ["pg.customer.caregiver", "pg-customer-caregiver-password"],
+          ]);
+          const users = await customer.client.user.findMany({
+            select: {
+              account: true,
+              passwordHash: true,
+              passwordResetRequired: true,
+            },
+          });
+          assert.equal(users.length, expectedPasswords.size);
+          for (const user of users) {
+            assert.equal(user.passwordResetRequired, true);
+            const expectedPassword = expectedPasswords.get(user.account);
+            assert.ok(expectedPassword);
+            assert.equal(
+              await verifyCredential(user.passwordHash, expectedPassword),
+              true,
+              `${user.account} cannot log in with its explicit initial password`,
+            );
+          }
+
+          const beforeRerun = await dataRowCounts(customer.client);
+          const beforeUsers = await customer.client.user.findMany({
+            orderBy: { account: "asc" },
+            select: {
+              account: true,
+              identityEnvelope: true,
+              passwordHash: true,
+            },
+          });
+          const rerunFailure = runCustomerSeed(environment, false);
+          assert.match(rerunFailure.stderr, /requires a new empty database/);
+          assert.deepEqual(await dataRowCounts(customer.client), beforeRerun);
+          assert.deepEqual(
+            await customer.client.user.findMany({
+              orderBy: { account: "asc" },
+              select: {
+                account: true,
+                identityEnvelope: true,
+                passwordHash: true,
+              },
+            }),
+            beforeUsers,
+          );
+        },
+      );
+      await customer.client.$disconnect();
+
+      const customerExisting = await createIsolatedClient("customer_existing");
+      await context.test(
+        "customer seed never overwrites pre-existing non-seed business data",
+        async () => {
+          await customerExisting.client.organization.create({
+            data: {
+              code: "existing-customer-data",
+              name: "不得覆盖的既有客户机构",
+              type: "existing_business",
+            },
+          });
+          const before = await dataRowCounts(customerExisting.client);
+          const failure = runCustomerSeed(
+            customerEnvironment(customerExisting.databaseUrl),
+            false,
+          );
+          assert.match(failure.stderr, /Populated tables: organization/);
+          assert.deepEqual(
+            await dataRowCounts(customerExisting.client),
+            before,
+          );
+          assert.deepEqual(
+            await customerExisting.client.organization.findUniqueOrThrow({
+              where: { code: "existing-customer-data" },
+              select: { name: true, type: true },
+            }),
+            { name: "不得覆盖的既有客户机构", type: "existing_business" },
+          );
+        },
+      );
+      await customerExisting.client.$disconnect();
 
       const trial = await createIsolatedClient("trial");
       await context.test(

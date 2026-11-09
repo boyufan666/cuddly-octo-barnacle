@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 
 import { spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const rootDir = resolve(fileURLToPath(new URL("..", import.meta.url)));
+const productionApiEnvironmentPath = "/etc/rehab/api.env";
 
 const steps = {
   dbGenerate: step("db:generate", "pnpm", ["run", "db:generate"]),
@@ -15,6 +17,7 @@ const steps = {
     "prisma",
     "validate",
   ]),
+  dbBuild: packageStep("db:build", "@rehab-platform/db", "build"),
   dbTypecheck: packageStep("db:typecheck", "@rehab-platform/db", "typecheck"),
   dbContracts: packageStep("db:contracts", "@rehab-platform/db", "test"),
   apiUnit: packageStep("api:unit", "@rehab-platform/api", "test:unit"),
@@ -168,6 +171,7 @@ export const regressionPlans = Object.freeze({
     steps.dbGenerate,
     steps.dbValidate,
     steps.dbTypecheck,
+    steps.dbBuild,
     steps.apiTypecheck,
     steps.apiLint,
     steps.apiBuild,
@@ -181,6 +185,8 @@ export const regressionPlans = Object.freeze({
     steps.unityBuild,
   ]),
   unit: Object.freeze([
+    steps.dbGenerate,
+    steps.dbBuild,
     steps.dbContracts,
     steps.apiUnit,
     steps.apiContracts,
@@ -194,6 +200,7 @@ export const regressionPlans = Object.freeze({
     steps.dbGenerate,
     steps.dbValidate,
     steps.dbTypecheck,
+    steps.dbBuild,
     steps.dbContracts,
     steps.apiUnit,
     steps.apiContracts,
@@ -316,7 +323,14 @@ export function runRegression({
   scope,
   env = process.env,
   runStep = runChildStep,
+  existsSync: checkExists = existsSync,
 } = {}) {
+  if (checkExists(productionApiEnvironmentPath)) {
+    throw new Error(
+      `Regression is blocked because ${productionApiEnvironmentPath} exists on this single-host production server. Run this scope on an independent Linux runner with dedicated test databases.`,
+    );
+  }
+
   const plan = regressionPlans[scope];
   if (!plan) {
     throw new Error(

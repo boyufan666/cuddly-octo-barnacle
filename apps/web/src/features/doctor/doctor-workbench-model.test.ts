@@ -65,6 +65,7 @@ test("doctor workbench binds assessment review to the selected assessment risk",
       {
         id: "assessment-id",
         assessmentType: "MMSE/CDR",
+        status: "completed",
         scoreSummary: { mmse: 22, cdr: 1 },
         rawInputSummary: {},
         createdAt: "2026-06-10T08:00:00.000Z",
@@ -87,6 +88,7 @@ test("doctor workbench keeps return action available when risk evidence is missi
       {
         id: "assessment-id",
         assessmentType: "MMSE/CDR",
+        status: "completed",
         scoreSummary: { mmse: 22, cdr: 1 },
         rawInputSummary: {},
         createdAt: "2026-06-10T08:00:00.000Z",
@@ -101,6 +103,141 @@ test("doctor workbench keeps return action available when risk evidence is missi
 
   assert.equal(model.assessmentReview.isApproveDisabled, true);
   assert.equal(model.assessmentReview.isReturnDisabled, false);
+});
+
+test("doctor plan recommendation requires a doctor-confirmed formal assessment", () => {
+  const confirmedRisk = createConfirmedRisk("assessment-risk-id");
+  const model = buildDoctorWorkbenchModel({
+    patient: createPatientProfile(
+      {
+        id: "assessment-id",
+        assessmentType: "MMSE/CDR",
+        status: "completed",
+        scoreSummary: { mmse: 22, cdr: 1 },
+        rawInputSummary: {},
+        createdAt: "2026-06-10T08:00:00.000Z",
+        riskGrades: [confirmedRisk],
+      },
+      [confirmedRisk],
+    ),
+    collectionBatchForm: emptyCollectionBatchForm,
+    collectionBatches: [],
+    collectionProtocols: [],
+  });
+
+  assert.equal(model.planRecommendation.canRecommend, false);
+  assert.equal(model.planRecommendation.assessmentConfirmed, false);
+  assert.match(model.planRecommendation.blockers.join(" "), /正式评估/);
+});
+
+test("doctor plan recommendation requires the current risk linked to the formal assessment", () => {
+  const unrelatedConfirmedRisk = createConfirmedRisk("patient-risk-id");
+  const model = buildDoctorWorkbenchModel({
+    patient: createPatientProfile(
+      {
+        id: "assessment-id",
+        assessmentType: "MMSE/CDR",
+        status: "doctor_confirmed",
+        scoreSummary: { mmse: 22, cdr: 1 },
+        rawInputSummary: {},
+        createdAt: "2026-06-10T08:00:00.000Z",
+        riskGrades: [],
+      },
+      [unrelatedConfirmedRisk],
+    ),
+    collectionBatchForm: emptyCollectionBatchForm,
+    collectionBatches: [],
+    collectionProtocols: [],
+  });
+
+  assert.equal(model.currentRisk, undefined);
+  assert.equal(model.planRecommendation.canRecommend, false);
+  assert.match(model.planRecommendation.blockers.join(" "), /当前风险评级/);
+});
+
+test("doctor plan recommendation opens only after formal assessment and risk confirmation", () => {
+  const confirmedRisk = createConfirmedRisk("assessment-risk-id");
+  const model = buildDoctorWorkbenchModel({
+    patient: createPatientProfile(
+      {
+        id: "assessment-id",
+        assessmentType: "MMSE/CDR",
+        status: "doctor_confirmed",
+        scoreSummary: { mmse: 22, cdr: 1 },
+        rawInputSummary: {},
+        createdAt: "2026-06-10T08:00:00.000Z",
+        riskGrades: [confirmedRisk],
+      },
+      [confirmedRisk],
+    ),
+    collectionBatchForm: emptyCollectionBatchForm,
+    collectionBatches: [],
+    collectionProtocols: [],
+  });
+
+  assert.equal(model.planRecommendation.canRecommend, true);
+  assert.equal(model.planRecommendation.assessmentConfirmed, true);
+  assert.equal(model.planRecommendation.riskConfirmed, true);
+  assert.deepEqual(model.planRecommendation.blockers, []);
+});
+
+test("doctor plan editor never falls back to the active plan", () => {
+  const confirmedRisk = createConfirmedRisk("assessment-risk-id");
+  const patient = createPatientProfile(
+    {
+      id: "assessment-id",
+      assessmentType: "MMSE/CDR",
+      status: "doctor_confirmed",
+      scoreSummary: { mmse: 22, cdr: 1 },
+      rawInputSummary: {},
+      createdAt: "2026-06-10T08:00:00.000Z",
+      riskGrades: [confirmedRisk],
+    },
+    [confirmedRisk],
+  );
+  patient.rehabPlans = [createPlan("active-plan-id", [])];
+
+  const model = buildDoctorWorkbenchModel({
+    patient,
+    collectionBatchForm: emptyCollectionBatchForm,
+    collectionBatches: [],
+    collectionProtocols: [],
+  });
+
+  assert.equal(model.currentPlan, undefined);
+  assert.equal(model.confirmedPlan?.id, "active-plan-id");
+  assert.equal(model.planEditorForm.dailyDuration, "");
+});
+
+test("existing pending plan is shown for adjustment and blocks duplicate recommendation", () => {
+  const confirmedRisk = createConfirmedRisk("assessment-risk-id");
+  const patient = createPatientProfile(
+    {
+      id: "assessment-id",
+      assessmentType: "MMSE/CDR",
+      status: "doctor_confirmed",
+      scoreSummary: { mmse: 22, cdr: 1 },
+      rawInputSummary: {},
+      createdAt: "2026-06-10T08:00:00.000Z",
+      riskGrades: [confirmedRisk],
+    },
+    [confirmedRisk],
+  );
+  const pendingPlan = createPlan("pending-plan-id", []);
+  pendingPlan.status = "pending_confirm";
+  pendingPlan.isCurrent = false;
+  patient.rehabPlans = [pendingPlan];
+
+  const model = buildDoctorWorkbenchModel({
+    patient,
+    collectionBatchForm: emptyCollectionBatchForm,
+    collectionBatches: [],
+    collectionProtocols: [],
+  });
+
+  assert.equal(model.currentPlan?.id, "pending-plan-id");
+  assert.equal(model.planRecommendation.canRecommend, false);
+  assert.match(model.planRecommendation.blockers.join(" "), /待确认推荐方案/);
 });
 
 test("doctor preparation reload opens the plan item with an existing ready batch", () => {
@@ -235,6 +372,19 @@ function createGameContent(
     supportedInputModes: ["keyboard"],
     requiredMetrics: [{ metricType: "completionRate", unit: "ratio" }],
     status: "active",
+  };
+}
+
+function createConfirmedRisk(id: string): RiskGrade {
+  return {
+    id,
+    riskLevel: "moderate",
+    systemRiskLevel: "moderate",
+    manualRiskLevel: "moderate",
+    reasonSummary: "量表与临床观察支持当前风险结论。",
+    isCurrent: true,
+    confirmedById: "doctor-user-id",
+    confirmedAt: "2026-06-10T09:00:00.000Z",
   };
 }
 

@@ -554,6 +554,34 @@ describe('Task 4 concurrency guarantees on disposable PostgreSQL', () => {
         },
       },
     });
+    const formalAssessmentId = randomUUID();
+    await prisma.assessmentRecord.create({
+      data: {
+        id: formalAssessmentId,
+        patientId: current.patients[0].id,
+        assessmentType: 'MMSE/CDR',
+        source: 'task4_concurrency_test',
+        resultEnvelope: encryptSensitiveJson(
+          {
+            scoreSummary: {},
+            rawInputSummary: {
+              conversationEvidence: {
+                sessionId: session.id,
+                patientId: current.patients[0].id,
+                assessmentType: 'MMSE/CDR',
+                status: 'pending_human_review',
+              },
+            },
+          },
+          {
+            tableName: 'assessment_record',
+            recordId: formalAssessmentId,
+            fieldName: 'resultEnvelope',
+          },
+          testSensitiveEncryptionKey,
+        ),
+      },
+    });
     await installCasBarrier('conversation');
 
     const attempts = await Promise.allSettled([

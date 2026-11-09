@@ -4,7 +4,7 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { chromium, type Page } from "@playwright/test";
+import { chromium, type Browser, type Page } from "@playwright/test";
 import { createRef } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { CognitiveAnswerChoices } from "./CognitiveTrainingSurface.tsx";
@@ -271,28 +271,35 @@ async function mountSurface(
   } = {},
 ) {
   const server = await startSurfaceTestServer();
-  const browser = await chromium.launch({ channel: "chrome", headless: true });
-  const page = await browser.newPage();
-  await page.clock.install({ time: new Date(startedAtMs) });
-  await page.clock.setFixedTime(new Date(startedAtMs));
-  const address = server.address();
-  if (!address || typeof address === "string") {
-    throw new Error("认知训练 Surface 测试服务器地址无效。");
+  let browser: Browser | undefined;
+  try {
+    browser = await chromium.launch({ headless: true });
+    const page = await browser.newPage();
+    await page.clock.install({ time: new Date(startedAtMs) });
+    await page.clock.setFixedTime(new Date(startedAtMs));
+    const address = server.address();
+    if (!address || typeof address === "string") {
+      throw new Error("认知训练 Surface 测试服务器地址无效。");
+    }
+    await page.goto(`http://127.0.0.1:${address.port}`);
+    await page.addScriptTag({ content: await surfaceBundlePromise });
+    await page.evaluate(
+      (mountOptions) => window.__cognitiveSurfaceHarness.mount(mountOptions),
+      options,
+    );
+    const mountedBrowser = browser;
+    return {
+      browser: mountedBrowser,
+      page,
+      async close() {
+        await mountedBrowser.close();
+        await closeServer(server);
+      },
+    };
+  } catch (error) {
+    await Promise.allSettled([browser?.close(), closeServer(server)]);
+    throw error;
   }
-  await page.goto(`http://127.0.0.1:${address.port}`);
-  await page.addScriptTag({ content: await surfaceBundlePromise });
-  await page.evaluate(
-    (mountOptions) => window.__cognitiveSurfaceHarness.mount(mountOptions),
-    options,
-  );
-  return {
-    browser,
-    page,
-    async close() {
-      await browser.close();
-      await closeServer(server);
-    },
-  };
 }
 
 function startSurfaceTestServer() {

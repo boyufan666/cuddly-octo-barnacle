@@ -163,7 +163,7 @@ export type RehabPlan = {
   patientId: string;
   doctorId?: string | null;
   planName: string;
-  status: string;
+  status: "draft" | "pending_confirm" | "active" | "paused" | "ended";
   isCurrent: boolean;
   weekFrequency: number;
   dailyDuration: number;
@@ -175,50 +175,77 @@ export type RehabPlan = {
   items: RehabPlanItem[];
 };
 
-export type RiskGrade = {
-  id: string;
+type RiskGradeSummary = {
   riskLevel: "low" | "moderate" | "high";
   systemRiskLevel: "low" | "moderate" | "high";
   manualRiskLevel?: "low" | "moderate" | "high" | null;
   reasonSummary: string;
   isCurrent: boolean;
-  confirmedById?: string | null;
   confirmedAt?: string | null;
 };
+
+export type PatientRiskGrade = RiskGradeSummary & {
+  id?: never;
+  confirmedById?: never;
+};
+
+export type ClinicianRiskGrade = RiskGradeSummary & {
+  id: string;
+  confirmedById?: string | null;
+};
+
+export type RiskGrade = PatientRiskGrade | ClinicianRiskGrade;
 
 export type AiAnalysis = {
   id: string;
   analysisScene: string;
-  modelVersion: string;
+  modelVersion?: string;
   confidence: number;
-  inputSummary: unknown;
-  outputSummary: unknown;
+  inputSummary?: unknown;
+  outputSummary?: unknown;
 };
 
 export type AssessmentRecord = {
   id: string;
   assessmentType: string;
   status?: string;
+  physicalConditions?: AssessmentPhysicalCondition[];
   scoreSummary: Record<string, unknown>;
-  rawInputSummary: Record<string, unknown>;
+  rawInputSummary?: Record<string, unknown>;
   completedAt?: string | null;
   createdAt: string;
   riskGrades?: RiskGrade[];
   aiAnalyses?: AiAnalysis[];
 };
 
-export type AssessmentScoreSummary = {
-  mmse: number;
-  cdr: number;
-  memory: number;
-  orientation: number;
-  executive: number;
-  language: number;
-};
+export type AssessmentPhysicalCondition =
+  | "no_known_limitations"
+  | "wheelchair"
+  | "upper_limb_limited";
+
+export type AssessmentScoreSummary = Record<string, number> &
+  Partial<{
+    mmse: number;
+    cdr: number;
+    memory: number;
+    orientation: number;
+    executive: number;
+    language: number;
+    ad8Total: number;
+    itemMemoryProblems: number;
+    itemReducedInterest: number;
+    itemRepeatsQuestions: number;
+    itemTroubleLearningTools: number;
+    itemForgetsMonthYear: number;
+    itemHandlesFinancesPoorly: number;
+    itemTroubleAppointments: number;
+    itemDailyThinkingMemoryProblems: number;
+  }>;
 
 export type CreateAiAssessmentDraftRequest = {
   patientId: string;
   assessmentType?: string;
+  physicalConditions?: AssessmentPhysicalCondition[];
   transcript: string;
   idempotencyKey: string;
 };
@@ -232,10 +259,17 @@ export type ReviewAssessmentRequest = {
 export type CreateAssessmentSpeechTranscriptRequest = {
   patientId: string;
   assessmentType?: string;
+  physicalConditions?: AssessmentPhysicalCondition[];
   idempotencyKey: string;
   audio: {
     contentBase64: string;
-    mimeType: "audio/webm" | "audio/wav" | "audio/mpeg" | "audio/mp4";
+    mimeType:
+      | "audio/webm"
+      | "audio/wav"
+      | "audio/mpeg"
+      | "audio/mp4"
+      | "audio/ogg"
+      | "audio/flac";
     durationSeconds: number;
   };
 };
@@ -244,6 +278,7 @@ export type AssessmentSpeechTranscriptResponse = {
   patientId: string;
   assessmentType: string;
   status: "transcribed";
+  physicalConditions: AssessmentPhysicalCondition[];
   transcript: string;
   speechEvidence: {
     provider: string;
@@ -298,8 +333,10 @@ export type AiAssessmentDraftResponse = {
   status: "pending_human_review";
   riskLevel: "low" | "moderate" | "high";
   scoreSummary: AssessmentScoreSummary;
+  physicalConditions?: AssessmentPhysicalCondition[];
   rawInputSummary: {
     source: "production_ai_assessment";
+    physicalConditions?: AssessmentPhysicalCondition[];
     transcript: string;
     analysisSummary: string;
     modelVersion: string;
@@ -322,15 +359,15 @@ export type AiConversationMessage = {
 export type AiConversationSession = {
   id: string;
   patientId: string;
-  createdByUserId: string;
-  assessmentType: string;
+  createdByUserId?: string;
+  assessmentType?: string;
   status: "active" | "completed" | "pending_human_review" | "reviewed";
-  startedAt: string;
+  startedAt?: string;
   completedAt?: string | null;
-  provider: string;
-  modelVersion: string;
+  provider?: string;
+  modelVersion?: string;
   callId?: string | null;
-  endpointRef: string;
+  endpointRef?: string;
   promptVersion?: string | null;
   summary?: string | null;
   reviewNote?: string | null;
@@ -345,6 +382,7 @@ export type AiConversationSession = {
 export type StartAiConversationRequest = {
   patientId: string;
   assessmentType?: string;
+  physicalConditions?: AssessmentPhysicalCondition[];
 };
 
 export type AppendAiConversationMessageRequest = {
@@ -543,6 +581,30 @@ export type TrainingResult = {
   createdAt: string;
 };
 
+type PatientTrainingResultField =
+  | "id"
+  | "score"
+  | "completionRate"
+  | "durationSeconds"
+  | "reactionTimeMs"
+  | "motionAccuracy"
+  | "exerciseIntensity"
+  | "abnormalFlag"
+  | "qualityFlag"
+  | "reviewStatus"
+  | "reviewConclusion"
+  | "reviewNote"
+  | "reviewedAt"
+  | "createdAt";
+
+export type PatientTrainingResult = Pick<
+  TrainingResult,
+  PatientTrainingResultField
+> &
+  Partial<
+    Record<Exclude<keyof TrainingResult, PatientTrainingResultField>, never>
+  >;
+
 export type TrainingSession = {
   id: string;
   patientId: string;
@@ -586,8 +648,7 @@ export type TrainingRecoveryContext = {
   startedAt: string;
 };
 
-type PatientTrainingRecordSession = Pick<
-  TrainingSession,
+type PatientTrainingRecordSessionField =
   | "id"
   | "planItemId"
   | "calibrationStatus"
@@ -595,8 +656,49 @@ type PatientTrainingRecordSession = Pick<
   | "startedAt"
   | "endedAt"
   | "interruptReason"
-  | "syncStatus"
-  | "result"
+  | "syncStatus";
+
+type PatientTrainingGameContentField =
+  | "id"
+  | "name"
+  | "trainingTargets"
+  | "tags"
+  | "defaultDuration"
+  | "defaultDifficulty";
+
+export type PatientTrainingGameContent = Pick<
+  GameContent,
+  PatientTrainingGameContentField
+> &
+  Partial<
+    Record<Exclude<keyof GameContent, PatientTrainingGameContentField>, never>
+  >;
+
+export type PatientTrainingRecordSession = Pick<
+  TrainingSession,
+  PatientTrainingRecordSessionField
+> & {
+  gameContent: PatientTrainingGameContent;
+  result: PatientTrainingResult | null;
+  recoveryContext?: TrainingRecoveryContext;
+} & Partial<
+    Record<
+      Exclude<
+        keyof TrainingSession,
+        PatientTrainingRecordSessionField | "gameContent" | "result"
+      >,
+      never
+    >
+  >;
+
+export type DoctorTrainingRecordSession = TrainingSession & {
+  gameContent: GameContent;
+  recoveryContext?: never;
+};
+
+type WorkspacePatientTrainingRecordSession = Pick<
+  TrainingSession,
+  PatientTrainingRecordSessionField | "result"
 > & {
   gameContent: GameContent;
   recoveryContext?: TrainingRecoveryContext;
@@ -616,13 +718,10 @@ type PatientTrainingRecordSession = Pick<
   motionMetrics?: never;
 };
 
-type DoctorTrainingRecordSession = TrainingSession & {
-  gameContent: GameContent;
-  recoveryContext?: never;
-};
-
+// This compatibility view is consumed by role-polymorphic workspaces. Patient-only
+// responses should use PatientTrainingRecordSession/PatientTrainingRecordsResponse.
 export type TrainingRecordSession =
-  | PatientTrainingRecordSession
+  | WorkspacePatientTrainingRecordSession
   | DoctorTrainingRecordSession;
 
 export type CollectionCondition = {
@@ -726,6 +825,7 @@ export type CreateAssessmentRequest = {
   patientId: string;
   assessmentType: string;
   scoreSummary: Record<string, number>;
+  physicalConditions?: AssessmentPhysicalCondition[];
   rawInputSummary: Record<string, unknown>;
 };
 
@@ -861,14 +961,21 @@ export type PatientProfile = {
   caregiverRelations: CaregiverRelation[];
 };
 
+type TrainingRecordsSummary = {
+  totalSessions: number;
+  completedSessions: number;
+  averageScore: number;
+  abnormalCount: number;
+};
+
+export type PatientTrainingRecordsResponse = {
+  sessions: PatientTrainingRecordSession[];
+  summary: TrainingRecordsSummary;
+};
+
 export type TrainingRecordsResponse = {
   sessions: TrainingRecordSession[];
-  summary: {
-    totalSessions: number;
-    completedSessions: number;
-    averageScore: number;
-    abnormalCount: number;
-  };
+  summary: TrainingRecordsSummary;
 };
 
 export type RewardLedgerItem = {
@@ -1005,7 +1112,7 @@ export type ExportDataset =
   | "audit-logs";
 
 export type DataExportRequest = {
-  dataset: Exclude<ExportDataset, "assessments" | "training-records">;
+  dataset: ExportDataset;
   format: "csv";
   reason: string;
   dateFrom?: string;

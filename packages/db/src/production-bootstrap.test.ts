@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { createPhoneLookupHmac, decryptSensitiveJson } from "./sensitive-encryption";
 import {
   bootstrapProduction,
   parseProductionBootstrapConfig,
@@ -30,6 +31,16 @@ const config: ProductionBootstrapConfig = {
     department: "认知康复科",
   },
 };
+
+const expectedRoleDefinitions = [
+  { code: "patient", name: "患者", level: 10 },
+  { code: "caregiver", name: "家属", level: 20 },
+  { code: "doctor", name: "医师", level: 30 },
+  { code: "admin", name: "管理员", level: 40 },
+  { code: "admin_super", name: "超级管理员", level: 43 },
+  { code: "admin_operator", name: "普通运营", level: 41 },
+  { code: "admin_auditor", name: "只读审计", level: 40 },
+];
 
 function writeSecret(directory: string, filename: string, value: string) {
   const path = join(directory, filename);
@@ -84,6 +95,24 @@ test("production bootstrap config has an exact approved shape", () => {
   );
 });
 
+test("production bootstrap requires an explicit phone value or null for each account", () => {
+  for (const role of ["administrator", "doctor"] as const) {
+    const withoutPhone = { ...config, [role]: { ...config[role], mobilePhone: null } };
+    assert.deepEqual(parseProductionBootstrapConfig(withoutPhone), withoutPhone);
+    for (const mobilePhone of ["", " ", undefined, 123]) {
+      assert.throws(() => parseProductionBootstrapConfig({
+        ...config,
+        [role]: { ...config[role], mobilePhone },
+      }), /exact non-empty string/);
+    }
+    const { mobilePhone: _phone, ...missingPhone } = config[role];
+    assert.throws(() => parseProductionBootstrapConfig({
+      ...config,
+      [role]: missingPhone,
+    }), /unsupported field/);
+  }
+});
+
 test("production bootstrap reads only direct Secret Files and rejects raw or linked sources", () => {
   const directory = mkdtempSync(join(tmpdir(), "rehab-production-bootstrap-"));
   try {
@@ -136,12 +165,15 @@ test("production bootstrap reads only direct Secret Files and rejects raw or lin
   }
 });
 
-test("production bootstrap is transactional, idempotent, and creates no patient or training records", async () => {
+for (const hasPhone of [true, false]) {
+test(`production bootstrap is transactional, idempotent, and creates no patient or training records (phone=${hasPhone})`, async () => {
   const users = new Map<string, Record<string, unknown>>();
+  const roleDefinitions = new Map<string, Record<string, unknown>>();
   const roleBindings = new Map<string, Record<string, unknown>>();
   const doctorProfiles = new Map<string, Record<string, unknown>>();
   const audits: Record<string, unknown>[] = [];
   const operations: string[] = [];
+  let roleDefinitionCreates = 0;
   const organization = {
     id: randomUUID(),
     ...config.organization,
@@ -153,7 +185,19 @@ test("production bootstrap is transactional, idempotent, and creates no patient 
       return 1;
     },
     roleDefinition: {
-      upsert: async ({ create }: { create: Record<string, unknown> }) => create,
+      upsert: async ({
+        where,
+        create,
+      }: {
+        where: { code: string };
+        create: Record<string, unknown>;
+      }) => {
+        const existing = roleDefinitions.get(where.code);
+        if (existing) return existing;
+        roleDefinitionCreates += 1;
+        roleDefinitions.set(where.code, create);
+        return create;
+      },
     },
     organization: {
       upsert: async () => organization,
@@ -209,7 +253,11 @@ test("production bootstrap is transactional, idempotent, and creates no patient 
       callback(transaction),
   };
   const input = {
-    config,
+    config: hasPhone ? config : {
+      ...config,
+      administrator: { ...config.administrator, mobilePhone: null },
+      doctor: { ...config.doctor, mobilePhone: null },
+    },
     administratorPassword: "AdminBootstrap-253913!",
     doctorPassword: "DoctorBootstrap-253913!",
     encryptionKey: {
@@ -224,6 +272,30 @@ test("production bootstrap is transactional, idempotent, and creates no patient 
   assert.deepEqual(second, first);
   assert.deepEqual(operations, ["advisory-lock", "advisory-lock"]);
   assert.equal(users.size, 2);
+  assert.equal(roleDefinitionCreates, expectedRoleDefinitions.length);
+  assert.deepEqual(
+    [...roleDefinitions.values()].map(({ code, name, level, isSystemRole }) => ({
+      code,
+      name,
+      level,
+      isSystemRole,
+    })),
+    expectedRoleDefinitions.map((role) => ({ ...role, isSystemRole: true })),
+  );
+  assert.ok(roleDefinitions.has("patient"));
+  assert.ok(roleDefinitions.has("caregiver"));
+  for (const person of [input.config.administrator, input.config.doctor]) {
+    const user = users.get(person.account)!;
+    assert.deepEqual(decryptSensitiveJson(user.identityEnvelope, {
+      tableName: "user", recordId: String(user.id), fieldName: "identityEnvelope",
+    }, input.encryptionKey), {
+      displayName: person.displayName,
+      mobilePhone: person.mobilePhone,
+    });
+    assert.equal(user.mobilePhoneLookup, person.mobilePhone === null
+      ? null
+      : createPhoneLookupHmac(person.mobilePhone, input.encryptionKey.key));
+  }
   assert.equal(doctorProfiles.size, 1);
   assert.equal(roleBindings.size, 2);
   assert.equal(audits.length, 1);
@@ -236,3 +308,59 @@ test("production bootstrap is transactional, idempotent, and creates no patient 
     trainingRecordsCreated: 0,
   });
 });
+}
+
+for (const conflictingRole of ["patient", "caregiver"] as const) {
+  test(`production bootstrap rejects a conflicting ${conflictingRole} role definition before creating accounts`, async () => {
+    const roleDefinitions = new Map<string, Record<string, unknown>>();
+    const roleDefinitionUpserts: string[] = [];
+    let organizationWrites = 0;
+    const transaction = {
+      $executeRawUnsafe: async () => 1,
+      roleDefinition: {
+        upsert: async ({
+          where,
+          create,
+        }: {
+          where: { code: string };
+          create: Record<string, unknown>;
+        }) => {
+          roleDefinitionUpserts.push(where.code);
+          const existing = roleDefinitions.get(where.code) ?? create;
+          roleDefinitions.set(where.code, existing);
+          return where.code === conflictingRole
+            ? { ...existing, name: "与正式策略冲突" }
+            : existing;
+        },
+      },
+      organization: {
+        upsert: async () => {
+          organizationWrites += 1;
+          return { id: "should-not-be-created" };
+        },
+      },
+    };
+    const prisma = {
+      $transaction: async <T>(callback: (tx: typeof transaction) => Promise<T>) =>
+        callback(transaction),
+    };
+
+    await assert.rejects(
+      bootstrapProduction(prisma as never, {
+        config,
+        administratorPassword: "AdminBootstrap-253913!",
+        doctorPassword: "DoctorBootstrap-253913!",
+        encryptionKey: {
+          kid: "secret-manager://customer/sensitive-data-key",
+          key: Buffer.alloc(32, 7),
+        },
+      }),
+      new RegExp(`Role definition ${conflictingRole} does not match`),
+    );
+    assert.deepEqual(
+      roleDefinitionUpserts,
+      conflictingRole === "patient" ? ["patient"] : ["patient", "caregiver"],
+    );
+    assert.equal(organizationWrites, 0);
+  });
+}

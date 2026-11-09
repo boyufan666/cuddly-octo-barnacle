@@ -160,7 +160,7 @@ test("minimal premium UI plan keeps business gates and removes demo-first surfac
     "prepareFormalSameIdChain",
     "prepareFormalPlanAndProtocol",
     "collection-batches",
-    "确认计划",
+    "确认并下发方案",
     "开始训练准备",
     "patient-prep-flow",
     "patient-prep-start-cta",

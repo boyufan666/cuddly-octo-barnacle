@@ -70,6 +70,7 @@ describe('encrypted seed through real API reads on isolated PostgreSQL', () => {
   const wrongKeyService = new AppService(prisma, wrongEncryptionKey);
   const patientId = '6d8dfde7-6b95-4ca2-8d1a-2af98927b205';
   const patientUserId = '6d8dfde7-6b95-4ca2-8d1a-2af98927b105';
+  const doctorUserId = '6d8dfde7-6b95-4ca2-8d1a-2af98927b104';
   const patientActor: RequestUser = {
     id: patientUserId,
     account: 'patient001',
@@ -82,9 +83,27 @@ describe('encrypted seed through real API reads on isolated PostgreSQL', () => {
       },
     ],
   };
+  let doctorActor: RequestUser;
 
   beforeAll(async () => {
     await prisma.$connect();
+    const doctor = await prisma.doctorProfile.findUnique({
+      where: { userId: doctorUserId },
+      select: { id: true },
+    });
+    if (!doctor) throw new Error('Seeded responsible doctor is missing.');
+    doctorActor = {
+      id: doctorUserId,
+      account: 'doctor001',
+      displayName: '王医生',
+      roles: [
+        {
+          roleCode: 'doctor',
+          relatedObjectType: 'doctor',
+          relatedObjectId: doctor.id,
+        },
+      ],
+    };
   });
 
   afterAll(async () => {
@@ -133,8 +152,40 @@ describe('encrypted seed through real API reads on isolated PostgreSQL', () => {
     expectNoEncryptionStorageFields(result);
   });
 
-  it('decrypts seeded assessment, risk, and AI DTOs without exposing storage fields', async () => {
+  it('returns patient-safe assessment progress without sensitive input or AI summaries', async () => {
     const result = await service.listAssessments(patientActor, patientId);
+
+    expect(result).toEqual(
+      arrayContaining([
+        objectContaining({
+          id: '6d8dfde7-6b95-4ca2-8d1a-2af98927b201',
+          scoreSummary: objectContaining({ mmse: 20, cdr: 1 }),
+          riskGrades: arrayContaining([
+            objectContaining({
+              riskLevel: 'moderate',
+              reasonSummary:
+                'MMSE 20/30，CDR 1.0，近记忆和执行力分项存在波动。',
+            }),
+          ]),
+          aiAnalyses: arrayContaining([
+            objectContaining({
+              id: '6d8dfde7-6b95-4ca2-8d1a-2af98927b203',
+              analysisScene: 'assessment_summary',
+              confidence: 0.84,
+            }),
+          ]),
+        }),
+      ]),
+    );
+    expectNoEncryptionStorageFields(result);
+    const serialized = JSON.stringify(result);
+    expect(serialized).not.toContain('SEED-ALZ-0001');
+    expect(serialized).not.toContain('inputSummary');
+    expect(serialized).not.toContain('outputSummary');
+  });
+
+  it('decrypts seeded assessment, risk, and AI DTOs for the responsible doctor', async () => {
+    const result = await service.listAssessments(doctorActor, patientId);
 
     expect(result).toEqual(
       arrayContaining([

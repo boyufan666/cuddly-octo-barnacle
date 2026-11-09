@@ -1,0 +1,18 @@
+{
+  "schema": "rehab-platform/customer-license-policy/v1",
+  "policyVersion": 1,
+  "status": "approved",
+  "lockfileSha256": "bcb8df188fd7e90f47f210967e7edd51d7ed70aa317ada414bfc16e0fc7cf352",
+  "approvedBy": "当前会话用户（直接批准）",
+  "approvedAt": "2026-10-23T06:23:38.000Z",
+  "allowedLicenseExpressions": [
+    "0BSD",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "CC-BY-4.0",
+    "ISC",
+    "LGPL-3.0-or-later",
+    "MIT"
+  ]
+}

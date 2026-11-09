@@ -29,10 +29,15 @@ import {
   type Ad8AssessmentFormState,
   updateAd8AssessmentFormField,
   updateAssessmentDraftFormField,
+  updateAssessmentPhysicalConditions,
 } from "@/lib/ai-assessment-draft";
 import { mergeBrowserPoseEvidencePrefill } from "@/lib/browser-pose-evidence-prefill";
 import type { AiConversationFormState } from "@/features/patient/AssessmentDialoguePage";
-import type { AuditLogFilters, GameContent } from "@/types/api";
+import type {
+  AssessmentPhysicalCondition,
+  AuditLogFilters,
+  GameContent,
+} from "@/types/api";
 
 type RoleWorkspaceFormUpdaterDependencies = {
   adminGameContents?: GameContent[];
@@ -93,6 +98,13 @@ export function createRoleWorkspaceFormUpdaters({
     updateAssessmentForm(field: AssessmentDraftFormField, value: string) {
       setAssessmentForm((current) =>
         updateAssessmentDraftFormField(current, field, value),
+      );
+    },
+    updateAssessmentPhysicalConditions(
+      physicalConditions: AssessmentPhysicalCondition[],
+    ) {
+      setAssessmentForm((current) =>
+        updateAssessmentPhysicalConditions(current, physicalConditions),
       );
     },
     updateAd8AssessmentForm(field: Ad8AssessmentFormField, value: string) {

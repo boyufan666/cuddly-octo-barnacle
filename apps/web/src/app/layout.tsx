@@ -13,7 +13,19 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="zh-CN" className="h-full antialiased">
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        {children}
+        <footer className="w-full shrink-0 border-t border-[var(--line-subtle)] bg-[var(--surface-page)] px-4 py-2 text-center text-xs leading-5 text-[var(--ink-subtle)]">
+          <a
+            href="https://beian.miit.gov.cn/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline underline-offset-2"
+          >
+            辽ICP备2026024184号-1
+          </a>
+        </footer>
+      </body>
     </html>
   );
 }

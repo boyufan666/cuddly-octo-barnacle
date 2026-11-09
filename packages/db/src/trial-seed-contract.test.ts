@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
-import { seedEnvelope } from "../prisma/seed";
+import {
+  parseSeedMode,
+  requireCustomerInitializationInput,
+  seedEnvelope,
+} from "../prisma/seed";
 import { trialEnvelope } from "../prisma/seed-trial";
 import {
   decryptSensitiveJson,
@@ -66,9 +70,11 @@ test("seed envelope builders bind ciphertext to the exact real-row AAD", () => {
 test("seed scripts require the strict key before their first database write", () => {
   const mainSeed = sourceOf("../prisma/seed.ts");
   const trialSeed = sourceOf("../prisma/seed-trial.ts");
+  const main = mainSeed.match(/async function main\(\) \{[\s\S]*?\n\}/)?.[0];
+  assert.ok(main);
   assert.ok(
-    mainSeed.indexOf("requireSensitiveBackfillKey(process.env)") <
-      mainSeed.indexOf("prisma.roleDefinition.createMany"),
+    main.indexOf("requireSensitiveBackfillKey(process.env)") <
+      main.indexOf("await initializeSeed("),
   );
   assert.ok(
     trialSeed.indexOf("requireSensitiveBackfillKey(process.env)") <
@@ -100,7 +106,7 @@ test("main seed sensitive writers use canonical ids, envelopes, lookups, and ide
   }
   assert.match(source, /createPhoneLookupHmac/);
   assert.match(source, /existing\?\.id \?\? input\.id/);
-  assert.match(source, /existingPatient\?\.id \?\? seedPatientProfileId/);
+  assert.match(source, /existingPatient\?\.id \?\? config\.patient\.id/);
   assert.match(
     source,
     /existingTrainingResult\?\.id \?\? seedTrainingResultId/,
@@ -138,10 +144,10 @@ test("seed Prisma sensitive write blocks contain no legacy plaintext columns", (
   const mainSeed = sourceOf("../prisma/seed.ts");
   const trialSeed = sourceOf("../prisma/seed-trial.ts");
   const mainUserWrite = mainSeed.match(
-    /return prisma\.user\.upsert\(\{[\s\S]*?\n  \}\);/,
+    /return database\.user\.upsert\(\{[\s\S]*?\n  \}\);/,
   )?.[0];
   const patientWrite = mainSeed.match(
-    /const patient = await prisma\.patientProfile\.upsert\(\{[\s\S]*?\n  \}\);/,
+    /const patient = await database\.patientProfile\.upsert\(\{[\s\S]*?\n  \}\);/,
   )?.[0];
   assert.ok(mainUserWrite);
   assert.ok(patientWrite);
@@ -201,4 +207,106 @@ test("database package exposes controlled first-admin and production bootstrap c
     packageJson.scripts["bootstrap:production"],
     "tsx src/production-bootstrap.ts",
   );
+  assert.equal(
+    packageJson.scripts["prisma:seed:customer"],
+    "tsx prisma/seed.ts --mode=customer",
+  );
+
+  const rootPackageJson = JSON.parse(
+    readFileSync(resolve(__dirname, "../../../package.json"), "utf8"),
+  ) as { scripts: Record<string, string> };
+  assert.equal(
+    rootPackageJson.scripts["db:seed:customer"],
+    "pnpm --filter @rehab-platform/db prisma:seed:customer",
+  );
+});
+
+function customerEnvironment(): Record<string, string> {
+  return {
+    CUSTOMER_SEED_CONFIRM_EMPTY_DATABASE:
+      "I_UNDERSTAND_CUSTOMER_SEED_REQUIRES_A_NEW_EMPTY_DATABASE",
+    CUSTOMER_ORG_CODE: "customer-rehab",
+    CUSTOMER_ORG_NAME: "客户康复中心",
+    CUSTOMER_ORG_TYPE: "rehab_center",
+    CUSTOMER_ADMIN_ACCOUNT: "customer.admin",
+    CUSTOMER_ADMIN_DISPLAY_NAME: "客户超级管理员",
+    CUSTOMER_ADMIN_MOBILE_PHONE: "13710000001",
+    CUSTOMER_ADMIN_INITIAL_PASSWORD: "customer-admin-password",
+    CUSTOMER_OPERATOR_ACCOUNT: "customer.operator",
+    CUSTOMER_OPERATOR_DISPLAY_NAME: "客户运营管理员",
+    CUSTOMER_OPERATOR_MOBILE_PHONE: "13710000002",
+    CUSTOMER_OPERATOR_INITIAL_PASSWORD: "customer-operator-password",
+    CUSTOMER_AUDITOR_ACCOUNT: "customer.auditor",
+    CUSTOMER_AUDITOR_DISPLAY_NAME: "客户审计管理员",
+    CUSTOMER_AUDITOR_MOBILE_PHONE: "13710000003",
+    CUSTOMER_AUDITOR_INITIAL_PASSWORD: "customer-auditor-password",
+    CUSTOMER_DOCTOR_ACCOUNT: "customer.doctor",
+    CUSTOMER_DOCTOR_DISPLAY_NAME: "客户医生",
+    CUSTOMER_DOCTOR_MOBILE_PHONE: "13710000004",
+    CUSTOMER_DOCTOR_INITIAL_PASSWORD: "customer-doctor-password",
+    CUSTOMER_DOCTOR_TITLE: "主任医师",
+    CUSTOMER_DOCTOR_DEPARTMENT: "认知康复科",
+    CUSTOMER_PATIENT_ACCOUNT: "customer.patient",
+    CUSTOMER_PATIENT_NAME: "客户患者",
+    CUSTOMER_PATIENT_MOBILE_PHONE: "13710000005",
+    CUSTOMER_PATIENT_INITIAL_PASSWORD: "customer-patient-password",
+    CUSTOMER_PATIENT_GENDER: "female",
+    CUSTOMER_PATIENT_AGE: "71",
+    CUSTOMER_PATIENT_MEDICAL_RECORD_NO: "CUSTOMER-MRN-0001",
+    CUSTOMER_CAREGIVER_ACCOUNT: "customer.caregiver",
+    CUSTOMER_CAREGIVER_NAME: "客户家属",
+    CUSTOMER_CAREGIVER_MOBILE_PHONE: "13710000006",
+    CUSTOMER_CAREGIVER_INITIAL_PASSWORD: "customer-caregiver-password",
+    CUSTOMER_CAREGIVER_RELATION: "女儿",
+  };
+}
+
+test("customer seed mode and configuration are explicit and strict", () => {
+  assert.equal(parseSeedMode([]), "main");
+  assert.equal(parseSeedMode(["--mode=customer"]), "customer");
+  assert.throws(() => parseSeedMode(["--mode=unknown"]), /Unsupported seed/);
+
+  const environment = customerEnvironment();
+  const input = requireCustomerInitializationInput(environment);
+  assert.equal(input.organization.code, "customer-rehab");
+  assert.equal(input.patient.age, 71);
+  assert.deepEqual(input.patient.careDetails, {
+    healthMetrics: { medicalRecordNo: "CUSTOMER-MRN-0001" },
+  });
+  assert.throws(
+    () =>
+      requireCustomerInitializationInput({
+        ...environment,
+        CUSTOMER_SEED_CONFIRM_EMPTY_DATABASE: "yes",
+      }),
+    /requires CUSTOMER_SEED_CONFIRM_EMPTY_DATABASE=/,
+  );
+  assert.throws(
+    () =>
+      requireCustomerInitializationInput({
+        ...environment,
+        CUSTOMER_DOCTOR_INITIAL_PASSWORD:
+          environment.CUSTOMER_ADMIN_INITIAL_PASSWORD,
+      }),
+    /INITIAL_PASSWORD values must be different/,
+  );
+});
+
+test("customer seed refuses populated databases and stops before regression history", () => {
+  const source = sourceOf("../prisma/seed.ts");
+  const customerGuard = source.indexOf(
+    'if (config.mode === "customer") return;',
+  );
+  const assessmentHistory = source.indexOf("const assessmentResultPayload");
+  assert.ok(customerGuard > 0 && customerGuard < assessmentHistory);
+  assert.match(source, /assertCustomerDatabaseIsEmpty\(database\)/);
+  assert.match(
+    source,
+    /Customer initialization requires a new empty database and will not merge, delete, or overwrite existing business data/,
+  );
+  assert.match(
+    source,
+    /\.\.\.\(config\.mode === "main"[\s\S]*?memory_basket[\s\S]*?path_treasure[\s\S]*?: \[\]\)/,
+  );
+  assert.doesNotMatch(source, /\.delete(?:Many)?\(/);
 });

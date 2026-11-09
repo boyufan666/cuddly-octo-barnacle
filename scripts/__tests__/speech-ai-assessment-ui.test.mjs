@@ -45,9 +45,23 @@ test("assessment screen exposes a real speech-to-AI draft flow without formal au
     "function AssessmentProgressPanel",
     "function ProgressStatusCard",
   );
+  const patientConversationPanel = sliceBetween(
+    assessmentSource,
+    "function AiConversationPanel",
+    "function AssessmentInputPanel",
+  );
+  const patientConversationMessage = sliceBetween(
+    assessmentSource,
+    "function AiConversationMessageBubble",
+    "function SummaryCard",
+  );
   assert.doesNotMatch(
     patientAssessmentPanel,
-    /Provider|Model|Call ID|Source|Endpoint|Prompt|Human Review/,
+    /provider|modelVersion|callId|source|endpoint|prompt|human review/i,
+  );
+  assert.doesNotMatch(
+    patientConversationPanel + patientConversationMessage,
+    /provider|modelVersion|callId|endpointRef|promptVersion|evidenceMetadata/i,
   );
   assert.doesNotMatch(
     workspaceSource,
@@ -106,8 +120,9 @@ test("doctor assessment review feature exposes structured evidence before approv
     "AD-8",
     "评估摘要",
     "医生结论",
-    "待医生确认",
-    "批准正式评估",
+    "医师正式评估确认",
+    "由医师确认正式评估",
+    "只有医师确认后",
     "退回复核",
   ]) {
     assert.match(source, new RegExp(copy));
@@ -219,18 +234,38 @@ test("main shell surfaces business status instead of raw demo service status", a
   );
 });
 
-test("assessment screen contains a formal AD-8 caregiver interview workflow", async () => {
+test("formal AD-8 assessment is owned by the doctor review flow", async () => {
   const workspaceSource = await readWorkspaceSource();
   const assessmentSource = await readAssessmentSource();
+  const doctorWorkspaceSource = await readFile(
+    join(rootDir, "apps/web/src/features/doctor/DoctorWorkspacePage.tsx"),
+    "utf8",
+  );
+  const doctorAssessmentSource = await readFile(
+    join(rootDir, "apps/web/src/features/doctor/AssessmentReviewPanel.tsx"),
+    "utf8",
+  );
+  const doctorConversationSource = await readFile(
+    join(
+      rootDir,
+      "apps/web/src/features/doctor/AiConversationReviewPanel.tsx",
+    ),
+    "utf8",
+  );
 
-  assert.match(assessmentSource, /Ad8AssessmentPanel/);
-  assert.match(assessmentSource, /AD-8照护者访谈/);
-  assert.match(workspaceSource, /buildAd8AssessmentSubmission/);
-  assert.match(assessmentSource, /isAd8AssessmentSubmissionFormComplete/);
-  assert.match(workspaceSource, /handleCreateAd8Assessment/);
-  assert.match(assessmentSource, /itemMemoryProblems/);
-  assert.match(assessmentSource, /itemDailyThinkingMemoryProblems/);
-  assert.match(assessmentSource, /医生复核后保存 AD-8 正式筛查记录/);
+  assert.doesNotMatch(
+    assessmentSource,
+    /function Ad8AssessmentPanel|onCreateAd8Assessment|isAd8AssessmentSubmissionFormComplete/,
+  );
+  assert.doesNotMatch(workspaceSource, /async function handleCreateAd8Assessment/);
+  assert.match(assessmentSource, /assessmentStatus\.isConfirmed && latestAd8/);
+  assert.match(assessmentSource, /仅展示医生确认后的必要摘要/);
+  assert.match(doctorWorkspaceSource, /<AiConversationReviewPanel/);
+  assert.match(doctorWorkspaceSource, /<AssessmentReviewPanel/);
+  assert.match(doctorConversationSource, /<ScoreTile label="AD-8"/);
+  assert.match(doctorConversationSource, /保存为待复核正式评估/);
+  assert.match(doctorAssessmentSource, /由医师确认正式评估/);
+  assert.match(workspaceSource, /handleCreateAssessmentFromAiConversation/);
 });
 
 test("patient and caregiver facing copy avoids technical implementation details", async () => {

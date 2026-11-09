@@ -30,6 +30,7 @@ describe('AppController', () => {
     startTrainingSession: jest.Mock;
     submitTrainingResult: jest.Mock;
     exportDataset: jest.Mock;
+    getAiConversationAssessmentDraft: jest.Mock;
   };
 
   beforeEach(() => {
@@ -60,6 +61,7 @@ describe('AppController', () => {
       startTrainingSession: jest.fn(),
       submitTrainingResult: jest.fn(),
       exportDataset: jest.fn(),
+      getAiConversationAssessmentDraft: jest.fn(),
     };
     appController = new AppController(appService as unknown as AppService);
   });
@@ -249,6 +251,28 @@ describe('AppController', () => {
       expect(appService.createAiAssessmentDraft).toHaveBeenCalledWith(
         user,
         body,
+      );
+    });
+
+    it('delegates persisted AI assessment draft recovery requests to the service', async () => {
+      appService.getAiConversationAssessmentDraft.mockReturnValue({
+        status: 'pending_human_review',
+      });
+      const user = { id: 'doctor-user-id' };
+
+      await expect(
+        appController.getAiConversationAssessmentDraft(
+          user as never,
+          'conversation-session-id',
+        ),
+      ).resolves.toEqual({
+        draft: {
+          status: 'pending_human_review',
+        },
+      });
+      expect(appService.getAiConversationAssessmentDraft).toHaveBeenCalledWith(
+        user,
+        'conversation-session-id',
       );
     });
   });

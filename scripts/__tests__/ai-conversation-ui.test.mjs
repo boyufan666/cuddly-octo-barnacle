@@ -62,6 +62,27 @@ test("assessment page has guided AI conversation without direct formal assessmen
     join(rootDir, "apps/web/src/features/session/high-cost-request-actions.ts"),
     "utf8",
   );
+  const doctorWorkspaceSource = await readFile(
+    join(rootDir, "apps/web/src/features/doctor/DoctorWorkspacePage.tsx"),
+    "utf8",
+  );
+  const doctorConversationReviewSource = await readFile(
+    join(
+      rootDir,
+      "apps/web/src/features/doctor/AiConversationReviewPanel.tsx",
+    ),
+    "utf8",
+  );
+  const patientConversationSource = sliceBetween(
+    assessmentDialogueSource,
+    "function AiConversationPanel",
+    "function AssessmentInputPanel",
+  );
+  const patientConversationMessageSource = sliceBetween(
+    assessmentDialogueSource,
+    "function AiConversationMessageBubble",
+    "function SummaryCard",
+  );
 
   assert.match(roleWorkspaceSource, /aiConversationForm/);
   assert.match(roleWorkspaceSource, /handleStartAiConversation/);
@@ -76,7 +97,23 @@ test("assessment page has guided AI conversation without direct formal assessmen
   assert.match(assessmentDialogueSource, /提交给医生复核/);
   assert.match(assessmentDialogueSource, /不会直接保存为正式评估/);
   assert.match(assessmentDialogueSource, /医生确认后才会形成正式评估记录/);
-  assert.match(assessmentDialogueSource, /formalSubmit/);
+  assert.match(assessmentDialogueSource, /AI评估草稿/);
+  assert.doesNotMatch(
+    assessmentDialogueSource,
+    /formalSubmit|onCreateAssessment\b|handleCreateAssessment|批准正式评估|由医师确认正式评估/,
+  );
+  assert.match(
+    roleWorkspaceSource,
+    /canUseAiAssessment=\{canUsePatientAiAssessment\(primaryRole\)\}/,
+  );
+  assert.match(
+    roleWorkspaceSource,
+    /onCreateAssessment=\{handleCreateAssessmentFromAiConversation\}/,
+  );
+  assert.match(doctorWorkspaceSource, /<AiConversationReviewPanel/);
+  assert.match(doctorWorkspaceSource, /<AssessmentReviewPanel/);
+  assert.match(doctorConversationReviewSource, /保存为待复核正式评估/);
+  assert.match(doctorConversationReviewSource, /onCreateAssessment\(payload\)/);
   assert.match(roleWorkspaceSource, /requestAssessmentSpeechTranscript/);
   assert.match(roleWorkspaceSource, /requestAiAssessmentDraft/);
   assert.match(roleWorkspaceSource, /requestTtsSpeechOutput/);
@@ -94,6 +131,10 @@ test("assessment page has guided AI conversation without direct formal assessmen
   assert.doesNotMatch(
     assessmentDialogueSource,
     /requestBody|responseBody|audio\.contentBase64|Provider|Endpoint|Call ID|rawPayload|manifest|runtime/i,
+  );
+  assert.doesNotMatch(
+    patientConversationSource + patientConversationMessageSource,
+    /provider|modelVersion|callId|endpointRef|promptVersion|evidenceMetadata/i,
   );
 });
 

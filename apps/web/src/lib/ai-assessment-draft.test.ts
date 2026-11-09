@@ -7,10 +7,14 @@ import {
   buildAssessmentSubmission,
   createStagedAiAssessmentDraft,
   isAd8AssessmentSubmissionFormComplete,
+  isAssessmentPhysicalConditionSelectionComplete,
   isAssessmentSubmissionFormComplete,
   isStagedAiAssessmentDraftForRequest,
+  normalizeAssessmentPhysicalConditions,
+  type AssessmentDraftFormState,
   updateAd8AssessmentFormField,
   updateAssessmentDraftFormField,
+  updateAssessmentPhysicalConditions,
 } from "./ai-assessment-draft.ts";
 import { applyAssessmentSpeechTranscriptToForm } from "./assessment-speech-transcript.ts";
 import type {
@@ -18,13 +22,28 @@ import type {
   AssessmentSpeechTranscriptResponse,
 } from "@/types/api";
 
-const emptyForm = {
+const emptyForm: AssessmentDraftFormState = {
+  assessmentType: "MMSE/CDR",
+  riskLevel: "",
+  physicalConditions: ["no_known_limitations"],
+  informantName: "",
+  informantRelation: "",
+  assessmentSource: "caregiver_interview",
   mmse: "",
   cdr: "",
   memory: "",
   orientation: "",
   executive: "",
   language: "",
+  ad8Total: "",
+  itemMemoryProblems: "",
+  itemReducedInterest: "",
+  itemRepeatsQuestions: "",
+  itemTroubleLearningTools: "",
+  itemForgetsMonthYear: "",
+  itemHandlesFinancesPoorly: "",
+  itemTroubleAppointments: "",
+  itemDailyThinkingMemoryProblems: "",
   transcript: "医师原始记录",
   reactionDelaySeconds: "",
   modelVersion: "",
@@ -82,21 +101,56 @@ test("applyAiAssessmentDraftToForm fills clinician review form from complete dra
   assert.equal(form.transcript, "患者完成 MMSE 问答，短时记忆表现下降。");
   assert.equal(form.modelVersion, "MiMo-V2.5");
   assert.equal(form.confidence, "0.82");
+  assert.equal(form.assessmentType, "MMSE/CDR");
+  assert.equal(form.riskLevel, "moderate");
   assert.deepEqual(form.aiDraftEvidence, validDraft().rawInputSummary.evidence);
+});
+
+test("applyAiAssessmentDraftToForm routes AD-8 drafts without requiring MMSE/CDR scores", () => {
+  const form = applyAiAssessmentDraftToForm(
+    emptyForm,
+    validDraft({
+      assessmentType: "AD-8",
+      riskLevel: "high",
+      scoreSummary: {
+        ad8Total: 4,
+        itemMemoryProblems: 1,
+        itemReducedInterest: 0,
+        itemRepeatsQuestions: 1,
+        itemTroubleLearningTools: 0,
+        itemForgetsMonthYear: 1,
+        itemHandlesFinancesPoorly: 0,
+        itemTroubleAppointments: 1,
+        itemDailyThinkingMemoryProblems: 0,
+      },
+    }),
+  );
+
+  assert.equal(form.assessmentType, "AD-8");
+  assert.equal(form.riskLevel, "high");
+  assert.equal(form.ad8Total, "4");
+  assert.equal(form.itemRepeatsQuestions, "1");
 });
 
 test("staged AI draft is reusable only for the exact completed request", () => {
   const staged = createStagedAiAssessmentDraft({
     patientId: "patient-profile-id",
     assessmentType: "MMSE/CDR",
+    physicalConditions: ["wheelchair"],
     transcript: "  患者完成 MMSE 问答。  ",
-    draft: validDraft(),
+    draft: validDraft({
+      rawInputSummary: {
+        ...validDraft().rawInputSummary,
+        transcript: "患者完成 MMSE 问答。",
+      },
+    }),
   });
 
   assert.equal(
     isStagedAiAssessmentDraftForRequest(staged, {
       patientId: "patient-profile-id",
       assessmentType: "MMSE/CDR",
+      physicalConditions: ["wheelchair"],
       transcript: "患者完成 MMSE 问答。",
     }),
     true,
@@ -105,6 +159,7 @@ test("staged AI draft is reusable only for the exact completed request", () => {
     isStagedAiAssessmentDraftForRequest(staged, {
       patientId: "other-patient",
       assessmentType: "MMSE/CDR",
+      physicalConditions: ["wheelchair"],
       transcript: "患者完成 MMSE 问答。",
     }),
     false,
@@ -113,7 +168,17 @@ test("staged AI draft is reusable only for the exact completed request", () => {
     isStagedAiAssessmentDraftForRequest(staged, {
       patientId: "patient-profile-id",
       assessmentType: "MMSE/CDR",
+      physicalConditions: ["wheelchair"],
       transcript: "患者完成另一份问答。",
+    }),
+    false,
+  );
+  assert.equal(
+    isStagedAiAssessmentDraftForRequest(staged, {
+      patientId: "patient-profile-id",
+      assessmentType: "MMSE/CDR",
+      physicalConditions: ["upper_limb_limited"],
+      transcript: "患者完成 MMSE 问答。",
     }),
     false,
   );
@@ -192,6 +257,7 @@ test("buildAssessmentSubmission keeps manual review input as clinician source", 
     reviewedAt: "2026-05-26T10:05:00.000Z",
     form: {
       ...emptyForm,
+      physicalConditions: ["wheelchair", "upper_limb_limited"],
       mmse: "22",
       cdr: "1",
       memory: "48",
@@ -208,6 +274,10 @@ test("buildAssessmentSubmission keeps manual review input as clinician source", 
 
   assert.equal(submission.rawInputSummary.source, "clinician_input");
   assert.equal(submission.rawInputSummary.evidence, undefined);
+  assert.deepEqual(submission.rawInputSummary.physicalConditions, [
+    "upper_limb_limited",
+    "wheelchair",
+  ]);
 });
 
 test("buildAssessmentSubmission preserves AI evidence and adds approved human review", () => {
@@ -339,6 +409,105 @@ test("updateAssessmentDraftFormField clears AI and speech evidence after clinici
   assert.equal(edited.speechEvidence, undefined);
 });
 
+test("updateAssessmentPhysicalConditions stores explicit selections and invalidates stale draft evidence", () => {
+  const form = applyAiAssessmentDraftToForm(emptyForm, validDraft());
+  const updated = updateAssessmentPhysicalConditions(form, [
+    "wheelchair",
+    "upper_limb_limited",
+  ]);
+
+  assert.deepEqual(updated.physicalConditions, [
+    "upper_limb_limited",
+    "wheelchair",
+  ]);
+  assert.equal(updated.aiDraftEvidence, undefined);
+});
+
+test("physical condition validation rejects empty and mutually exclusive selections", () => {
+  assert.equal(isAssessmentPhysicalConditionSelectionComplete([]), false);
+  assert.equal(
+    isAssessmentPhysicalConditionSelectionComplete(["no_known_limitations"]),
+    true,
+  );
+  assert.equal(
+    isAssessmentPhysicalConditionSelectionComplete([
+      "no_known_limitations",
+      "wheelchair",
+    ]),
+    false,
+  );
+  assert.throws(
+    () => normalizeAssessmentPhysicalConditions([]),
+    /明确选择身体情况/,
+  );
+  assert.throws(
+    () =>
+      normalizeAssessmentPhysicalConditions([
+        "no_known_limitations",
+        "upper_limb_limited",
+      ]),
+    /不能与其他身体限制同时选择/,
+  );
+  assert.throws(
+    () =>
+      buildAssessmentSubmission({
+        patientId: "patient-profile-id",
+        reviewerUserId: "doctor-user-id",
+        reviewedAt: "2026-05-26T10:05:00.000Z",
+        form: { ...emptyForm, physicalConditions: [] },
+      }),
+    /明确选择身体情况/,
+  );
+});
+
+test("buildAssessmentSubmission preserves an AI-routed AD-8 score set and physical conditions", () => {
+  const form = applyAiAssessmentDraftToForm(
+    { ...emptyForm, physicalConditions: ["wheelchair"] },
+    validDraft({
+      assessmentType: "AD-8",
+      riskLevel: "high",
+      scoreSummary: {
+        ad8Total: 4,
+        itemMemoryProblems: 1,
+        itemReducedInterest: 0,
+        itemRepeatsQuestions: 1,
+        itemTroubleLearningTools: 0,
+        itemForgetsMonthYear: 1,
+        itemHandlesFinancesPoorly: 0,
+        itemTroubleAppointments: 1,
+        itemDailyThinkingMemoryProblems: 0,
+      },
+    }),
+  );
+  const submission = buildAssessmentSubmission({
+    patientId: "patient-profile-id",
+    reviewerUserId: "doctor-user-id",
+    reviewedAt: "2026-05-26T10:05:00.000Z",
+    form: {
+      ...form,
+      informantName: "李明",
+      informantRelation: "儿子",
+      assessmentSource: "caregiver_interview",
+      reactionDelaySeconds: "2.4",
+    },
+  });
+
+  assert.equal(submission.assessmentType, "AD-8");
+  assert.equal(submission.scoreSummary.ad8Total, 4);
+  assert.equal("mmse" in submission.scoreSummary, false);
+  assert.deepEqual(submission.rawInputSummary.physicalConditions, [
+    "wheelchair",
+  ]);
+  assert.equal(
+    submission.rawInputSummary.interviewSource,
+    "caregiver_interview",
+  );
+  assert.deepEqual(submission.rawInputSummary.informant, {
+    name: "李明",
+    relation: "儿子",
+  });
+});
+
 test("isAssessmentSubmissionFormComplete ignores optional AI evidence and checks required strings only", () => {
   assert.equal(
     isAssessmentSubmissionFormComplete({
@@ -356,6 +525,24 @@ test("isAssessmentSubmissionFormComplete ignores optional AI evidence and checks
       reactionDelaySeconds: "2.1",
     }),
     true,
+  );
+  assert.equal(
+    isAssessmentSubmissionFormComplete({
+      ...emptyForm,
+      physicalConditions: [],
+      mmse: "22",
+      cdr: "1",
+      memory: "48",
+      orientation: "58",
+      executive: "52",
+      language: "73",
+      transcript: "医师手工录入问答摘要。",
+      analysisSummary: "存在轻中度认知风险。",
+      modelVersion: "clinician-structured-input-v1",
+      confidence: "0.84",
+      reactionDelaySeconds: "2.1",
+    }),
+    false,
   );
 });
 
@@ -475,6 +662,7 @@ function validTranscriptResponse(
     patientId: "patient-profile-id",
     assessmentType: "MMSE/CDR",
     status: "transcribed",
+    physicalConditions: ["no_known_limitations"],
     transcript: "患者完成语音问答。",
     speechEvidence: {
       provider: "xiaomi-mimo-audio-understanding",

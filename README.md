@@ -36,6 +36,7 @@ pnpm db:seed
 `pnpm db:seed` 仅用于本地开发与自动化验收，不作为试点或生产数据初始化方案。
 执行前必须显式配置 `DEFAULT_PATIENT_PASSWORD`、`SENSITIVE_DATA_KEY_REF` 和
 `SENSITIVE_DATA_KEY`；seed 使用的两个敏感数据密钥变量必须与 API 运行时完全一致。
+该默认入口继续创建完整演示数据，包括已完成评估、当前风险、康复计划和训练记录；客户重新部署不得使用该入口。
 
 试点环境只初始化机构、平台管理账号和首个医师账号时，使用：
 
@@ -56,6 +57,71 @@ pnpm dev
 - Web: `http://localhost:3000`
 - API liveness: `http://localhost:4000/health/live`
 
+## 客户重新部署初始化
+
+客户重新部署并需要患者、家属、医师及管理账号可直接登录时，必须使用客户专用入口：
+
+```bash
+pnpm db:migrate:deploy
+pnpm db:seed:customer
+```
+
+`pnpm db:seed:customer` 只接受执行过当前 Prisma migrations、且除 `_prisma_migrations` 外所有业务表均为空的新数据库。它会在同一个串行化事务中检查空库并写入数据；任一业务表已有记录时会直接失败，不会删除、合并或覆盖既有数据，也不会改走默认 seed、trial seed 或其他初始化流程。失败后应修正配置或更换新的空数据库，不得在已有客户业务库上重试。
+
+客户入口创建以下基线：
+
+- 1 个客户机构，以及超级管理员、运营、审计、医师、患者、家属共 6 个可登录账号；每个账号首次登录必须重置密码。
+- 1 份患者基本资料、责任医师关系、家属授权，以及隐私、AI、摄像头、麦克风和家属共享授权。
+- 9 个 `released`、`production`、`published`、`active` 的正式游戏。
+- 不创建已完成评估、当前风险、AI 分析、康复计划、计划调整、训练 session、训练结果或动作指标；患者登录后必须先进入 AI 评估。
+
+除 `DATABASE_URL`、`SENSITIVE_DATA_KEY_REF` 和 `SENSITIVE_DATA_KEY` 外，必须逐项显式配置：
+
+```text
+CUSTOMER_SEED_CONFIRM_EMPTY_DATABASE=I_UNDERSTAND_CUSTOMER_SEED_REQUIRES_A_NEW_EMPTY_DATABASE
+CUSTOMER_ORG_CODE
+CUSTOMER_ORG_NAME
+CUSTOMER_ORG_TYPE
+
+CUSTOMER_ADMIN_ACCOUNT
+CUSTOMER_ADMIN_DISPLAY_NAME
+CUSTOMER_ADMIN_MOBILE_PHONE
+CUSTOMER_ADMIN_INITIAL_PASSWORD
+
+CUSTOMER_OPERATOR_ACCOUNT
+CUSTOMER_OPERATOR_DISPLAY_NAME
+CUSTOMER_OPERATOR_MOBILE_PHONE
+CUSTOMER_OPERATOR_INITIAL_PASSWORD
+
+CUSTOMER_AUDITOR_ACCOUNT
+CUSTOMER_AUDITOR_DISPLAY_NAME
+CUSTOMER_AUDITOR_MOBILE_PHONE
+CUSTOMER_AUDITOR_INITIAL_PASSWORD
+
+CUSTOMER_DOCTOR_ACCOUNT
+CUSTOMER_DOCTOR_DISPLAY_NAME
+CUSTOMER_DOCTOR_MOBILE_PHONE
+CUSTOMER_DOCTOR_INITIAL_PASSWORD
+CUSTOMER_DOCTOR_TITLE
+CUSTOMER_DOCTOR_DEPARTMENT
+
+CUSTOMER_PATIENT_ACCOUNT
+CUSTOMER_PATIENT_NAME
+CUSTOMER_PATIENT_MOBILE_PHONE
+CUSTOMER_PATIENT_INITIAL_PASSWORD
+CUSTOMER_PATIENT_GENDER
+CUSTOMER_PATIENT_AGE
+CUSTOMER_PATIENT_MEDICAL_RECORD_NO
+
+CUSTOMER_CAREGIVER_ACCOUNT
+CUSTOMER_CAREGIVER_NAME
+CUSTOMER_CAREGIVER_MOBILE_PHONE
+CUSTOMER_CAREGIVER_INITIAL_PASSWORD
+CUSTOMER_CAREGIVER_RELATION
+```
+
+账号必须为 4–32 位字母、数字、下划线、点或短横线；6 个账号、手机号和初始密码必须分别互不相同。`CUSTOMER_PATIENT_GENDER` 只能是 `female`、`male` 或 `unspecified`，年龄必须是 1–120 的整数。所有文本都拒绝首尾空格，所有初始密码必须满足 8–128 位密码策略。客户入口不读取 `DEFAULT_PATIENT_PASSWORD`。
+
 ## 客户 Mac 一键启动
 
 首次从 GitHub 克隆后，客户或运维先准备 Node.js `24.14.1`、pnpm `10.29.3`、Docker Desktop，并在项目根目录执行：
@@ -65,9 +131,9 @@ pnpm install --frozen-lockfile
 cp .env.example .env
 ```
 
-然后填写本节列出的基础字段和完整 MiMo AI/STT/TTS 字段。新安装必须使用客户专用的空数据库，不得复用开发机的 `rehab_platform` 数据库。需要本地演示 seed 数据时，确认 `DEFAULT_PATIENT_PASSWORD` 后显式执行 `pnpm db:seed`；试点或正式环境改用 `pnpm db:seed:trial` 或受控 production bootstrap，启动器不会自动初始化账号或覆盖数据库。
+然后填写本节列出的基础字段和完整 MiMo AI/STT/TTS 字段。新安装必须使用客户专用的空数据库，不得复用开发机的 `rehab_platform` 数据库。需要本地演示 seed 数据时，确认 `DEFAULT_PATIENT_PASSWORD` 后显式执行 `pnpm db:seed`；客户重新部署必须按“客户重新部署初始化”一节执行 `pnpm db:seed:customer`。`pnpm db:seed:trial` 和受控 production bootstrap 只覆盖各自既有的小范围账号开通场景，不能替代客户完整基线初始化。启动器不会自动初始化账号或覆盖数据库。
 
-客户 Mac 使用项目根目录的 `一键启动康复平台.command`。双击启动前，必须由客户或运维在项目根目录的 `.env` 中显式填写以下字段：
+客户 Mac 使用项目根目录的 `一键启动康复平台.command`。双击启动前，必须由客户或运维在项目根目录的 `.env` 中显式填写以下基础字段：
 
 ```text
 DATABASE_URL
@@ -78,16 +144,22 @@ NEXT_PUBLIC_API_BASE_URL
 COOKIE_SECURE
 PUBLIC_CREDENTIAL_THROTTLE_LIMIT
 PUBLIC_CREDENTIAL_THROTTLE_TTL_MS
-DEFAULT_PATIENT_PASSWORD
 SENSITIVE_DATA_KEY_REF
 SENSITIVE_DATA_KEY
 POSTGRES_PASSWORD
 ```
 
+首次在新空数据库上部署客户基线时，还必须填写上一节列出的全部 `CUSTOMER_*` 字段，并在项目根目录的终端中显式执行：
+
+```bash
+./scripts/start-customer-mac.sh --initialize-customer
+```
+
+该命令会先执行迁移，再只执行 `pnpm db:seed:customer`，随后构建并启动服务。初始化成功后，后续日常启动不带参数，直接双击 `一键启动康复平台.command`；普通启动不会再次执行任何 seed。客户初始化失败时不会改用默认演示 seed，也不会自动删除或覆盖数据库。
+
 - `COOKIE_SECURE` 只能精确填写 `true` 或 `false`。HTTPS 填 `true`；本地 HTTP 可由用户显式填写 `COOKIE_SECURE=false`，启动器不会根据 URL 推断。
 - 客户 Mac 启动器的 Web 端口固定为 `3000`；`PORT` 是 API 端口，必须是 `1` 到 `65535` 的未占用端口，通常填写 `4000`，不能填写 `3000`。
 - `PUBLIC_CREDENTIAL_THROTTLE_LIMIT` 与 `PUBLIC_CREDENTIAL_THROTTLE_TTL_MS` 必须是 `1` 到 `9007199254740991` 之间、不带符号和前导零的 base-10 正安全整数。
-- `DEFAULT_PATIENT_PASSWORD` 必须是 8 到 128 位的客户自定义初始密码；启动器会在 Docker、迁移等启动步骤之前校验，不会生成或推断默认密码。新客户数据库还必须按试点或生产初始化流程单独创建账号。
 - `SENSITIVE_DATA_KEY_REF` 必须是非空且没有首尾空格的精确密钥引用。
 - `SENSITIVE_DATA_KEY` 必须是 canonical base64 编码，解码后恰好为 32 bytes。可由运维执行 `openssl rand -base64 32` 生成后显式填入。
 - `POSTGRES_PASSWORD` 必须显式非空；启动器校验通过后会将其导出给 Docker Compose 子进程。
@@ -95,6 +167,22 @@ POSTGRES_PASSWORD
 启动器不会生成默认值、不会修改 `.env`、不会兼容旧变量，也不会在缺失配置时继续执行。任一字段缺失或不合法时，会在 Docker、构建、进程启动和端口操作前给出中文修复提示。
 
 启动成功后访问 `http://localhost:3000`。若要确认 AI、语音识别和语音合成供应商配置，先执行 `pnpm verify:mimo:connectivity`；该命令只验证真实供应商响应，不产生患者临床记录。
+
+### 本次修复版客户重新部署顺序
+
+本次修复调整了患者首屏和业务状态链路：患者先完成真实 AI 对话评估，提交后由医师复核并确认正式评估，再由医师生成、调整和确认康复方案，患者训练完成后查看真实训练反馈。不要在旧的演示数据库上直接执行客户初始化，否则旧的完成评估和康复计划仍可能保留。
+
+安全重新部署按以下顺序执行：
+
+1. 在旧项目目录先执行 `./scripts/stop-customer-mac.sh`；如需停止 Docker 服务，再执行 `pnpm infra:down`。这两步不会删除旧数据。
+2. 将本次交付包解压到新的项目目录；不要复制旧目录的 `infra/data/postgres`、`.env`、`logs` 或 `.customer-runtime`。
+3. 在新目录执行 `pnpm install --frozen-lockfile`，复制 `.env.example` 为 `.env`，填入基础运行配置、真实 MiMo 配置和全部 `CUSTOMER_*` 初始账号配置。
+4. 先执行 `pnpm verify:mimo:connectivity`，确认 AI、STT、TTS 均为真实供应商连通；失败时停止，不进入临床数据初始化。
+5. 仅在确认新目录使用的是已迁移的全新空数据库后执行 `./scripts/start-customer-mac.sh --initialize-customer`。该命令只执行客户 seed；任何失败都会停止，不会改用 demo seed、删除数据库或覆盖已有业务数据。
+6. 看到 `Startup complete` 后访问 `http://localhost:3000`，按客户验收流程依次用患者、医师、家属、管理员、运营和审计账号检查权限与数据范围。
+7. 首次初始化成功后的日常启动不再带参数，双击 `一键启动康复平台.command` 或执行 `./scripts/start-customer-mac.sh` 即可；退出项目执行 `./scripts/stop-customer-mac.sh`，Docker 数据库按需执行 `pnpm infra:down`。
+
+如果客户必须保留旧数据库，应先备份并另行设计数据迁移验收，不能把 `--initialize-customer` 当作原地升级命令。
 
 ## 本地初始化账号
 

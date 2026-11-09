@@ -8,6 +8,11 @@ type TtsSpeechOutputRequestIdentity = Pick<
   "patientId" | "text" | "scenario"
 >;
 
+type TtsAudioPlayer = Pick<
+  HTMLAudioElement,
+  "play" | "addEventListener"
+>;
+
 export type StagedTtsSpeechOutput = Readonly<{
   request: TtsSpeechOutputRequestIdentity;
   output: TtsSpeechOutputResponse;
@@ -37,9 +42,8 @@ export function isStagedTtsSpeechOutputForRequest(
 
 export function playTtsSpeechOutputAudio(
   output: TtsSpeechOutputResponse,
-  createAudioElement: (source: string) => Pick<HTMLAudioElement, "play"> = (
-    source,
-  ) => new Audio(source),
+  createAudioElement: (source: string) => TtsAudioPlayer = (source) =>
+    new Audio(source),
 ) {
   const audio = output.audio;
   if (!audio.contentBase64.trim()) {
@@ -51,21 +55,42 @@ export function playTtsSpeechOutputAudio(
   if (!["audio/mpeg", "audio/wav"].includes(audio.mimeType)) {
     throw new Error("TTS 语音输出音频格式不受支持。");
   }
-  if (!ttsAudioBytesMatchMimeType(audio.contentBase64, audio.mimeType)) {
+
+  const audioBytes = decodeBase64Bytes(audio.contentBase64);
+  if (!ttsAudioBytesMatchMimeType(audioBytes, audio.mimeType)) {
     throw new Error("TTS 语音输出音频格式与内容不匹配，不能播放。");
   }
 
-  const player = createAudioElement(
-    `data:${audio.mimeType};base64,${audio.contentBase64}`,
+  const audioObjectUrl = URL.createObjectURL(
+    new Blob([audioBytes], { type: audio.mimeType }),
   );
-  return player.play();
+  let objectUrlReleased = false;
+  const releaseObjectUrl = () => {
+    if (objectUrlReleased) {
+      return;
+    }
+    objectUrlReleased = true;
+    URL.revokeObjectURL(audioObjectUrl);
+  };
+
+  try {
+    const player = createAudioElement(audioObjectUrl);
+    player.addEventListener("ended", releaseObjectUrl, { once: true });
+    player.addEventListener("error", releaseObjectUrl, { once: true });
+    return player.play().catch((error) => {
+      releaseObjectUrl();
+      throw error;
+    });
+  } catch (error) {
+    releaseObjectUrl();
+    throw error;
+  }
 }
 
 function ttsAudioBytesMatchMimeType(
-  contentBase64: string,
+  bytes: Uint8Array,
   mimeType: "audio/mpeg" | "audio/wav",
 ) {
-  const bytes = decodeBase64Bytes(contentBase64);
   if (mimeType === "audio/wav") {
     return (
       bytes.length >= 12 &&

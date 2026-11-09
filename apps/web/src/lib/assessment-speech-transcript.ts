@@ -1,5 +1,6 @@
 import type {
   AssessmentSpeechTranscriptResponse,
+  AssessmentPhysicalCondition,
   CreateAssessmentSpeechTranscriptRequest,
 } from "@/types/api";
 import type { AssessmentDraftFormState } from "./ai-assessment-draft";
@@ -26,12 +27,14 @@ type AudioContextGlobal = typeof globalThis & {
 export async function buildAssessmentSpeechTranscriptRequest({
   patientId,
   assessmentType,
+  physicalConditions,
   audioBlob,
   startedAtMs,
   endedAtMs,
 }: {
   patientId: string;
   assessmentType: string;
+  physicalConditions: AssessmentPhysicalCondition[];
   audioBlob: Blob;
   startedAtMs: number;
   endedAtMs: number;
@@ -46,11 +49,13 @@ export async function buildAssessmentSpeechTranscriptRequest({
   if (audioBlob.size <= 0) {
     throw new Error("录音内容为空，不能提交语音转写。");
   }
+  assertAssessmentPhysicalConditions(physicalConditions);
   const providerReadyAudio = await prepareProviderReadyAudio(audioBlob);
 
   return {
     patientId,
     assessmentType,
+    physicalConditions,
     audio: {
       contentBase64: await blobToBase64(providerReadyAudio.blob),
       mimeType: providerReadyAudio.mimeType,
@@ -59,18 +64,59 @@ export async function buildAssessmentSpeechTranscriptRequest({
   };
 }
 
+function assertAssessmentPhysicalConditions(
+  values: readonly AssessmentPhysicalCondition[],
+) {
+  const supported = new Set<AssessmentPhysicalCondition>([
+    "no_known_limitations",
+    "wheelchair",
+    "upper_limb_limited",
+  ]);
+  if (!values.length || values.some((value) => !supported.has(value))) {
+    throw new Error("请明确选择受支持的身体情况后再提交语音转写。");
+  }
+  if (new Set(values).size !== values.length) {
+    throw new Error("身体状况选项不能重复。");
+  }
+  if (values.includes("no_known_limitations") && values.length > 1) {
+    throw new Error("无上述特殊限制不能与其他身体限制同时选择。");
+  }
+}
+
 export function applyAssessmentSpeechTranscriptToForm(
   current: AssessmentDraftFormState,
   response: AssessmentSpeechTranscriptResponse,
 ): AssessmentDraftFormState {
+  assertMatchingAssessmentPhysicalConditions(
+    current.physicalConditions,
+    response.physicalConditions,
+  );
   const transcript = readRequiredTranscript(response.transcript);
   const speechEvidence = readRequiredSpeechEvidence(response.speechEvidence);
   return {
     ...current,
+    assessmentType: response.assessmentType,
     transcript,
     speechEvidence,
     aiDraftEvidence: undefined,
   };
+}
+
+function assertMatchingAssessmentPhysicalConditions(
+  current: readonly AssessmentPhysicalCondition[],
+  response: readonly AssessmentPhysicalCondition[] | undefined,
+) {
+  if (!response?.length) {
+    throw new Error("语音转写响应缺少身体状况证据，已阻止回填。");
+  }
+  const currentSet = new Set(current);
+  const responseSet = new Set(response);
+  if (
+    currentSet.size !== responseSet.size ||
+    [...currentSet].some((condition) => !responseSet.has(condition))
+  ) {
+    throw new Error("语音转写期间身体状况发生变化，已阻止绑定旧转写结果。");
+  }
 }
 
 export function resolveSupportedAssessmentAudioMimeType(

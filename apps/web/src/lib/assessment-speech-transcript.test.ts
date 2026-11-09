@@ -5,15 +5,31 @@ import {
   buildAssessmentSpeechTranscriptRequest,
   resolveSupportedAssessmentAudioMimeType,
 } from "./assessment-speech-transcript.ts";
+import type { AssessmentDraftFormState } from "./ai-assessment-draft.ts";
 import type { AssessmentSpeechTranscriptResponse } from "@/types/api";
 
-const form = {
+const form: AssessmentDraftFormState = {
+  assessmentType: "MMSE/CDR",
+  riskLevel: "",
+  physicalConditions: ["no_known_limitations"],
+  informantName: "",
+  informantRelation: "",
+  assessmentSource: "caregiver_interview",
   mmse: "",
   cdr: "",
   memory: "",
   orientation: "",
   executive: "",
   language: "",
+  ad8Total: "",
+  itemMemoryProblems: "",
+  itemReducedInterest: "",
+  itemRepeatsQuestions: "",
+  itemTroubleLearningTools: "",
+  itemForgetsMonthYear: "",
+  itemHandlesFinancesPoorly: "",
+  itemTroubleAppointments: "",
+  itemDailyThinkingMemoryProblems: "",
   transcript: "原有手工记录",
   reactionDelaySeconds: "",
   modelVersion: "",
@@ -28,6 +44,7 @@ test("buildAssessmentSpeechTranscriptRequest converts provider-ready audio bytes
   const request = await buildAssessmentSpeechTranscriptRequest({
     patientId: "patient-profile-id",
     assessmentType: "MMSE/CDR",
+    physicalConditions: ["no_known_limitations"],
     audioBlob: new Blob([new Uint8Array([1, 2, 3, 4])], {
       type: "audio/wav",
     }),
@@ -37,6 +54,7 @@ test("buildAssessmentSpeechTranscriptRequest converts provider-ready audio bytes
 
   assert.equal(request.patientId, "patient-profile-id");
   assert.equal(request.assessmentType, "MMSE/CDR");
+  assert.deepEqual(request.physicalConditions, ["no_known_limitations"]);
   assert.equal(request.audio.mimeType, "audio/wav");
   assert.equal(request.audio.durationSeconds, 42);
   assert.equal(request.audio.contentBase64, "AQIDBA==");
@@ -63,6 +81,7 @@ test("buildAssessmentSpeechTranscriptRequest transcodes browser webm recording t
     const request = await buildAssessmentSpeechTranscriptRequest({
       patientId: "patient-profile-id",
       assessmentType: "MMSE/CDR",
+      physicalConditions: ["no_known_limitations"],
       audioBlob: new Blob([new Uint8Array([1, 2, 3, 4])], {
         type: "audio/webm;codecs=opus",
       }),
@@ -83,6 +102,7 @@ test("buildAssessmentSpeechTranscriptRequest keeps browser mp4 recording as prov
   const request = await buildAssessmentSpeechTranscriptRequest({
     patientId: "patient-profile-id",
     assessmentType: "MMSE/CDR",
+    physicalConditions: ["no_known_limitations"],
     audioBlob: new Blob([new Uint8Array([1, 2, 3, 4])], {
       type: "audio/mp4",
     }),
@@ -101,6 +121,7 @@ test("buildAssessmentSpeechTranscriptRequest converts audio bytes without Node B
     const request = await buildAssessmentSpeechTranscriptRequest({
       patientId: "patient-profile-id",
       assessmentType: "MMSE/CDR",
+      physicalConditions: ["no_known_limitations"],
       audioBlob: new Blob([new Uint8Array([1, 2, 3, 4])], {
         type: "audio/wav",
       }),
@@ -120,6 +141,7 @@ test("buildAssessmentSpeechTranscriptRequest rejects short recordings before API
       buildAssessmentSpeechTranscriptRequest({
         patientId: "patient-profile-id",
         assessmentType: "MMSE/CDR",
+        physicalConditions: ["no_known_limitations"],
         audioBlob: new Blob([new Uint8Array([1, 2, 3, 4])], {
           type: "audio/webm",
         }),
@@ -136,6 +158,7 @@ test("buildAssessmentSpeechTranscriptRequest rejects unsupported audio types", a
       buildAssessmentSpeechTranscriptRequest({
         patientId: "patient-profile-id",
         assessmentType: "MMSE/CDR",
+        physicalConditions: ["no_known_limitations"],
         audioBlob: new Blob([new Uint8Array([1, 2, 3, 4])], {
           type: "text/plain",
         }),
@@ -187,6 +210,28 @@ test("applyAssessmentSpeechTranscriptToForm rejects empty provider transcript", 
   );
 });
 
+test("applyAssessmentSpeechTranscriptToForm rejects physical-condition drift", () => {
+  assert.throws(
+    () =>
+      applyAssessmentSpeechTranscriptToForm(
+        form,
+        validTranscriptResponse({ physicalConditions: ["wheelchair"] }),
+      ),
+    /身体状况发生变化/,
+  );
+});
+
+test("applyAssessmentSpeechTranscriptToForm rejects missing physical-condition evidence", () => {
+  assert.throws(
+    () =>
+      applyAssessmentSpeechTranscriptToForm(
+        form,
+        validTranscriptResponse({ physicalConditions: [] }),
+      ),
+    /缺少身体状况证据/,
+  );
+});
+
 test("applyAssessmentSpeechTranscriptToForm rejects missing speech evidence fields", () => {
   assert.throws(
     () =>
@@ -197,7 +242,8 @@ test("applyAssessmentSpeechTranscriptToForm rejects missing speech evidence fiel
             provider: "xiaomi-mimo-audio-understanding",
             modelVersion: "mimo-v2.5",
             callId: "",
-            endpointRef: "https://token-plan-cn.xiaomimimo.com/v1/chat/completions",
+            endpointRef:
+              "https://token-plan-cn.xiaomimimo.com/v1/chat/completions",
             source: "provider_audio_understanding",
             calledAt: "2026-05-27T09:58:45.000Z",
             audio: {
@@ -221,7 +267,8 @@ test("applyAssessmentSpeechTranscriptToForm rejects missing speech audio evidenc
             provider: "xiaomi-mimo-audio-understanding",
             modelVersion: "mimo-v2.5",
             callId: "mimo-audio-call-001",
-            endpointRef: "https://token-plan-cn.xiaomimimo.com/v1/chat/completions",
+            endpointRef:
+              "https://token-plan-cn.xiaomimimo.com/v1/chat/completions",
             source: "provider_audio_understanding",
             calledAt: "2026-05-27T09:58:45.000Z",
           } as AssessmentSpeechTranscriptResponse["speechEvidence"],
@@ -232,8 +279,8 @@ test("applyAssessmentSpeechTranscriptToForm rejects missing speech audio evidenc
 });
 
 test("resolveSupportedAssessmentAudioMimeType chooses a browser-supported recording type", () => {
-  const selected = resolveSupportedAssessmentAudioMimeType((mimeType) =>
-    mimeType === "audio/mp4",
+  const selected = resolveSupportedAssessmentAudioMimeType(
+    (mimeType) => mimeType === "audio/mp4",
   );
 
   assert.equal(selected, "audio/mp4");
@@ -253,6 +300,7 @@ function validTranscriptResponse(
     patientId: "patient-profile-id",
     assessmentType: "MMSE/CDR",
     status: "transcribed",
+    physicalConditions: ["no_known_limitations"],
     transcript: "今天是星期一，我记得三个词。",
     speechEvidence: {
       provider: "xiaomi-mimo-audio-understanding",

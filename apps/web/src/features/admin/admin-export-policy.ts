@@ -3,6 +3,8 @@ import type { DataExportFormState } from "./admin-governance-forms";
 
 const datasetOptions: Array<[ExportDataset, string]> = [
   ["patients", "患者档案"],
+  ["assessments", "AI 评估"],
+  ["training-records", "训练记录"],
   ["consents", "授权记录"],
   ["audit-logs", "审计日志"],
 ];

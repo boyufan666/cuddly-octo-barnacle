@@ -333,8 +333,9 @@ test("patient facing screens hide internal evidence, confidence, and review voca
   );
   assert.doesNotMatch(
     patientReviewLabelSource,
-    /确认异常|排除统计分析|人工采纳为有效|未复核/,
+    /确认异常|排除统计分析|人工采纳为有效/,
   );
+  assert.match(patientReviewLabelSource, /尚未复核/);
   assert.doesNotMatch(
     unityGameVisibleCopy,
     /资源清单|协议版本|Unity loader|Unity runtime|加载失败：/i,
@@ -419,6 +420,10 @@ test("desensitized export validates before showing generation progress", async (
 
 test("form actions validate synchronously before showing busy progress", async () => {
   const workspaceSource = await readWorkspaceSource();
+  const aiConversationActionsSource = await readFile(
+    join(rootDir, "apps/web/src/features/session/ai-conversation-actions.ts"),
+    "utf8",
+  );
   const actionChecks = [
     {
       handler: "handleRefreshAuditLogs",
@@ -434,21 +439,9 @@ test("form actions validate synchronously before showing busy progress", async (
     },
     {
       handler: "handleCreateCaregiverAccount",
-      end: "async function handleCreateAssessment",
+      end: "async function handleCreateAiAssessmentDraft",
       validation: "buildCreateCaregiverAccountPayload(form)",
       progress: 'setActionStatus("正在创建家属登录账号")',
-    },
-    {
-      handler: "handleCreateAssessment",
-      end: "async function handleCreateAd8Assessment",
-      validation: "buildAssessmentSubmission({",
-      progress: 'setActionStatus("正在写入结构化评估记录")',
-    },
-    {
-      handler: "handleCreateAd8Assessment",
-      end: "async function handleCreateAiAssessmentDraft",
-      validation: "buildAd8AssessmentSubmission({",
-      progress: 'setActionStatus("正在保存 AD-8 照护者访谈记录")',
     },
     {
       handler: "handleCreateAiAssessmentDraft",
@@ -492,6 +485,14 @@ test("form actions validate synchronously before showing busy progress", async (
       end: "async function handleSubmitTrainingResult",
       validation: "buildDoctorCollectionBatchPayload(form, data.patient, plan)",
       progress: 'setActionStatus("正在创建患者训练准备记录")',
+    },
+    {
+      handler: "handleCreateAssessmentFromAiConversation",
+      end: "async function handleReviewAiConversationFromDoctor",
+      validation: 'if (primaryRole !== "doctor")',
+      progress:
+        'setActionStatus("正在保存 AI 对话对应的待复核正式评估")',
+      source: "aiConversationActions",
     },
     {
       handler: "handleSubmitTrainingResult",
@@ -568,8 +569,12 @@ test("form actions validate synchronously before showing busy progress", async (
   );
 
   for (const check of actionChecks) {
+    const source =
+      check.source === "aiConversationActions"
+        ? aiConversationActionsSource
+        : workspaceSource;
     const handlerSource = sliceBetween(
-      workspaceSource,
+      source,
       `async function ${check.handler}`,
       check.end,
     );

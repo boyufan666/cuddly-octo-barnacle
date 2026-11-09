@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { expect, request as playwrightRequest, test } from "@playwright/test";
 import { resolvePlaywrightRegressionEnvironment } from "./playwright-regression-environment.mjs";
+import { createProductionAiAssessmentInput } from "./playwright-production-assessment-fixture.mjs";
 
 const playwrightApiPort = requirePlaywrightPort("PLAYWRIGHT_API_PORT");
 const playwrightWebPort = requirePlaywrightPort("PLAYWRIGHT_WEB_PORT");
@@ -153,7 +154,7 @@ test("formal UI chain preserves same IDs from clinical review through audit expo
   await selectDoctorPatient(doctorPlanPage, chainIds.patientId);
   await clickWorkbenchNav(doctorPlanPage, "计划");
   await doctorPlanPage
-    .getByLabel("调整原因")
+    .getByLabel("确认或调整依据")
     .fill("Formal UI same-ID plan confirmation");
   const confirmedPlan = await waitForResponse(
     doctorPlanPage,
@@ -161,7 +162,9 @@ test("formal UI chain preserves same IDs from clinical review through audit expo
     new RegExp(`/rehab-plans/${escapeRegExp(chainIds.rehabPlanId)}/confirm$`),
     200,
     async () => {
-      await doctorPlanPage.getByRole("button", { name: "确认计划" }).click();
+      await doctorPlanPage
+        .getByRole("button", { name: "确认并下发方案" })
+        .click();
     },
   );
   expectSameChainId(
@@ -245,7 +248,8 @@ test("formal UI chain preserves same IDs from clinical review through audit expo
     async () => clickWorkbenchNav(doctorPrepPage, "准备"),
   );
   const patientPage = await loginNewPage(browser, "patient001", "patient");
-  await expect(patientPage.getByText("今日训练").first()).toBeVisible();
+  await clickPatientTaskNav(patientPage, "今日");
+  await expect(patientPage.getByTestId("patient-today-flow")).toBeVisible();
   const todayCta = patientPage.getByTestId("patient-next-action");
   await expect(todayCta).toHaveText("开始训练准备");
   await expect(todayCta).toBeEnabled();
@@ -699,7 +703,7 @@ test("formal UI chain preserves same IDs from clinical review through audit expo
     "138****6721",
     "李*",
     "139****8206",
-    "王医生",
+    "王*",
     "active",
   ]);
   expect(new Date(csvRows[1][9]).toISOString()).toBe(csvRows[1][9]);
@@ -1101,7 +1105,9 @@ async function completeCognitiveTraining(
   for (const option of sequence) {
     await page.getByRole("button", { name: option, exact: true }).click();
   }
-  const feedbackStatus = page.getByRole("status");
+  const feedbackStatus = page.locator(
+    '.training-stage-shell p[role="status"]',
+  );
   await expect(feedbackStatus).toHaveCount(1);
   await expect(feedbackStatus).toHaveText(
     `本轮正确 ${sequence.length}/${sequence.length}`,
@@ -1133,7 +1139,7 @@ async function abortFormalTrainingSession(sessionId) {
 }
 
 async function prepareFormalSameIdChain(roleClients) {
-  const patientIds = roleClients.patient.login.context.patientIds;
+  const patientIds = roleClients.doctor.login.context.doctorPatientIds;
   expect(
     patientIds,
     "patient001 must have exactly one patient profile",
@@ -1142,32 +1148,19 @@ async function prepareFormalSameIdChain(roleClients) {
   expect(typeof patientId).toBe("string");
   expect(patientId.length).toBeGreaterThan(0);
 
+  const assessmentInput = await createProductionAiAssessmentInput({
+    apiPost,
+    context: roleClients.doctor.context,
+    patientId,
+    assessmentType: "MMSE/CDR",
+    physicalConditions: ["no_known_limitations"],
+    transcript:
+      "原始量表记录：MMSE 总分 16/30，CDR 2，记忆 48/100，定向 52/100，执行 44/100，语言 58/100。患者能够回答部分定向问题，但回忆和执行功能表现需要进一步复核。",
+  });
   const assessment = await apiPost(
     roleClients.doctor.context,
     "/assessments",
-    {
-      patientId,
-      assessmentType: "MMSE/CDR",
-      scoreSummary: {
-        mmse: 16,
-        cdr: 2,
-        memory: 48,
-        orientation: 52,
-        executive: 44,
-        language: 58,
-      },
-      rawInputSummary: {
-        source: "clinician_input",
-        transcript: "Formal UI same-ID assessment transcript for regression.",
-        analysisSummary:
-          "MMSE 16 and CDR 2 indicate a high cognitive risk profile.",
-        modelVersion: "clinician-structured-input",
-        confidence: 0.91,
-        reactionSeconds: 4,
-        reviewerUserId: roleClients.doctor.login.user.id,
-        reviewedAt: new Date().toISOString(),
-      },
-    },
+    { patientId, assessmentType: "MMSE/CDR", ...assessmentInput },
     201,
   );
   expectSameChainId(
@@ -1274,6 +1267,8 @@ async function prepareFormalPlanAndProtocol(roleClients, chainIds) {
       conditionRules: {
         requireCamera: false,
         requirePoseCheck: false,
+        physicalConditions: ["no_known_limitations"],
+        riskLevels: ["low", "moderate", "high"],
       },
       samplingConfig: {
         eventSource: planItem.gameContent.runtimeType,

@@ -70,6 +70,13 @@ export function buildTodayTrainingRecords(
 export function buildTrainingRecordsFromSessions(
   sessions: TrainingRecordsResponse["sessions"],
 ): TrainingRecordsResponse {
+  const completedResults = sessions
+    .filter(
+      (session) =>
+        session.sessionStatus === "completed" && Boolean(session.result),
+    )
+    .map((session) => session.result)
+    .filter((result): result is NonNullable<typeof result> => Boolean(result));
   const validResults = sessions
     .filter(isCompletedTrainingSession)
     .map((session) => session.result)
@@ -86,7 +93,9 @@ export function buildTrainingRecordsFromSessions(
               validResults.length,
           )
         : 0,
-      abnormalCount: validResults.filter((result) => result.abnormalFlag).length,
+      abnormalCount: completedResults.filter(
+        (result) => result.abnormalFlag || result.qualityFlag !== "valid",
+      ).length,
     },
   };
 }
@@ -94,7 +103,11 @@ export function buildTrainingRecordsFromSessions(
 export function isCompletedTrainingSession(
   session: TrainingRecordsResponse["sessions"][number],
 ) {
-  return session.sessionStatus === "completed" && Boolean(session.result);
+  return (
+    session.sessionStatus === "completed" &&
+    session.result?.qualityFlag === "valid" &&
+    session.result.abnormalFlag === false
+  );
 }
 
 export function isTodayDateTime(value?: string | null) {

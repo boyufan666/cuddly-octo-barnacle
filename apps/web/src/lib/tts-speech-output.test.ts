@@ -43,22 +43,47 @@ function ttsOutput(
   };
 }
 
-test("plays provider TTS audio from the returned data URL", async () => {
+test("plays provider TTS audio from a CSP-compatible blob URL", async () => {
   let source = "";
   let played = false;
+  let endedListener: (() => void) | undefined;
+  let revokedSource = "";
+  const originalCreateObjectURL = URL.createObjectURL;
+  const originalRevokeObjectURL = URL.revokeObjectURL;
+  URL.createObjectURL = () => "blob:test-tts-audio";
+  URL.revokeObjectURL = (objectUrl) => {
+    revokedSource = objectUrl;
+  };
 
-  await playTtsSpeechOutputAudio(ttsOutput(), (nextSource) => {
-    source = nextSource;
-    return {
-      play: () => {
-        played = true;
-        return Promise.resolve();
-      },
-    };
-  });
+  try {
+    await playTtsSpeechOutputAudio(ttsOutput(), (nextSource) => {
+      source = nextSource;
+      return {
+        addEventListener: (
+          eventName: string,
+          listener: EventListenerOrEventListenerObject,
+        ) => {
+          if (eventName === "ended") {
+            endedListener = listener as () => void;
+          }
+        },
+        play: () => {
+          played = true;
+          return Promise.resolve();
+        },
+      };
+    });
 
-  assert.equal(played, true);
-  assert.match(source, /^data:audio\/wav;base64,/);
+    assert.equal(played, true);
+    assert.equal(source, "blob:test-tts-audio");
+    assert.equal(revokedSource, "");
+
+    endedListener?.();
+    assert.equal(revokedSource, "blob:test-tts-audio");
+  } finally {
+    URL.createObjectURL = originalCreateObjectURL;
+    URL.revokeObjectURL = originalRevokeObjectURL;
+  }
 });
 
 test("staged TTS output is replayed only for the same patient and request", () => {

@@ -7,6 +7,7 @@ import { Prisma, type RoleCode } from '@prisma/client';
 import { AppService } from './app.service';
 import type { RequestUser } from './current-user';
 import { PrismaService } from './prisma.service';
+import { encryptSensitiveJson } from './sensitive-encryption';
 
 const testSensitiveEncryptionKey = {
   kid: 'secret-manager://rehab/unit-sensitive-key',
@@ -34,7 +35,7 @@ type PatientProfileFixture = {
 };
 
 type StartPlanItemFixture = {
-  gameContent: Record<string, never>;
+  gameContent: { name: string; tags: string[] };
   rehabPlan: Record<string, never>;
 };
 
@@ -42,8 +43,26 @@ type StartCollectionBatchFixture = {
   protocol: {
     requiredConsentTypes: string[];
     requiredInputModes: string[];
+    conditionRules: {
+      physicalConditions: string[];
+      riskLevels: string[];
+    };
   };
   condition: Record<string, never>;
+};
+
+type StartRiskFixture = {
+  assessmentId: string;
+  riskLevel: string;
+  systemRiskLevel: string;
+  manualRiskLevel: string | null;
+  isCurrent: boolean;
+  confirmedById: string;
+  confirmedAt: Date;
+  assessment: {
+    id: string;
+    resultEnvelope: unknown;
+  };
 };
 
 type AsyncPrismaMock<TResult, TArgs extends unknown[]> = jest.Mock<
@@ -220,7 +239,7 @@ function createStartConflictService(error: Error) {
           [Prisma.RehabPlanItemFindFirstArgs]
         >()
         .mockResolvedValue({
-          gameContent: {},
+          gameContent: { name: '测试游戏', tags: [] },
           rehabPlan: {},
         }),
     },
@@ -231,17 +250,45 @@ function createStartConflictService(error: Error) {
           [Prisma.CollectionBatchFindUniqueArgs]
         >()
         .mockResolvedValue({
-          protocol: { requiredConsentTypes: [], requiredInputModes: [] },
+          protocol: {
+            requiredConsentTypes: [],
+            requiredInputModes: [],
+            conditionRules: {
+              physicalConditions: ['no_known_limitations'],
+              riskLevels: ['low', 'moderate', 'high'],
+            },
+          },
           condition: {},
         }),
     },
     riskGradeRecord: {
       findFirst: jest
-        .fn<
-          Promise<{ assessmentId: string }>,
-          [Prisma.RiskGradeRecordFindFirstArgs]
-        >()
-        .mockResolvedValue({ assessmentId: 'assessment-id' }),
+        .fn<Promise<StartRiskFixture>, [Prisma.RiskGradeRecordFindFirstArgs]>()
+        .mockResolvedValue({
+          assessmentId: '283713da-322c-462f-9784-42da468f3dd4',
+          riskLevel: 'moderate',
+          systemRiskLevel: 'moderate',
+          manualRiskLevel: null,
+          isCurrent: true,
+          confirmedById: 'responsible-doctor-user-id',
+          confirmedAt: new Date('2026-05-20T05:30:00.000Z'),
+          assessment: {
+            id: '283713da-322c-462f-9784-42da468f3dd4',
+            resultEnvelope: encryptSensitiveJson(
+              {
+                scoreSummary: { mmse: 22, cdr: 1 },
+                rawInputSummary: { source: 'production_ai_assessment' },
+                physicalConditions: ['no_known_limitations'],
+              },
+              {
+                tableName: 'assessment_record',
+                recordId: '283713da-322c-462f-9784-42da468f3dd4',
+                fieldName: 'resultEnvelope',
+              },
+              testSensitiveEncryptionKey,
+            ),
+          },
+        }),
     },
     $transaction: jest
       .fn<

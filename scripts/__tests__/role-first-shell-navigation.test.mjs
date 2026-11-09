@@ -595,38 +595,60 @@ test("training runtime result adapters stay out of workspace orchestration", asy
   );
 });
 
-test("session success handlers refetch persisted state before resetting local form state", async () => {
+test("session success handlers refetch persisted state before applying local success state", async () => {
   const workspace = await readFile(
     join(rootDir, "apps/web/src/features/session/role-workspace.tsx"),
+    "utf8",
+  );
+  const aiConversationActions = await readFile(
+    join(rootDir, "apps/web/src/features/session/ai-conversation-actions.ts"),
     "utf8",
   );
 
   assertSourceOrder(
     sliceBetween(
-      workspace,
-      "async function handleCreateAssessment",
-      "async function handleCreateAd8Assessment",
+      aiConversationActions,
+      "async function handleCreateAssessmentFromAiConversation",
+      "async function handleReviewAiConversationFromDoctor",
+    ),
+    "api.createAssessment(payload)",
+    "await reloadRoleData",
+  );
+  assertSourceOrder(
+    sliceBetween(
+      aiConversationActions,
+      "async function handleCreateAssessmentFromAiConversation",
+      "async function handleReviewAiConversationFromDoctor",
     ),
     "await reloadRoleData",
-    "setAssessmentForm(emptyAssessmentForm)",
+    "return assessment",
+  );
+  assertSourceOrder(
+    sliceBetween(
+      aiConversationActions,
+      "async function handleReviewAiConversationFromDoctor",
+      "  return {",
+    ),
+    "api.reviewAiConversation(sessionId, payload)",
+    "await reloadRoleData",
+  );
+  assertSourceOrder(
+    sliceBetween(
+      aiConversationActions,
+      "async function handleReviewAiConversationFromDoctor",
+      "  return {",
+    ),
+    "await reloadRoleData",
+    "return reviewed",
   );
   assertSourceOrder(
     sliceBetween(
       workspace,
       "async function handleCreateCaregiverAccount",
-      "async function handleCreateAssessment",
-    ),
-    "await reloadRoleData",
-    "setCaregiverAccountForm(emptyCaregiverAccountForm)",
-  );
-  assertSourceOrder(
-    sliceBetween(
-      workspace,
-      "async function handleCreateAd8Assessment",
       "async function handleCreateAiAssessmentDraft",
     ),
     "await reloadRoleData",
-    "setAd8AssessmentForm(emptyAd8AssessmentForm)",
+    "setCaregiverAccountForm(emptyCaregiverAccountForm)",
   );
   assertSourceOrder(
     sliceBetween(

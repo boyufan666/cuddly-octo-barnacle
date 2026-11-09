@@ -59,10 +59,16 @@ export function PatientClinicalSummary({
           value={scoreValue(assessment, "mmse")}
           icon={Brain}
         />
-        <MetricTile label="CDR" value={scoreValue(assessment, "cdr")} icon={Brain} />
+        <MetricTile
+          label="CDR"
+          value={scoreValue(assessment, "cdr")}
+          icon={Brain}
+        />
         <MetricTile
           label="评估时间"
-          value={formatDateTime(assessment?.completedAt ?? assessment?.createdAt)}
+          value={formatDateTime(
+            assessment?.completedAt ?? assessment?.createdAt,
+          )}
           icon={ShieldCheck}
         />
       </div>
@@ -81,7 +87,9 @@ export function PatientClinicalSummary({
               需要当前风险等级、系统评级和原因摘要齐全后，才允许确认风险结论。
             </p>
           </div>
-          <StatusBadge status={risk && hasRiskEvidence(risk) ? "ready" : "pending"}>
+          <StatusBadge
+            status={risk && hasRiskEvidence(risk) ? "ready" : "pending"}
+          >
             {risk && hasRiskEvidence(risk) ? "证据完整" : "待补充证据"}
           </StatusBadge>
         </div>
@@ -94,7 +102,9 @@ export function PatientClinicalSummary({
           />
           <SummaryField
             label="人工调整"
-            value={risk?.manualRiskLevel ? riskLabel(risk.manualRiskLevel) : "未调整"}
+            value={
+              risk?.manualRiskLevel ? riskLabel(risk.manualRiskLevel) : "未调整"
+            }
           />
           <SummaryField
             label="风险原因"
@@ -142,18 +152,19 @@ function SummaryField({
 }
 
 function currentRisk(patient: PatientProfile): RiskGrade | undefined {
-  return patient.riskGrades.find((risk) => risk.isCurrent) ?? patient.riskGrades[0];
+  return patient.riskGrades.find((risk) => risk.isCurrent);
 }
 
-function currentAssessmentRisk(assessment: AssessmentRecord): RiskGrade | undefined {
-  return (
-    assessment.riskGrades?.find((risk) => risk.isCurrent) ??
-    assessment.riskGrades?.[0]
-  );
+function currentAssessmentRisk(
+  assessment: AssessmentRecord,
+): RiskGrade | undefined {
+  return assessment.riskGrades?.find((risk) => risk.isCurrent);
 }
 
 function hasRiskEvidence(risk: RiskGrade) {
-  return Boolean(risk.riskLevel && risk.systemRiskLevel && risk.reasonSummary.trim());
+  return Boolean(
+    risk.riskLevel && risk.systemRiskLevel && risk.reasonSummary.trim(),
+  );
 }
 
 function scoreValue(
@@ -176,7 +187,7 @@ function riskLabel(level?: RiskGrade["riskLevel"] | null) {
   if (level === "high") return "高风险";
   if (level === "moderate") return "中风险";
   if (level === "low") return "低风险";
-  return "未评级";
+  return "待确认";
 }
 
 function formatDateTime(value?: string | null) {

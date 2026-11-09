@@ -69,9 +69,10 @@ export function PhaserPoseStage({
   onError,
 }: PhaserPoseStageProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
-  const gameRef = useRef<import("phaser").Game | null>(null);
   const callbacksRef = useRef({ onReady, onError });
-  const [ready, setReady] = useState(false);
+  const stageKey = `${gameName}:${profile}`;
+  const [readyStageKey, setReadyStageKey] = useState<string | null>(null);
+  const ready = readyStageKey === stageKey;
 
   useEffect(() => {
     callbacksRef.current = { onReady, onError };
@@ -79,21 +80,29 @@ export function PhaserPoseStage({
 
   useEffect(() => {
     let cancelled = false;
+    let game: import("phaser").Game | null = null;
 
     async function mountPhaserStage() {
       if (!hostRef.current) return;
       try {
         const Phaser = await import("phaser");
         if (cancelled || !hostRef.current) return;
-        gameRef.current = createPhaserStage({
+        const mountedGame = createPhaserStage({
           Phaser,
           host: hostRef.current,
           gameName,
           profile,
+          onSceneReady: () => {
+            if (cancelled) return;
+            setReadyStageKey(stageKey);
+            callbacksRef.current.onReady();
+          },
         });
-        if (cancelled) return;
-        setReady(true);
-        callbacksRef.current.onReady();
+        if (cancelled) {
+          mountedGame.destroy(true);
+          return;
+        }
+        game = mountedGame;
       } catch (error) {
         if (cancelled) return;
         const message =
@@ -104,14 +113,17 @@ export function PhaserPoseStage({
       }
     }
 
-    void mountPhaserStage();
+    const mountFrame = window.requestAnimationFrame(() => {
+      void mountPhaserStage();
+    });
 
     return () => {
       cancelled = true;
-      gameRef.current?.destroy(true);
-      gameRef.current = null;
+      window.cancelAnimationFrame(mountFrame);
+      game?.destroy(true);
+      game = null;
     };
-  }, [gameName, profile]);
+  }, [gameName, profile, stageKey]);
 
   return (
     <div
@@ -141,13 +153,16 @@ function createPhaserStage({
   host,
   gameName,
   profile,
+  onSceneReady,
 }: {
   Phaser: PhaserRuntime;
   host: HTMLDivElement;
   gameName: string;
   profile: BrowserPoseGameDefinition["scoringProfile"];
+  onSceneReady: () => void;
 }) {
   const palette = resolveStagePalette(profile, host);
+  let sceneReadyReported = false;
 
   class PoseStageScene extends Phaser.Scene {
     create() {
@@ -311,6 +326,11 @@ function createPhaserStage({
         repeat: -1,
         ease: "Sine.easeInOut",
       });
+
+      if (!sceneReadyReported) {
+        sceneReadyReported = true;
+        onSceneReady();
+      }
     }
   }
 

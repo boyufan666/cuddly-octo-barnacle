@@ -29,7 +29,7 @@ read_ownership_file() {
 process_cwd() {
   local pid="$1"
   local output cwd
-  output="$(lsof -nP -a -p "$pid" -d cwd -Fn 2>/dev/null)" || return 1
+  output="$(lsof -nP -a -p "$pid" -d cwd -F pfn 2>/dev/null)" || return 1
   cwd="$(printf '%s\n' "$output" | awk -v pid="$pid" '
     $0 == "p" pid { pid_count += 1; next }
     $0 == "fcwd" { fd_count += 1; next }

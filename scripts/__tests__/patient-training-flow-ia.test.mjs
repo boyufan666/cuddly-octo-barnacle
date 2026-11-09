@@ -416,7 +416,8 @@ test("patient assessment summary does not fake doctor confirmation", async () =>
   assert.match(summarySource, /assessmentDoctorConfirmationStatus/);
   assert.match(summarySource, /待医生确认/);
   assert.match(summarySource, /医生已确认/);
-  assert.match(summarySource, /risk\.confirmedAt \|\| risk\.confirmedById/);
+  assert.match(summarySource, /isDoctorConfirmedAssessment/);
+  assert.doesNotMatch(summarySource, /risk\.confirmedAt \|\| risk\.confirmedById/);
   assert.match(summarySource, /assessmentStatus\.isConfirmed && latestAd8/);
   assert.doesNotMatch(summarySource, /latestAssessment \? "评估已完成"/);
   assert.doesNotMatch(
@@ -452,7 +453,8 @@ test("patient result page avoids exact runtime metric readouts", async () => {
   );
   const visibleCopy = visibleJsxTextAndLiteralProps(resultSource);
 
-  assert.match(resultSource, /医生状态/);
+  assert.match(resultSource, /医师复核/);
+  assert.match(resultSource, /具体复核建议/);
   assert.match(resultSource, /patientDoctorReviewStatus/);
   assert.doesNotMatch(
     visibleCopy,

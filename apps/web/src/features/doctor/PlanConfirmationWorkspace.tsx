@@ -170,8 +170,14 @@ function PlanConfirmationForm({
         />
       </div>
       <div className="mt-4">
-        <label className="text-sm font-black text-[var(--ink-soft)]">调整原因</label>
+        <label
+          htmlFor="plan-adjustment-reason"
+          className="text-sm font-black text-[var(--ink-soft)]"
+        >
+          调整原因
+        </label>
         <textarea
+          id="plan-adjustment-reason"
           value={adjustmentReason}
           disabled={!pending}
           placeholder={
@@ -240,9 +246,15 @@ function PlanNumberInput({
 }) {
   return (
     <div className="rounded-[var(--radius-card)] border border-[var(--line-strong)] bg-[var(--surface-paper)] p-5">
-      <label className="text-sm font-black text-[var(--ink-subtle)]">{label}</label>
+      <label
+        htmlFor={`${label}-value`}
+        className="text-sm font-black text-[var(--ink-subtle)]"
+      >
+        {label}
+      </label>
       <div className="mt-3 flex items-center gap-3">
         <input
+          id={`${label}-value`}
           type="number"
           min="1"
           value={value}

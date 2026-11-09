@@ -1,6 +1,6 @@
 "use client";
 
-import { CheckCircle2, FileSearch, RotateCcw } from "lucide-react";
+import { CheckCircle2, FileSearch, RotateCcw, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { StatusBadge } from "@/components/ui/StatusBadge";
@@ -15,11 +15,12 @@ type ClinicalSummary = {
   title: "评估摘要" | "风险等级" | "医生结论";
   value: string;
   helper?: string;
+  status: "ready" | "pending" | "blocked" | "complete" | "review";
 };
 
 type AssessmentReviewPanelProps = {
   scores: AssessmentReviewScore[];
-  clinicalSummaries?: ClinicalSummary[];
+  clinicalSummaries: ClinicalSummary[];
   reviewStatusLabel: string;
   onApprove?: () => void;
   onReturn?: () => void;
@@ -36,9 +37,6 @@ export function AssessmentReviewPanel({
   isApproveDisabled,
   isReturnDisabled,
 }: AssessmentReviewPanelProps) {
-  const summaries = clinicalSummaries?.length
-    ? clinicalSummaries
-    : defaultClinicalSummaries;
   return (
     <Card tone="workbench" className="mt-5">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -48,10 +46,10 @@ export function AssessmentReviewPanel({
             评估复核
           </div>
           <h3 className="mt-4 text-3xl font-black text-[var(--ink-strong)]">
-            医生结构化评估确认
+            医师正式评估确认
           </h3>
           <p className="mt-3 max-w-4xl font-bold leading-7 text-[var(--ink-soft)]">
-            复核 MMSE、CDR、AD-8 分数、评估摘要和医生结论后，再批准正式评估写入。
+            复核 MMSE、CDR、AD-8 分数、评估摘要和风险证据后，由医师决定是否确认正式评估。
           </p>
         </div>
         <StatusBadge status="review">{reviewStatusLabel}</StatusBadge>
@@ -77,9 +75,19 @@ export function AssessmentReviewPanel({
       </div>
 
       <div className="mt-5 grid gap-4 xl:grid-cols-3">
-        {summaries.map((summary) => (
+        {clinicalSummaries.map((summary) => (
           <ClinicalSummaryCard key={summary.title} summary={summary} />
         ))}
+      </div>
+
+      <div className="mt-5 flex items-start gap-3 rounded-[var(--radius-card)] border border-[var(--warning-line)] bg-[var(--warning-soft)] p-4 text-[var(--ink-strong)]">
+        <ShieldCheck
+          className="mt-0.5 h-5 w-5 shrink-0 text-[var(--warning)]"
+          aria-hidden="true"
+        />
+        <p className="font-bold leading-7">
+          AI 评估、语音材料和系统风险建议只作为医师复核依据，不会自动写成正式评估。只有医师确认后，才可进入康复方案生成。
+        </p>
       </div>
 
       <div className="mt-5 flex flex-wrap gap-3">
@@ -90,7 +98,7 @@ export function AssessmentReviewPanel({
         >
           <span className="inline-flex items-center gap-2">
             <CheckCircle2 className="h-5 w-5" aria-hidden="true" />
-            批准正式评估
+            由医师确认正式评估
           </span>
         </Button>
         <Button
@@ -108,35 +116,17 @@ export function AssessmentReviewPanel({
   );
 }
 
-const defaultClinicalSummaries: ClinicalSummary[] = [
-  {
-    title: "评估摘要",
-    value: "待补齐评估",
-    helper: "患者完成结构化评估后可复核",
-  },
-  {
-    title: "风险等级",
-    value: "待医生确认",
-    helper: "结合量表分数和临床观察确认",
-  },
-  {
-    title: "医生结论",
-    value: "待医生确认",
-    helper: "批准后才会写入正式评估记录",
-  },
-];
-
 function ClinicalSummaryCard({ summary }: { summary: ClinicalSummary }) {
   return (
     <section className="rounded-[var(--radius-card)] border border-[var(--line-subtle)] bg-[var(--surface-paper)] p-4">
       <div className="flex items-center justify-between gap-3">
         <h4 className="text-lg font-black text-[var(--ink-strong)]">{summary.title}</h4>
-        <StatusBadge status={summary.value ? "ready" : "pending"}>
-          {summary.value ? "已整理" : "待补充"}
+        <StatusBadge status={summary.status}>
+          {clinicalSummaryStatusLabel(summary.status)}
         </StatusBadge>
       </div>
       <p className="mt-4 break-words text-base font-black leading-7 text-[var(--ink-strong)]">
-        {summary.value || "待补充"}
+        {summary.value}
       </p>
       {summary.helper ? (
         <p className="mt-2 text-sm font-bold leading-6 text-[var(--ink-subtle)]">
@@ -145,6 +135,14 @@ function ClinicalSummaryCard({ summary }: { summary: ClinicalSummary }) {
       ) : null}
     </section>
   );
+}
+
+function clinicalSummaryStatusLabel(status: ClinicalSummary["status"]) {
+  if (status === "complete") return "已确认";
+  if (status === "ready") return "已整理";
+  if (status === "pending") return "待确认";
+  if (status === "blocked") return "未就绪";
+  return "复核中";
 }
 
 function formatScoreValue(value: AssessmentReviewScore["value"]) {

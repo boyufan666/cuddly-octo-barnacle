@@ -38,7 +38,6 @@ const validCustomerEnv = {
   COOKIE_SECURE: "false",
   PUBLIC_CREDENTIAL_THROTTLE_LIMIT: "7",
   PUBLIC_CREDENTIAL_THROTTLE_TTL_MS: "45000",
-  DEFAULT_PATIENT_PASSWORD: "customer-seed-password",
   SENSITIVE_DATA_KEY_REF: "secret-manager://rehab/customer-sensitive-key",
   SENSITIVE_DATA_KEY: Buffer.alloc(32, 7).toString("base64"),
   POSTGRES_PASSWORD: "customer-postgres-password",
@@ -48,6 +47,7 @@ function runConfigurationPrefix({
   overrides = {},
   omitted = [],
   writeEnv = true,
+  args = [],
 } = {}) {
   const firstPrerequisite =
     'command_exists docker || fail "Docker is not installed or not in PATH."';
@@ -73,7 +73,7 @@ function runConfigurationPrefix({
   }
 
   try {
-    return spawnSync("/bin/bash", [probePath], {
+    return spawnSync("/bin/bash", [probePath, ...args], {
       encoding: "utf8",
       env: { ...process.env, HOME: root },
     });
@@ -661,7 +661,7 @@ test("start and stop use only exact cwd plus the exclusive inherited ownership F
       1,
       `${label} must query cwd once`,
     );
-    assert.match(cwdBody, /lsof -nP -a -p "\$pid" -d cwd -Fn/);
+    assert.match(cwdBody, /lsof -nP -a -p "\$pid" -d cwd -F pfn/);
     const nextFunction = script.indexOf(
       "() {",
       matchFunctionStart + "process_matches_expected() {".length,
@@ -1157,6 +1157,7 @@ function runFullLauncher({
   changeNextConfigBetweenRuns = false,
   existingWebBuild = false,
   webProcessCommand = "next start --hostname 0.0.0.0 --port 3000",
+  args = [],
 } = {}) {
   const root = mkdtempSync(join(tmpdir(), "customer-launcher-full-"));
   const scriptsDirectory = join(root, "scripts");
@@ -1236,7 +1237,7 @@ function runFullLauncher({
       LAUNCHER_WEB_PROCESS_COMMAND: webProcessCommand,
     };
     const executeLauncher = () =>
-      spawnSync("/bin/bash", [launcher], {
+      spawnSync("/bin/bash", [launcher, ...args], {
         encoding: "utf8",
         timeout: 10_000,
         env: launcherEnvironment,
@@ -1718,7 +1719,7 @@ function functionBody(name, nextName) {
   return source.slice(start, end);
 }
 
-test("complete customer launcher process migrates after infrastructure and before builds and starts", () => {
+test("normal customer launcher migrates and starts without running any seed", () => {
   const { result, events } = runFullLauncher();
   assert.equal(
     result.status,
@@ -1749,6 +1750,64 @@ test("complete customer launcher process migrates after infrastructure and befor
       `${event} must execute exactly once`,
     );
   }
+  assert.ok(!events.some((event) => event.startsWith("pnpm:db:seed")));
+  assert.match(combinedOutput(result), /Mode: start only; no seed command will run/);
+});
+
+test("explicit customer initialization issues only customer seed and hard-stops on failure", () => {
+  const { result, events } = runFullLauncher({
+    args: ["--initialize-customer"],
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(combinedOutput(result), /客户数据库初始化失败.*未改用默认 demo seed/);
+  assert.equal(
+    events.filter((event) => event === "pnpm:db:seed:customer").length,
+    1,
+  );
+  assert.ok(!events.includes("pnpm:db:seed"));
+  assert.ok(!events.includes("pnpm:db:seed:trial"));
+  assert.ok(!events.includes("pnpm:--filter @rehab-platform/api build"));
+  assert.ok(!events.includes("pnpm:--filter @rehab-platform/web build"));
+  assert.ok(!events.includes("start:api"));
+  assert.ok(!events.includes("start:web"));
+});
+
+test("customer launcher rejects unknown arguments before external operations", () => {
+  const result = runConfigurationPrefix({ args: ["--seed"] });
+  assert.notEqual(result.status, 0);
+  assert.match(
+    combinedOutput(result),
+    /启动参数无效.*--initialize-customer.*只执行 pnpm db:seed:customer/,
+  );
+});
+
+test("customer launcher checks stop state before Docker or database mutation and never invokes demo seed", () => {
+  const processPreflight = source.indexOf(
+    'ensure_process_stopped "API" "$API_PID_FILE"',
+  );
+  const portPreflight = source.indexOf(
+    'ensure_port_available "$API_PORT" "API"',
+  );
+  const dockerInfo = source.indexOf("docker info");
+  const infrastructure = source.indexOf("pnpm infra:up");
+  const migration = source.indexOf("pnpm db:migrate:deploy");
+  const customerSeed = source.indexOf("if ! pnpm db:seed:customer");
+  const apiBuild = source.indexOf("pnpm --filter @rehab-platform/api build");
+
+  for (const preflight of [processPreflight, portPreflight]) {
+    assert.notEqual(preflight, -1);
+    assert.ok(preflight < dockerInfo);
+    assert.ok(preflight < infrastructure);
+    assert.ok(preflight < migration);
+  }
+  assert.ok(migration < customerSeed);
+  assert.ok(customerSeed < apiBuild);
+  assert.match(
+    source,
+    /run \$ROOT_DIR\/scripts\/stop-customer-mac\.sh before launching or initializing/,
+  );
+  assert.doesNotMatch(source, /^\s*(?:if ! )?pnpm db:seed(?:\s|>|$)/m);
+  assert.doesNotMatch(source, /^\s*(?:if ! )?pnpm db:seed:trial(?:\s|>|$)/m);
 });
 
 test("complete customer launcher process hard-fails fingerprint errors without stale build reuse", () => {
@@ -1966,7 +2025,6 @@ for (const name of [
   "PORT",
   "PUBLIC_CREDENTIAL_THROTTLE_LIMIT",
   "PUBLIC_CREDENTIAL_THROTTLE_TTL_MS",
-  "DEFAULT_PATIENT_PASSWORD",
   "SENSITIVE_DATA_KEY_REF",
   "SENSITIVE_DATA_KEY",
   "POSTGRES_PASSWORD",
@@ -2024,19 +2082,6 @@ for (const value of ["0", "3000", "65536", "4000x"]) {
   });
 }
 
-for (const value of ["1234567", "x".repeat(129)]) {
-  test(`customer launcher rejects invalid DEFAULT_PATIENT_PASSWORD length`, () => {
-    const result = runConfigurationPrefix({
-      overrides: { DEFAULT_PATIENT_PASSWORD: value },
-    });
-    assert.notEqual(result.status, 0);
-    assert.match(
-      combinedOutput(result),
-      /DEFAULT_PATIENT_PASSWORD.*8 到 128 位/,
-    );
-  });
-}
-
 for (const value of ["", " leading-key-ref", "trailing-key-ref "]) {
   test(`customer launcher rejects non-exact SENSITIVE_DATA_KEY_REF=${JSON.stringify(value)}`, () => {
     const result = runConfigurationPrefix({
@@ -2087,9 +2132,53 @@ test("customer launcher accepts and exports only the explicit hard configuration
   assert.doesNotMatch(configurationBlock, />>?\s*"?\$ROOT_DIR\/\.env/);
 });
 
+test("explicit customer initialization exports every CUSTOMER_* seed field to the seed process", () => {
+  const customerSeedKeys = [
+    "CUSTOMER_SEED_CONFIRM_EMPTY_DATABASE",
+    "CUSTOMER_ORG_CODE",
+    "CUSTOMER_ORG_NAME",
+    "CUSTOMER_ORG_TYPE",
+    "CUSTOMER_ADMIN_ACCOUNT",
+    "CUSTOMER_ADMIN_DISPLAY_NAME",
+    "CUSTOMER_ADMIN_MOBILE_PHONE",
+    "CUSTOMER_ADMIN_INITIAL_PASSWORD",
+    "CUSTOMER_OPERATOR_ACCOUNT",
+    "CUSTOMER_OPERATOR_DISPLAY_NAME",
+    "CUSTOMER_OPERATOR_MOBILE_PHONE",
+    "CUSTOMER_OPERATOR_INITIAL_PASSWORD",
+    "CUSTOMER_AUDITOR_ACCOUNT",
+    "CUSTOMER_AUDITOR_DISPLAY_NAME",
+    "CUSTOMER_AUDITOR_MOBILE_PHONE",
+    "CUSTOMER_AUDITOR_INITIAL_PASSWORD",
+    "CUSTOMER_DOCTOR_ACCOUNT",
+    "CUSTOMER_DOCTOR_DISPLAY_NAME",
+    "CUSTOMER_DOCTOR_MOBILE_PHONE",
+    "CUSTOMER_DOCTOR_INITIAL_PASSWORD",
+    "CUSTOMER_DOCTOR_TITLE",
+    "CUSTOMER_DOCTOR_DEPARTMENT",
+    "CUSTOMER_PATIENT_ACCOUNT",
+    "CUSTOMER_PATIENT_NAME",
+    "CUSTOMER_PATIENT_MOBILE_PHONE",
+    "CUSTOMER_PATIENT_INITIAL_PASSWORD",
+    "CUSTOMER_PATIENT_GENDER",
+    "CUSTOMER_PATIENT_AGE",
+    "CUSTOMER_PATIENT_MEDICAL_RECORD_NO",
+    "CUSTOMER_CAREGIVER_ACCOUNT",
+    "CUSTOMER_CAREGIVER_NAME",
+    "CUSTOMER_CAREGIVER_MOBILE_PHONE",
+    "CUSTOMER_CAREGIVER_INITIAL_PASSWORD",
+    "CUSTOMER_CAREGIVER_RELATION",
+  ];
+  for (const key of customerSeedKeys) {
+    assert.match(source, new RegExp(`\\b${key}\\b`));
+  }
+  assert.match(source, /export \"\$key\"/);
+});
+
 test("README documents direct customer Mac startup hard configuration without inference", () => {
   assert.match(readme, /## 客户 Mac 一键启动/);
   assert.match(readme, /一键启动康复平台\.command/);
+  assert.match(readme, /--initialize-customer/);
   for (const name of Object.keys(validCustomerEnv)) {
     assert.match(readme, new RegExp(`\\b${name}\\b`));
   }

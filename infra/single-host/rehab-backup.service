@@ -1,0 +1,9 @@
+[Unit]
+Description=Rehabilitation daily database backup
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /etc/rehab/backup.sh
+UMask=0077

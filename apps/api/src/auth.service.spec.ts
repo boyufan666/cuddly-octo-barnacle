@@ -181,6 +181,38 @@ describe('AppService credential lifecycle', () => {
     expect(result).not.toHaveProperty('sessionToken');
   });
 
+  it('accepts a historical short credential only for reset-required login', async () => {
+    const { prisma, service } = createService();
+    const userId = 'a558056d-743d-4018-b65a-b782798ec29d';
+    prisma.user.findUnique.mockResolvedValue({
+      id: userId,
+      account: 'patient001',
+      identityEnvelope: encryptedUserIdentity(userId, '患者'),
+      passwordHash:
+        '$argon2id$v=19$m=19456,t=2,p=1$TOmVOSuQjjr/nt/qq5fc6Q$hVBTU/Sk5w/WwIrDvD00PpSJgUq4xuOIDrMSR+YzQhE',
+      credentialVersion: 1,
+      passwordResetRequired: true,
+      authSessionVersion: 2,
+      accountStatus: 'active',
+      roleBindings: [
+        {
+          roleCode: 'patient',
+          relatedObjectType: 'patient',
+          relatedObjectId: 'patient-id',
+        },
+      ],
+    });
+
+    const result = await service.login({
+      account: 'patient001',
+      password: '253913',
+    });
+
+    expect(result).toMatchObject({ status: 'password_reset_required' });
+    expect(result).toHaveProperty('resetToken');
+    expect(result).not.toHaveProperty('sessionToken');
+  });
+
   it('does not verify a legacy SHA-256 credential', async () => {
     const { prisma, service } = createService();
     prisma.user.findUnique.mockResolvedValue({
@@ -250,6 +282,18 @@ describe('AppService credential lifecycle', () => {
     );
     expect(prisma.user.findUnique).not.toHaveBeenCalled();
   });
+
+  it.each(['', 'x'.repeat(129)])(
+    'rejects an empty or oversized login password before user lookup',
+    async (password) => {
+      const { prisma, service } = createService();
+
+      await expect(
+        service.login({ account: 'patient001', password }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.user.findUnique).not.toHaveBeenCalled();
+    },
+  );
 
   it('locks the target and all role bindings in one ReadCommitted transaction before resetting and auditing', async () => {
     const { prisma, service } = createService();

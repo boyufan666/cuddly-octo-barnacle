@@ -1,7 +1,14 @@
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import type { TrainingRecordsResponse } from "@/types/api";
+import {
+  StatusBadge,
+  type StatusBadgeStatus,
+} from "@/components/ui/StatusBadge";
+import type {
+  TrainingRecordSession,
+  TrainingRecordsResponse,
+  TrainingResult,
+} from "@/types/api";
 
 type TrainingResultPageProps = {
   onBackToday: () => void;
@@ -12,12 +19,12 @@ export function TrainingResultPage({
   onBackToday,
   trainingRecords,
 }: TrainingResultPageProps) {
-  const latest = trainingRecords?.sessions.find((session) => session.result);
+  const savedSessions =
+    trainingRecords?.sessions.filter(hasTrainingResult) ?? [];
+  const completedSessions = savedSessions.filter(isValidTrainingResult);
+  const latest = savedSessions[0];
   const result = latest?.result;
-  const doctorStatus = result
-    ? patientDoctorReviewStatus(result.reviewConclusion, result.abnormalFlag)
-    : "完成训练后，医生会看到需要关注的情况。";
-  const completedSessions = trainingRecords?.sessions.filter((session) => session.result) ?? [];
+  const doctorReview = result ? patientDoctorReviewStatus(result) : undefined;
   const trend = summarizeTrend(completedSessions);
 
   return (
@@ -46,22 +53,36 @@ export function TrainingResultPage({
             </p>
             <div className="mt-6 grid gap-3 rounded-[var(--radius-card)] border border-[var(--line-subtle)] bg-[var(--surface-muted)] p-5 md:grid-cols-2">
               <div>
-                <p className="text-sm font-black text-[var(--accent-strong)]">训练记录</p>
+                <p className="text-sm font-black text-[var(--accent-strong)]">
+                  训练记录
+                </p>
                 <p className="mt-2 font-bold leading-7 text-[var(--ink-soft)]">
                   最近一次训练已经进入记录页，可按今日安排继续下一项。
                 </p>
               </div>
               <div>
-                <p className="text-sm font-black text-[var(--accent-strong)]">医生状态</p>
-                <p className="mt-2 font-bold leading-7 text-[var(--ink-soft)]">
-                  {doctorStatus}
+                <p className="text-sm font-black text-[var(--accent-strong)]">
+                  医师复核
                 </p>
+                <StatusBadge className="mt-2" status={doctorReview?.status}>
+                  {doctorReview?.label}
+                </StatusBadge>
+                <p className="mt-2 font-bold leading-7 text-[var(--ink-soft)]">
+                  {doctorReview?.description}
+                </p>
+                {doctorReview?.reviewed ? (
+                  <p className="mt-3 whitespace-pre-wrap break-words font-bold leading-7 text-[var(--ink-strong)]">
+                    {doctorReview.reviewNote}
+                  </p>
+                ) : null}
               </div>
             </div>
           </>
         ) : (
           <div className="mt-6 rounded-[var(--radius-card)] border border-dashed border-[var(--line-subtle)] bg-[var(--surface-panel)] p-6">
-            <h3 className="text-2xl font-black text-[var(--ink-strong)]">暂无训练结果</h3>
+            <h3 className="text-2xl font-black text-[var(--ink-strong)]">
+              暂无训练结果
+            </h3>
             <p className="mt-2 font-bold leading-7 text-[var(--ink-soft)]">
               完成训练并保存后，这里会显示训练记录和医生提醒。
             </p>
@@ -82,41 +103,61 @@ export function TrainingResultPage({
           </p>
         </div>
         <div className="grid gap-3 md:grid-cols-3">
-          <ResultFact label="已保存记录" value={`${completedSessions.length} 次`} />
-          <ResultFact label="最近训练" value={latest?.gameContent.name ?? "待训练"} />
-          <ResultFact label="医生状态" value={doctorStatus} />
+          <ResultFact
+            label="已保存记录"
+            value={`${savedSessions.length} 次`}
+          />
+          <ResultFact
+            label="最近训练"
+            value={latest?.gameContent.name ?? "待训练"}
+          />
+          <ResultFact
+            label="医生状态"
+            value={
+              doctorReview?.description ??
+              "完成训练后，医生会看到需要关注的情况。"
+            }
+          />
         </div>
       </Card>
 
       <div className="flex flex-wrap gap-3">
-        <Button onClick={onBackToday}>
-          返回今日训练
-        </Button>
+        <Button onClick={onBackToday}>返回今日训练</Button>
       </div>
     </section>
   );
 }
 
-function ResultFact({
-  label,
-  value,
-}: {
-  label: string;
-  value: string;
-}) {
+type CompletedTrainingSession = TrainingRecordSession & {
+  result: NonNullable<TrainingRecordSession["result"]>;
+};
+
+function hasTrainingResult(
+  session: TrainingRecordSession,
+): session is CompletedTrainingSession {
+  return session.sessionStatus === "completed" && Boolean(session.result);
+}
+
+function isValidTrainingResult(session: CompletedTrainingSession) {
+  return session.result.qualityFlag === "valid" && !session.result.abnormalFlag;
+}
+
+function ResultFact({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0 rounded-[var(--radius-card)] border border-[var(--line-subtle)] bg-[var(--surface-panel)] p-4">
-      <div className="text-sm font-black text-[var(--accent-strong)]">{label}</div>
-      <p className="mt-2 break-words text-base font-black leading-6 text-[var(--ink-strong)]">{value}</p>
+      <div className="text-sm font-black text-[var(--accent-strong)]">
+        {label}
+      </div>
+      <p className="mt-2 break-words text-base font-black leading-6 text-[var(--ink-strong)]">
+        {value}
+      </p>
     </div>
   );
 }
 
-function summarizeTrend(sessions: TrainingRecordsResponse["sessions"]) {
+function summarizeTrend(sessions: CompletedTrainingSession[]) {
   if (!sessions.length) {
     return {
-      averageCompletion: "待生成",
-      averageMotion: "待生成",
       description: "完成训练后，这里会显示近期完成情况和变化方向。",
       title: "暂无近期趋势",
     };
@@ -133,11 +174,69 @@ function summarizeTrend(sessions: TrainingRecordsResponse["sessions"]) {
   };
 }
 
+type DoctorReviewPresentation = {
+  description: string;
+  label: string;
+  status: StatusBadgeStatus;
+} & ({ reviewed: false } | { reviewNote: string; reviewed: true });
+
 function patientDoctorReviewStatus(
-  reviewConclusion?: string | null,
-  abnormalFlag?: boolean,
-) {
-  if (reviewConclusion === "needs_retrain") return "医生建议重新训练，请按提醒安排下一次训练。";
-  if (reviewConclusion) return "医生已确认本次训练记录。";
-  return abnormalFlag ? "本次表现等待医生确认。" : "本次训练记录已保存。";
+  result: TrainingResult,
+): DoctorReviewPresentation {
+  if (result.reviewStatus !== "reviewed") {
+    return result.abnormalFlag || result.qualityFlag !== "valid"
+      ? {
+          description: "本次记录需要医师复核，请等待医师给出具体建议。",
+          label: "尚未复核",
+          reviewed: false,
+          status: "pending",
+        }
+      : {
+          description: "本次训练记录已保存，无需医师复核。",
+          label: "无需复核",
+          reviewed: false,
+          status: "ready",
+        };
+  }
+
+  if (typeof result.reviewNote !== "string" || !result.reviewNote.trim()) {
+    throw new Error("已复核训练结果缺少具体复核建议。");
+  }
+
+  const reviewedState = {
+    reviewNote: result.reviewNote,
+    reviewed: true as const,
+  };
+  switch (result.reviewConclusion) {
+    case "accepted_valid":
+      return {
+        ...reviewedState,
+        description: "医师已接受本次训练记录。",
+        label: "已接受",
+        status: "complete",
+      };
+    case "confirmed_abnormal":
+      return {
+        ...reviewedState,
+        description: "医师确认本次训练存在需要关注的情况。",
+        label: "需关注",
+        status: "blocked",
+      };
+    case "excluded_from_analysis":
+      return {
+        ...reviewedState,
+        description: "医师已将本次记录排除在后续分析之外。",
+        label: "需关注",
+        status: "blocked",
+      };
+    case "needs_retrain":
+      return {
+        ...reviewedState,
+        description: "医师建议重新训练。",
+        label: "需关注",
+        status: "blocked",
+      };
+    default:
+      throw new Error("已复核训练结果包含无效复核结论。");
+  }
 }

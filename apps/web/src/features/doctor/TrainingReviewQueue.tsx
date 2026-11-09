@@ -38,11 +38,15 @@ export function TrainingReviewQueue({
   onSubmit,
   isBusy,
 }: TrainingReviewQueueProps) {
-  const sessions = findTrainingSessionsRequiringReview(trainingRecords);
-  const selectedSession = sessions.find(
+  const sessions = trainingRecords
+    ? findTrainingSessionsRequiringReview(trainingRecords)
+    : undefined;
+  const selectedSession = sessions?.find(
     (session) => session.result?.id === form.resultId,
   );
-  const canSubmit = Boolean(selectedSession && isTrainingReviewFormComplete(form));
+  const canSubmit = Boolean(
+    selectedSession && isTrainingReviewFormComplete(form),
+  );
 
   function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -68,12 +72,28 @@ export function TrainingReviewQueue({
             仅列出真实回传且被标记为异常或质量可疑的训练结果。必须选择结果、人工结论和复核说明后才能保存。
           </p>
         </div>
-        <StatusBadge status={sessions.length ? "pending" : "complete"}>
-          {sessions.length ? `${sessions.length} 条待复核` : "无待复核结果"}
+        <StatusBadge
+          status={
+            sessions === undefined
+              ? "review"
+              : sessions.length
+                ? "pending"
+                : "complete"
+          }
+        >
+          {sessions === undefined
+            ? "训练结果未加载"
+            : sessions.length
+              ? `${sessions.length} 条待复核`
+              : "无待复核结果"}
         </StatusBadge>
       </div>
 
-      {sessions.length ? (
+      {sessions === undefined ? (
+        <div className="mt-5 rounded-[var(--radius-card)] border border-[var(--warning-line)] bg-[var(--warning-soft)] p-5 font-bold leading-7 text-[var(--warning)]">
+          训练结果尚未加载，暂时无法判断当前患者是否有待复核结果。
+        </div>
+      ) : sessions.length ? (
         <div className="mt-5 grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
           <div className="overflow-hidden rounded-[var(--radius-card)] border border-[var(--line-strong)]">
             {sessions.map((session) => {
@@ -86,7 +106,9 @@ export function TrainingReviewQueue({
                   onClick={() => onChange("resultId", result?.id ?? "")}
                   className={[
                     "block w-full border-b border-[var(--line-subtle)] bg-[var(--surface-paper)] p-5 text-left transition last:border-b-0 hover:bg-[var(--surface-muted)]",
-                    selected ? "bg-[var(--surface-muted)] ring-2 ring-inset ring-[var(--accent-strong)]/30" : "",
+                    selected
+                      ? "bg-[var(--surface-muted)] ring-2 ring-inset ring-[var(--accent-strong)]/30"
+                      : "",
                   ].join(" ")}
                 >
                   <div className="flex flex-wrap items-center justify-between gap-3">
@@ -95,15 +117,21 @@ export function TrainingReviewQueue({
                         {session.gameContent.name}
                       </p>
                       <p className="mt-1 text-sm font-bold text-[var(--ink-subtle)]">
-                        {formatDateTime(session.startedAt)} · 会话 {shortId(session.id)}
+                        {formatDateTime(session.startedAt)} · 会话{" "}
+                        {shortId(session.id)}
                       </p>
                     </div>
-                    <StatusBadge status={result?.abnormalFlag ? "blocked" : "pending"}>
+                    <StatusBadge
+                      status={result?.abnormalFlag ? "blocked" : "pending"}
+                    >
                       {qualityLabel(result?.qualityFlag)}
                     </StatusBadge>
                   </div>
                   <div className="mt-4 grid gap-3 md:grid-cols-4">
-                    <ResultMetric label="得分" value={scoreLabel(result?.score, "分")} />
+                    <ResultMetric
+                      label="得分"
+                      value={scoreLabel(result?.score, "分")}
+                    />
                     <ResultMetric
                       label="完成率"
                       value={percentLabel(result?.completionRate)}
@@ -133,7 +161,9 @@ export function TrainingReviewQueue({
           >
             <div className="flex items-center gap-2 text-[var(--accent-strong)]">
               <Activity className="h-5 w-5" aria-hidden="true" />
-              <h4 className="text-xl font-black text-[var(--ink-strong)]">录入复核结论</h4>
+              <h4 className="text-xl font-black text-[var(--ink-strong)]">
+                录入复核结论
+              </h4>
             </div>
             <p className="mt-2 text-sm font-bold leading-6 text-[var(--ink-subtle)]">
               {selectedSession
@@ -187,7 +217,9 @@ function ResultMetric({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-[var(--radius-control)] border border-[var(--line-subtle)] bg-[var(--surface-muted)] px-3 py-2">
       <p className="text-xs font-black text-[var(--ink-subtle)]">{label}</p>
-      <p className="mt-1 text-sm font-black text-[var(--ink-strong)]">{value}</p>
+      <p className="mt-1 text-sm font-black text-[var(--ink-strong)]">
+        {value}
+      </p>
     </div>
   );
 }
@@ -249,9 +281,9 @@ function TextAreaField({
 }
 
 function findTrainingSessionsRequiringReview(
-  trainingRecords?: TrainingRecordsResponse | null,
+  trainingRecords: TrainingRecordsResponse,
 ): TrainingRecordSession[] {
-  return (trainingRecords?.sessions ?? []).filter(
+  return trainingRecords.sessions.filter(
     (session): session is TrainingRecordSession =>
       Boolean(session.result) &&
       (session.result?.abnormalFlag === true ||

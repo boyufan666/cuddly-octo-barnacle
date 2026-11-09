@@ -23,6 +23,43 @@ LSOF_NO_MATCH=1
 LSOF_UNDETERMINED=2
 API_STARTED_BY_THIS_LAUNCH=0
 WEB_STARTED_BY_THIS_LAUNCH=0
+CUSTOMER_INITIALIZATION_REQUESTED=0
+CUSTOMER_SEED_ENV_KEYS=(
+  CUSTOMER_SEED_CONFIRM_EMPTY_DATABASE
+  CUSTOMER_ORG_CODE
+  CUSTOMER_ORG_NAME
+  CUSTOMER_ORG_TYPE
+  CUSTOMER_ADMIN_ACCOUNT
+  CUSTOMER_ADMIN_DISPLAY_NAME
+  CUSTOMER_ADMIN_MOBILE_PHONE
+  CUSTOMER_ADMIN_INITIAL_PASSWORD
+  CUSTOMER_OPERATOR_ACCOUNT
+  CUSTOMER_OPERATOR_DISPLAY_NAME
+  CUSTOMER_OPERATOR_MOBILE_PHONE
+  CUSTOMER_OPERATOR_INITIAL_PASSWORD
+  CUSTOMER_AUDITOR_ACCOUNT
+  CUSTOMER_AUDITOR_DISPLAY_NAME
+  CUSTOMER_AUDITOR_MOBILE_PHONE
+  CUSTOMER_AUDITOR_INITIAL_PASSWORD
+  CUSTOMER_DOCTOR_ACCOUNT
+  CUSTOMER_DOCTOR_DISPLAY_NAME
+  CUSTOMER_DOCTOR_MOBILE_PHONE
+  CUSTOMER_DOCTOR_INITIAL_PASSWORD
+  CUSTOMER_DOCTOR_TITLE
+  CUSTOMER_DOCTOR_DEPARTMENT
+  CUSTOMER_PATIENT_ACCOUNT
+  CUSTOMER_PATIENT_NAME
+  CUSTOMER_PATIENT_MOBILE_PHONE
+  CUSTOMER_PATIENT_INITIAL_PASSWORD
+  CUSTOMER_PATIENT_GENDER
+  CUSTOMER_PATIENT_AGE
+  CUSTOMER_PATIENT_MEDICAL_RECORD_NO
+  CUSTOMER_CAREGIVER_ACCOUNT
+  CUSTOMER_CAREGIVER_NAME
+  CUSTOMER_CAREGIVER_MOBILE_PHONE
+  CUSTOMER_CAREGIVER_INITIAL_PASSWORD
+  CUSTOMER_CAREGIVER_RELATION
+)
 
 mkdir -p "$LOG_DIR" "$RUNTIME_DIR"
 
@@ -38,6 +75,17 @@ fail() {
   log "ERROR: $*"
   log "Open logs for details: $LOG_DIR"
   exit 1
+}
+
+parse_launcher_arguments() {
+  if (( $# == 0 )); then
+    return 0
+  fi
+  if (( $# == 1 )) && [[ "$1" == "--initialize-customer" ]]; then
+    CUSTOMER_INITIALIZATION_REQUESTED=1
+    return 0
+  fi
+  fail "启动参数无效；普通启动不传参数。仅新空客户数据库可显式使用 --initialize-customer，该模式只执行 pnpm db:seed:customer，绝不会执行默认 demo seed。"
 }
 
 cleanup_started_process() {
@@ -129,7 +177,7 @@ read_ownership_file() {
 process_cwd() {
   local pid="$1"
   local output cwd
-  output="$(lsof -nP -a -p "$pid" -d cwd -Fn 2>/dev/null)" || return 1
+  output="$(lsof -nP -a -p "$pid" -d cwd -F pfn 2>/dev/null)" || return 1
   cwd="$(printf '%s\n' "$output" | awk -v pid="$pid" '
     $0 == "p" pid { pid_count += 1; next }
     $0 == "fcwd" { fd_count += 1; next }
@@ -225,7 +273,6 @@ validate_customer_configuration() {
   COOKIE_SECURE="$(read_env_value COOKIE_SECURE)"
   PUBLIC_CREDENTIAL_THROTTLE_LIMIT="$(read_env_value PUBLIC_CREDENTIAL_THROTTLE_LIMIT)"
   PUBLIC_CREDENTIAL_THROTTLE_TTL_MS="$(read_env_value PUBLIC_CREDENTIAL_THROTTLE_TTL_MS)"
-  DEFAULT_PATIENT_PASSWORD="$(read_env_value DEFAULT_PATIENT_PASSWORD)"
   SENSITIVE_DATA_KEY_REF="$(read_env_value SENSITIVE_DATA_KEY_REF)"
   SENSITIVE_DATA_KEY="$(read_env_value SENSITIVE_DATA_KEY)"
   POSTGRES_PASSWORD="$(read_env_value POSTGRES_PASSWORD)"
@@ -235,8 +282,6 @@ validate_customer_configuration() {
   ensure_not_placeholder "WEB_ORIGIN" "$WEB_ORIGIN"
   ensure_not_placeholder "PORT" "$API_PORT"
   ensure_not_placeholder "NEXT_PUBLIC_API_BASE_URL" "$NEXT_PUBLIC_API_BASE_URL"
-  ensure_not_placeholder "DEFAULT_PATIENT_PASSWORD" "$DEFAULT_PATIENT_PASSWORD"
-
   is_tcp_port "$API_PORT" || \
     fail "PORT 配置无效；请填写 1 到 65535 之间的正整数，客户 Mac 通常使用 PORT=4000。"
   [[ "$API_PORT" != "$WEB_PORT" ]] || \
@@ -256,10 +301,6 @@ validate_customer_configuration() {
     fail "SENSITIVE_DATA_KEY 配置无效；请在项目 .env 中填写 canonical base64 编码且解码后恰好为 32 bytes 的值。"
   [[ "$POSTGRES_PASSWORD" =~ [^[:space:]] ]] || \
     fail "POSTGRES_PASSWORD 配置无效，不得为空或纯空白；请在项目 .env 中显式填写数据库密码。"
-  if (( ${#DEFAULT_PATIENT_PASSWORD} < 8 || ${#DEFAULT_PATIENT_PASSWORD} > 128 )); then
-    fail "DEFAULT_PATIENT_PASSWORD 配置无效；初始患者密码长度必须在 8 到 128 位之间。"
-  fi
-
   export DATABASE_URL
   export JWT_SECRET
   export WEB_ORIGIN
@@ -268,11 +309,18 @@ validate_customer_configuration() {
   export COOKIE_SECURE
   export PUBLIC_CREDENTIAL_THROTTLE_LIMIT
   export PUBLIC_CREDENTIAL_THROTTLE_TTL_MS
-  export DEFAULT_PATIENT_PASSWORD
   export SENSITIVE_DATA_KEY_REF
   export SENSITIVE_DATA_KEY
   export POSTGRES_PASSWORD
   export NEXT_TELEMETRY_DISABLED=1
+
+  if (( CUSTOMER_INITIALIZATION_REQUESTED == 1 )); then
+    local key
+    for key in "${CUSTOMER_SEED_ENV_KEYS[@]}"; do
+      printf -v "$key" "%s" "$(read_env_value "$key")"
+      export "$key"
+    done
+  fi
 }
 
 port_listening() {
@@ -478,13 +526,11 @@ ensure_not_placeholder() {
   fi
 }
 
-start_process() {
+ensure_process_stopped() {
   local name="$1"
   local pid_file="$2"
   local owner_record_file="$3"
-  local log_file="$4"
-  local expected_cwd="$5"
-  shift 5
+  local expected_cwd="$4"
 
   if [[ -f "$pid_file" ]]; then
     local existing_pid
@@ -496,7 +542,7 @@ start_process() {
     fi
     if kill -0 "$existing_pid" >/dev/null 2>&1; then
       if process_matches_expected "$existing_pid" "$owner_record_file" "$expected_cwd"; then
-        fail "$name recorded PID $existing_pid is still running; stop it before launching."
+        fail "$name recorded PID $existing_pid is still running; run $ROOT_DIR/scripts/stop-customer-mac.sh before launching or initializing a customer database."
       fi
       fail "$name recorded PID $existing_pid is active but ownership does not match this project; records were preserved for manual handling."
     fi
@@ -505,6 +551,17 @@ start_process() {
   elif [[ -e "$owner_record_file" ]]; then
     fail "$name ownership record exists without a PID record; it was preserved for manual handling."
   fi
+}
+
+start_process() {
+  local name="$1"
+  local pid_file="$2"
+  local owner_record_file="$3"
+  local log_file="$4"
+  local expected_cwd="$5"
+  shift 5
+
+  ensure_process_stopped "$name" "$pid_file" "$owner_record_file" "$expected_cwd"
 
   log "Starting $name. Log: $log_file"
   : > "$log_file"
@@ -567,15 +624,26 @@ web_build_fingerprint() {
   } | shasum -a 256 | awk '{print $1}'
 }
 
+parse_launcher_arguments "$@"
 validate_customer_configuration
 
 log "Starting Rehabilitation Platform from $ROOT_DIR"
+if (( CUSTOMER_INITIALIZATION_REQUESTED == 1 )); then
+  log "Mode: explicit new-customer initialization with pnpm db:seed:customer."
+else
+  log "Mode: start only; no seed command will run."
+fi
 
 command_exists docker || fail "Docker is not installed or not in PATH."
 command_exists pnpm || fail "pnpm is not installed or not in PATH."
 command_exists node || fail "Node.js is not installed or not in PATH."
 command_exists curl || fail "curl is not installed or not in PATH."
 command_exists lsof || fail "lsof is not installed or not in PATH."
+
+ensure_process_stopped "API" "$API_PID_FILE" "$API_OWNER_RECORD_FILE" "$ROOT_DIR"
+ensure_process_stopped "Web" "$WEB_PID_FILE" "$WEB_OWNER_RECORD_FILE" "$ROOT_DIR/apps/web"
+ensure_port_available "$API_PORT" "API"
+ensure_port_available "$WEB_PORT" "Web"
 
 docker info >/dev/null 2>&1 || \
   fail "Docker Desktop 未运行；请先手动启动 Docker Desktop 后重新运行。"
@@ -605,7 +673,14 @@ pnpm db:generate >>"$START_LOG" 2>&1
 
 log "Applying database migrations..."
 if ! pnpm db:migrate:deploy >>"$START_LOG" 2>&1; then
-  fail "数据库迁移失败；请检查 $START_LOG，修复迁移问题后重新启动。"
+  fail "数据库迁移失败；请检查 ${START_LOG}，修复迁移问题后重新启动。"
+fi
+
+if (( CUSTOMER_INITIALIZATION_REQUESTED == 1 )); then
+  log "Initializing the new empty customer database with pnpm db:seed:customer..."
+  if ! pnpm db:seed:customer >>"$START_LOG" 2>&1; then
+    fail "客户数据库初始化失败；未改用默认 demo seed。请检查 ${START_LOG} 和 CUSTOMER_* 配置，并确认目标是已迁移的新空数据库。"
+  fi
 fi
 
 log "Building API from current source..."
@@ -620,7 +695,7 @@ fi
 EXISTING_WEB_BUILD_FINGERPRINT=""
 if [[ -e "$WEB_BUILD_FINGERPRINT_FILE" ]]; then
   if ! EXISTING_WEB_BUILD_FINGERPRINT="$(cat "$WEB_BUILD_FINGERPRINT_FILE")"; then
-    fail "Web fingerprint 读取失败；请修复 $WEB_BUILD_FINGERPRINT_FILE 的读取权限后重新启动。"
+    fail "Web fingerprint 读取失败；请修复 ${WEB_BUILD_FINGERPRINT_FILE} 的读取权限后重新启动。"
   fi
 fi
 if [[ ! -f "$ROOT_DIR/apps/web/.next/BUILD_ID" || "$EXISTING_WEB_BUILD_FINGERPRINT" != "$WEB_BUILD_FINGERPRINT" ]]; then
@@ -653,3 +728,4 @@ log "Startup complete."
 log "Web URL: http://localhost:${WEB_PORT}"
 log "API health: http://localhost:${API_PORT}/health/live"
 log "Logs: $LOG_DIR"
+log "Stop command: $ROOT_DIR/scripts/stop-customer-mac.sh"

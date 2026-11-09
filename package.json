@@ -48,6 +48,7 @@
     "db:sensitive:backfill": "pnpm --filter @rehab-platform/db sensitive:backfill",
     "db:bootstrap:production": "pnpm --filter @rehab-platform/db bootstrap:production",
     "db:seed": "pnpm --filter @rehab-platform/db prisma:seed",
+    "db:seed:customer": "pnpm --filter @rehab-platform/db prisma:seed:customer",
     "db:seed:trial": "pnpm --filter @rehab-platform/db prisma:seed:trial",
     "verify:render-blueprint": "node scripts/verify-render-blueprint.mjs",
     "verify:mimo:connectivity": "node --env-file=.env scripts/check-mimo-connectivity.mjs",

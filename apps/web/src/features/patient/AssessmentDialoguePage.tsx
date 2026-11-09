@@ -3,30 +3,19 @@
 import {
   AudioLines,
   Brain,
-  CheckCircle2,
   ClipboardCheck,
-  FileSearch,
   Mic,
   Play,
-  RotateCcw,
   Sparkles,
-  UsersRound,
 } from "lucide-react";
-import {
-  FormEvent,
-  useEffect,
-  useId,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import {
-  isAd8AssessmentSubmissionFormComplete,
+  isAssessmentPhysicalConditionSelectionComplete,
   isAssessmentSubmissionFormComplete,
-  type Ad8AssessmentFormField,
+  normalizeAssessmentPhysicalConditions,
   type Ad8AssessmentFormState,
   type AssessmentDraftFormField,
   type AssessmentDraftFormState,
@@ -37,6 +26,7 @@ import { cn } from "@/lib/utils";
 import type {
   AiConversationMessage,
   AiConversationSession,
+  AssessmentPhysicalCondition,
   AssessmentRecord,
 } from "@/types/api";
 import {
@@ -46,13 +36,18 @@ import {
   type StatusTone,
 } from "./plan-suggestion-model";
 
-export type AssessmentPhysicalCondition = {
-  id: string;
+export type AssessmentPhysicalConditionChoice = {
+  id: AssessmentPhysicalCondition;
   label: string;
   description: string;
 };
 
 export const assessmentPhysicalConditionChoices = [
+  {
+    id: "no_known_limitations",
+    label: "无上述特殊限制",
+    description: "已确认不需要针对下列身体情况调整评估流程。",
+  },
   {
     id: "wheelchair",
     label: "我需要使用轮椅",
@@ -63,7 +58,18 @@ export const assessmentPhysicalConditionChoices = [
     label: "我上肢活动不便",
     description: "评估时请减少需要抬手或持续握持的动作。",
   },
-] as const satisfies readonly AssessmentPhysicalCondition[];
+] as const satisfies readonly AssessmentPhysicalConditionChoice[];
+
+const ad8DraftFieldChoices = [
+  ["itemMemoryProblems", "记忆问题（0/1）"],
+  ["itemReducedInterest", "兴趣减退（0/1）"],
+  ["itemRepeatsQuestions", "重复提问（0/1）"],
+  ["itemTroubleLearningTools", "学习工具困难（0/1）"],
+  ["itemForgetsMonthYear", "忘记年月（0/1）"],
+  ["itemHandlesFinancesPoorly", "财务处理困难（0/1）"],
+  ["itemTroubleAppointments", "记住约定困难（0/1）"],
+  ["itemDailyThinkingMemoryProblems", "日常思考记忆困难（0/1）"],
+] as const satisfies readonly (readonly [AssessmentDraftFormField, string])[];
 
 type AssessmentDialogueActionState = {
   isDisabled?: boolean;
@@ -112,12 +118,27 @@ export const emptyAd8AssessmentForm: Ad8AssessmentFormState = {
 };
 
 export const emptyAssessmentForm: AssessmentFormState = {
+  assessmentType: "",
+  riskLevel: "",
+  physicalConditions: [],
+  informantName: "",
+  informantRelation: "",
+  assessmentSource: "caregiver_interview",
   mmse: "",
   cdr: "",
   memory: "",
   orientation: "",
   executive: "",
   language: "",
+  ad8Total: "",
+  itemMemoryProblems: "",
+  itemReducedInterest: "",
+  itemRepeatsQuestions: "",
+  itemTroubleLearningTools: "",
+  itemForgetsMonthYear: "",
+  itemHandlesFinancesPoorly: "",
+  itemTroubleAppointments: "",
+  itemDailyThinkingMemoryProblems: "",
   transcript: "",
   reactionDelaySeconds: "",
   modelVersion: "",
@@ -176,10 +197,33 @@ export function isAssessmentFormComplete(form: AssessmentFormState) {
   return isAssessmentSubmissionFormComplete(form);
 }
 
+export function toggleAssessmentPhysicalCondition(
+  current: AssessmentPhysicalCondition[],
+  condition: AssessmentPhysicalCondition,
+) {
+  if (!current.length) return [condition];
+
+  const normalizedCurrent = normalizeAssessmentPhysicalConditions(current);
+  if (condition === "no_known_limitations") {
+    return [condition];
+  }
+
+  const currentLimitations = normalizedCurrent.filter(
+    (value) => value !== "no_known_limitations",
+  );
+  if (currentLimitations.includes(condition)) {
+    return currentLimitations.length === 1
+      ? normalizedCurrent
+      : currentLimitations.filter((value) => value !== condition);
+  }
+  return normalizeAssessmentPhysicalConditions([
+    ...currentLimitations,
+    condition,
+  ]);
+}
+
 type AssessmentScreenProps = {
   assessments?: AssessmentRecord[];
-  onCreateAssessment: (form: AssessmentFormState) => Promise<void>;
-  onCreateAd8Assessment: (form: Ad8AssessmentFormState) => Promise<void>;
   onCreateAiAssessmentDraft: (form: AssessmentFormState) => Promise<void>;
   onCreateAssessmentSpeechTranscript: (
     recording: AssessmentSpeechRecording,
@@ -198,30 +242,25 @@ type AssessmentScreenProps = {
   onAppendAiConversationMessage: () => Promise<void>;
   onCompleteAiConversation: () => Promise<void>;
   assessmentForm: AssessmentFormState;
-  ad8AssessmentForm: Ad8AssessmentFormState;
   onAssessmentFormChange: (
     field: AssessmentDraftFormField,
     value: string,
   ) => void;
-  onAd8AssessmentFormChange: (
-    field: Ad8AssessmentFormField,
-    value: string,
+  onAssessmentPhysicalConditionsChange: (
+    physicalConditions: AssessmentPhysicalCondition[],
   ) => void;
   hasMicrophoneConsent: boolean;
-  isBusy: boolean;
   isDraftBusy: boolean;
   isSpeechBusy: boolean;
   isSpeechAiDraftBusy: boolean;
   isTtsBusy: boolean;
   isAiConversationBusy: boolean;
   showTechnicalEvidence: boolean;
-  canEditAssessment: boolean;
+  canUseAiAssessment: boolean;
 };
 
 export function AssessmentScreen({
   assessments,
-  onCreateAssessment,
-  onCreateAd8Assessment,
   onCreateAiAssessmentDraft,
   onCreateAssessmentSpeechTranscript,
   onCreateSpeechAiAssessmentDraft,
@@ -233,23 +272,18 @@ export function AssessmentScreen({
   onAppendAiConversationMessage,
   onCompleteAiConversation,
   assessmentForm,
-  ad8AssessmentForm,
   onAssessmentFormChange,
-  onAd8AssessmentFormChange,
+  onAssessmentPhysicalConditionsChange,
   hasMicrophoneConsent,
-  isBusy,
   isDraftBusy,
   isSpeechBusy,
   isSpeechAiDraftBusy,
   isTtsBusy,
   isAiConversationBusy,
   showTechnicalEvidence,
-  canEditAssessment,
+  canUseAiAssessment,
 }: AssessmentScreenProps) {
   const assessment = assessments?.[0];
-  const latestAd8Assessment = assessments?.find(
-    (record) => record.assessmentType === "AD-8",
-  );
   const transcript = readString(
     assessment?.rawInputSummary?.transcript,
     "等待评估人员录入问答转写或摘要",
@@ -274,18 +308,31 @@ export function AssessmentScreen({
     };
   }, []);
 
-  if (!canEditAssessment) {
+  if (!canUseAiAssessment) {
     return <PatientAssessmentSummaryScreen assessments={assessments} />;
   }
 
+  const hasExplicitPhysicalCondition =
+    isAssessmentPhysicalConditionSelectionComplete(
+      assessmentForm.physicalConditions,
+    );
+
+  function requireExplicitPhysicalCondition() {
+    if (hasExplicitPhysicalCondition) return true;
+    setSpeechRecorderStatus(
+      "请先明确选择身体情况，再提交 AI 评估、语音或智能对话。",
+    );
+    return false;
+  }
+
   async function handleStartSpeechRecording() {
+    if (!requireExplicitPhysicalCondition()) return;
     if (!hasMicrophoneConsent) {
       setSpeechRecorderStatus("请先签署语音评估授权，再开始语音评估录音。");
       return;
     }
     if (
       isRecording ||
-      isBusy ||
       isDraftBusy ||
       isSpeechBusy ||
       isSpeechAiDraftBusy ||
@@ -371,6 +418,7 @@ export function AssessmentScreen({
         recordingChunksRef,
         recordingStartedAtMsRef,
       });
+      if (!requireExplicitPhysicalCondition()) return;
       await onCreateAssessmentSpeechTranscript(recording);
       setSpeechRecorderStatus(
         "录音已结束。若转写成功，文本会回填到下方问答转写框。",
@@ -406,6 +454,7 @@ export function AssessmentScreen({
         recordingChunksRef,
         recordingStartedAtMsRef,
       });
+      if (!requireExplicitPhysicalCondition()) return;
       await onCreateSpeechAiAssessmentDraft(recording);
       setSpeechRecorderStatus(
         "录音已结束。语音转写和评估建议会填入表单，医生复核前不会提交正式评估。",
@@ -424,31 +473,42 @@ export function AssessmentScreen({
   }
 
   const questionPrompt = "请告诉我，今天是星期几？";
-  const isAssessmentReadyForSubmit = isAssessmentFormComplete(assessmentForm);
-
   return (
     <div className="grid gap-5">
       <AssessmentDialoguePage
-        assessmentStatusLabel={assessment ? "已完成评估" : "待提交评估"}
+        assessmentStatusLabel={patientAssessmentStatusLabel(assessment)}
         aiDraftStatusLabel={
           assessmentForm.aiDraftEvidence ? "待医生确认" : "等待智能建议"
         }
+        physicalConditions={assessmentForm.physicalConditions}
+        onPhysicalConditionsChange={onAssessmentPhysicalConditionsChange}
         hasMicrophoneConsent={hasMicrophoneConsent}
         isRecording={isRecording}
         questionPrompt={questionPrompt}
         speechRecorderStatus={speechRecorderStatus}
         transcriptSummary={transcript}
+        isPhysicalConditionSelectionDisabled={
+          isRecording ||
+          isDraftBusy ||
+          isSpeechBusy ||
+          isSpeechAiDraftBusy ||
+          isTtsBusy ||
+          isAiConversationBusy
+        }
         voiceInput={{
           isDisabled:
-            isBusy ||
+            !hasExplicitPhysicalCondition ||
             isDraftBusy ||
             isSpeechBusy ||
             isSpeechAiDraftBusy ||
-            isTtsBusy,
+            isTtsBusy ||
+            isAiConversationBusy,
           isLoading: isSpeechBusy || isSpeechAiDraftBusy,
-          label: hasMicrophoneConsent
-            ? "开始语音评估录音"
-            : "需先签署麦克风授权",
+          label: !hasExplicitPhysicalCondition
+            ? "请先明确身体情况"
+            : hasMicrophoneConsent
+              ? "开始语音评估录音"
+              : "需先签署麦克风授权",
           stopTranscriptLabel: isSpeechBusy ? "正在转写" : "停止并转写",
           stopTranscriptAndDraftLabel: isSpeechAiDraftBusy
             ? "正在生成评估建议"
@@ -460,12 +520,12 @@ export function AssessmentScreen({
         }}
         ttsPlayback={{
           isDisabled:
-            isBusy ||
             isDraftBusy ||
             isSpeechBusy ||
             isSpeechAiDraftBusy ||
             isTtsBusy ||
-            isRecording,
+            isRecording ||
+            isAiConversationBusy,
           isLoading: isTtsBusy,
           label: isTtsBusy ? "正在生成语音" : "播放评估题目语音",
           onCreateTtsSpeechOutput: () =>
@@ -473,39 +533,27 @@ export function AssessmentScreen({
         }}
         aiDraft={{
           isDisabled:
-            isBusy ||
+            !hasExplicitPhysicalCondition ||
             isDraftBusy ||
             isSpeechBusy ||
             isSpeechAiDraftBusy ||
             isTtsBusy ||
             isRecording ||
+            isAiConversationBusy ||
             !assessmentForm.transcript.trim() ||
             Boolean(assessmentForm.aiDraftEvidence),
           isLoading: isDraftBusy,
           label: isDraftBusy
             ? "正在生成评估建议"
-            : assessmentForm.aiDraftEvidence
-              ? "待医生复核评估建议"
-              : "生成待复核评估建议",
-          onCreateAiAssessmentDraft: () =>
-            void onCreateAiAssessmentDraft(assessmentForm),
-        }}
-        formalSubmit={{
-          isDisabled:
-            isBusy ||
-            isDraftBusy ||
-            isSpeechBusy ||
-            isSpeechAiDraftBusy ||
-            isTtsBusy ||
-            isRecording ||
-            !isAssessmentReadyForSubmit,
-          isLoading: isBusy,
-          label: isBusy
-            ? "正在保存评估"
-            : isAssessmentReadyForSubmit
-              ? "医生复核后提交正式评估"
-              : "填写完整后可正式提交",
-          onSubmit: () => void onCreateAssessment(assessmentForm),
+            : !hasExplicitPhysicalCondition
+              ? "请先明确身体情况"
+              : assessmentForm.aiDraftEvidence
+                ? "待医生复核评估建议"
+                : "生成待复核评估建议",
+          onCreateAiAssessmentDraft: () => {
+            if (!requireExplicitPhysicalCondition()) return;
+            void onCreateAiAssessmentDraft(assessmentForm);
+          },
         }}
       />
       <p className="sr-only">
@@ -515,199 +563,41 @@ export function AssessmentScreen({
         conversations={aiConversations}
         form={aiConversationForm}
         onChange={onAiConversationFormChange}
-        onStart={onStartAiConversation}
-        onAppend={onAppendAiConversationMessage}
-        onComplete={onCompleteAiConversation}
+        onStart={async () => {
+          if (!requireExplicitPhysicalCondition()) return;
+          await onStartAiConversation();
+        }}
+        onAppend={async () => {
+          if (!requireExplicitPhysicalCondition()) return;
+          await onAppendAiConversationMessage();
+        }}
+        onComplete={async () => {
+          if (!requireExplicitPhysicalCondition()) return;
+          await onCompleteAiConversation();
+        }}
         isBusy={isAiConversationBusy}
         disabled={
-          isBusy ||
+          !hasExplicitPhysicalCondition ||
           isDraftBusy ||
           isSpeechBusy ||
           isSpeechAiDraftBusy ||
           isTtsBusy ||
-          isRecording
+          isRecording ||
+          isAiConversationBusy
         }
       />
       <AssessmentInputPanel
         form={assessmentForm}
         onChange={onAssessmentFormChange}
         showTechnicalEvidence={showTechnicalEvidence}
-        disabled={isDraftBusy || isSpeechBusy || isSpeechAiDraftBusy}
-      />
-      <AssessmentReviewPanel
-        clinicalSummaries={[
-          {
-            title: "评估摘要",
-            value: assessmentForm.analysisSummary.trim() || "待补齐评估",
-            helper: assessmentForm.aiDraftEvidence
-              ? "智能建议已整理，需医生复核"
-              : "可先完成语音或结构化评估",
-          },
-          {
-            title: "风险等级",
-            value: assessmentForm.confidence.trim()
-              ? "待医生结合量表确认"
-              : "待形成建议",
-            helper: "平台建议不能直接成为正式评估",
-          },
-          {
-            title: "医生结论",
-            value: isAssessmentReadyForSubmit ? "待医生确认" : "待补齐评估",
-            helper: "批准后才会写入正式评估记录",
-          },
-        ]}
-        isApproveDisabled={
-          isBusy ||
+        disabled={
           isDraftBusy ||
           isSpeechBusy ||
           isSpeechAiDraftBusy ||
-          isTtsBusy ||
-          isRecording ||
-          !isAssessmentReadyForSubmit
+          isAiConversationBusy
         }
-        isReturnDisabled={
-          isBusy ||
-          isDraftBusy ||
-          isSpeechBusy ||
-          isSpeechAiDraftBusy ||
-          isTtsBusy ||
-          isRecording
-        }
-        onApprove={() => void onCreateAssessment(assessmentForm)}
-        reviewStatusLabel={
-          isAssessmentReadyForSubmit ? "待医生确认" : "待补齐评估"
-        }
-        scores={[
-          { label: "MMSE", value: assessmentForm.mmse, helper: "0-30" },
-          { label: "CDR", value: assessmentForm.cdr, helper: "0-3" },
-          {
-            label: "AD-8",
-            value:
-              calculateAd8FormScore(ad8AssessmentForm) ??
-              readOptionalNumber(latestAd8Assessment?.scoreSummary.ad8Total),
-            helper: "0-8",
-          },
-        ]}
-      />
-      <Ad8AssessmentPanel
-        form={ad8AssessmentForm}
-        latestAssessment={latestAd8Assessment}
-        onChange={onAd8AssessmentFormChange}
-        onSubmit={onCreateAd8Assessment}
-        isBusy={isBusy}
       />
     </div>
-  );
-}
-
-function AssessmentReviewPanel({
-  scores,
-  clinicalSummaries,
-  reviewStatusLabel,
-  onApprove,
-  isApproveDisabled,
-  isReturnDisabled,
-}: {
-  scores: Array<{
-    label: "MMSE" | "CDR" | "AD-8";
-    value?: string | number | null;
-    helper?: string;
-  }>;
-  clinicalSummaries: Array<{
-    title: "评估摘要" | "风险等级" | "医生结论";
-    value: string;
-    helper?: string;
-  }>;
-  reviewStatusLabel: string;
-  onApprove?: () => void;
-  isApproveDisabled?: boolean;
-  isReturnDisabled?: boolean;
-}) {
-  return (
-    <Card tone="workbench" className="mt-5">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <div className="inline-flex items-center gap-2 rounded-[var(--radius-control)] bg-[var(--surface-muted)] px-3 py-2 text-sm font-black text-[var(--accent-strong)]">
-            <FileSearch className="h-4 w-4" aria-hidden="true" />
-            评估复核
-          </div>
-          <h3 className="mt-4 text-3xl font-black text-[var(--ink-strong)]">
-            医生结构化评估确认
-          </h3>
-          <p className="mt-3 max-w-4xl font-bold leading-7 text-[var(--ink-soft)]">
-            复核 MMSE、CDR、AD-8
-            分数、评估摘要和医生结论后，再批准正式评估写入。
-          </p>
-        </div>
-        <StatusBadge status="review">{reviewStatusLabel}</StatusBadge>
-      </div>
-
-      <div className="mt-5 grid gap-3 md:grid-cols-3">
-        {scores.map((score) => (
-          <div
-            key={score.label}
-            className="rounded-[var(--radius-card)] border border-[var(--line-subtle)] bg-[var(--surface-muted)] p-4"
-          >
-            <p className="text-sm font-black text-[var(--accent-strong)]">
-              {score.label}
-            </p>
-            <p className="mt-2 text-3xl font-black text-[var(--ink-strong)]">
-              {formatScoreValue(score.value)}
-            </p>
-            {score.helper ? (
-              <p className="mt-2 text-sm font-bold leading-6 text-[var(--ink-subtle)]">
-                {score.helper}
-              </p>
-            ) : null}
-          </div>
-        ))}
-      </div>
-
-      <div className="mt-5 grid gap-4 xl:grid-cols-3">
-        {clinicalSummaries.map((summary) => (
-          <section
-            key={summary.title}
-            className="rounded-[var(--radius-card)] border border-[var(--line-subtle)] bg-[var(--surface-paper)] p-4"
-          >
-            <div className="flex items-center justify-between gap-3">
-              <h4 className="text-lg font-black text-[var(--ink-strong)]">
-                {summary.title}
-              </h4>
-              <StatusBadge status={summary.value ? "ready" : "pending"}>
-                {summary.value ? "已整理" : "待补充"}
-              </StatusBadge>
-            </div>
-            <p className="mt-4 break-words text-base font-black leading-7 text-[var(--ink-strong)]">
-              {summary.value || "待补充"}
-            </p>
-            {summary.helper ? (
-              <p className="mt-2 text-sm font-bold leading-6 text-[var(--ink-subtle)]">
-                {summary.helper}
-              </p>
-            ) : null}
-          </section>
-        ))}
-      </div>
-
-      <div className="mt-5 flex flex-wrap gap-3">
-        <Button
-          className="bg-[var(--ink-strong)] hover:bg-[var(--ink-strong)]"
-          disabled={isApproveDisabled}
-          onClick={onApprove}
-        >
-          <span className="inline-flex items-center gap-2">
-            <CheckCircle2 className="h-5 w-5" aria-hidden="true" />
-            批准正式评估
-          </span>
-        </Button>
-        <Button disabled={isReturnDisabled} intent="secondary">
-          <span className="inline-flex items-center gap-2">
-            <RotateCcw className="h-5 w-5" aria-hidden="true" />
-            退回复核
-          </span>
-        </Button>
-      </div>
-    </Card>
   );
 }
 
@@ -719,6 +609,11 @@ type AssessmentDialoguePageProps = {
   speechRecorderStatus?: string | null;
   hasMicrophoneConsent: boolean;
   isRecording: boolean;
+  isPhysicalConditionSelectionDisabled: boolean;
+  physicalConditions: AssessmentPhysicalCondition[];
+  onPhysicalConditionsChange: (
+    physicalConditions: AssessmentPhysicalCondition[],
+  ) => void;
   voiceInput: AssessmentDialogueActionState & {
     stopTranscriptLabel?: string;
     stopTranscriptAndDraftLabel?: string;
@@ -732,9 +627,6 @@ type AssessmentDialoguePageProps = {
   aiDraft: AssessmentDialogueActionState & {
     onCreateAiAssessmentDraft: () => void;
   };
-  formalSubmit?: AssessmentDialogueActionState & {
-    onSubmit: () => void;
-  };
   children?: ReactNode;
 };
 
@@ -746,12 +638,16 @@ export function AssessmentDialoguePage({
   speechRecorderStatus,
   hasMicrophoneConsent,
   isRecording,
+  isPhysicalConditionSelectionDisabled,
+  physicalConditions,
+  onPhysicalConditionsChange,
   voiceInput,
   ttsPlayback,
   aiDraft,
-  formalSubmit,
   children,
 }: AssessmentDialoguePageProps) {
+  const hasExplicitPhysicalCondition =
+    isAssessmentPhysicalConditionSelectionComplete(physicalConditions);
   const isVoiceActionBlocked =
     Boolean(voiceInput.isDisabled) || !hasMicrophoneConsent;
   const isSpeechStopBlocked = Boolean(voiceInput.isDisabled) || !isRecording;
@@ -780,30 +676,75 @@ export function AssessmentDialoguePage({
 
           <div className="mt-6 grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
             <section className="rounded-[var(--radius-card)] border border-[var(--line-subtle)] bg-[var(--surface-paper)] p-4">
-              <div className="flex items-center gap-2 text-sm font-black text-[var(--accent-strong)]">
-                <AudioLines className="h-4 w-4" aria-hidden="true" />
-                身体情况
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2 text-sm font-black text-[var(--accent-strong)]">
+                  <AudioLines className="h-4 w-4" aria-hidden="true" />
+                  身体情况
+                </div>
+                <StatusBadge
+                  status={hasExplicitPhysicalCondition ? "ready" : "blocked"}
+                >
+                  {hasExplicitPhysicalCondition ? "已明确" : "必须选择"}
+                </StatusBadge>
               </div>
+              <p
+                aria-live="polite"
+                className={cn(
+                  "mt-3 text-sm font-bold leading-6",
+                  hasExplicitPhysicalCondition
+                    ? "text-[var(--ink-soft)]"
+                    : "text-[var(--danger)]",
+                )}
+              >
+                {hasExplicitPhysicalCondition
+                  ? "已记录本次评估需要考虑的身体情况。"
+                  : "请明确选择一种身体状态后再开始 AI 评估、语音或智能对话。"}
+              </p>
               <div className="mt-4 grid gap-3">
-                {assessmentPhysicalConditionChoices.map((choice) => (
-                  <div
-                    key={choice.id}
-                    className="flex gap-3 rounded-[var(--radius-card)] border border-[var(--line-subtle)] bg-[var(--surface-panel)] p-4"
-                  >
-                    <span
-                      aria-hidden="true"
-                      className="mt-1 h-4 w-4 shrink-0 rounded-[var(--radius-control)] border border-[var(--accent-strong)] bg-[var(--surface-paper)]"
-                    />
-                    <span className="min-w-0">
-                      <span className="block break-words font-black text-[var(--ink-strong)]">
-                        {choice.label}
+                {assessmentPhysicalConditionChoices.map((choice) => {
+                  const isSelected = physicalConditions.includes(choice.id);
+                  return (
+                    <button
+                      key={choice.id}
+                      type="button"
+                      role="checkbox"
+                      aria-checked={isSelected}
+                      disabled={isPhysicalConditionSelectionDisabled}
+                      className={cn(
+                        "flex gap-3 rounded-[var(--radius-card)] border bg-[var(--surface-panel)] p-4 text-left disabled:cursor-not-allowed disabled:opacity-55",
+                        isSelected
+                          ? "border-[var(--accent-strong)]"
+                          : "border-[var(--line-subtle)]",
+                      )}
+                      onClick={() =>
+                        onPhysicalConditionsChange(
+                          toggleAssessmentPhysicalCondition(
+                            physicalConditions,
+                            choice.id,
+                          ),
+                        )
+                      }
+                    >
+                      <span
+                        aria-hidden="true"
+                        className={cn(
+                          "mt-1 h-4 w-4 shrink-0 rounded-[var(--radius-control)] border border-[var(--accent-strong)]",
+                          isSelected
+                            ? "bg-[var(--accent-strong)]"
+                            : "bg-[var(--surface-paper)]",
+                        )}
+                      />
+                      <span className="min-w-0">
+                        <span className="block break-words font-black text-[var(--ink-strong)]">
+                          {choice.label}
+                        </span>
+                        <span className="mt-1 block break-words text-sm font-bold leading-6 text-[var(--ink-soft)]">
+                          {choice.description}
+                        </span>
                       </span>
-                      <span className="mt-1 block break-words text-sm font-bold leading-6 text-[var(--ink-soft)]">
-                        {choice.description}
-                      </span>
-                    </span>
-                  </div>
-                ))}
+                    </button>
+                  );
+                })}
               </div>
             </section>
 
@@ -903,28 +844,15 @@ export function AssessmentDialoguePage({
             </div>
             <StatusBadge status="review">{aiDraftStatusLabel}</StatusBadge>
           </div>
-          <div className="mt-5 grid gap-3 md:grid-cols-2">
+          <div className="mt-5">
             <Button
+              className="w-full"
               disabled={aiDraft.isDisabled}
               isLoading={aiDraft.isLoading}
               onClick={aiDraft.onCreateAiAssessmentDraft}
             >
               {aiDraft.label ?? "生成待医生确认建议"}
             </Button>
-            {formalSubmit ? (
-              <Button
-                className={
-                  !formalSubmit.isDisabled
-                    ? "bg-[var(--ink-strong)] hover:bg-[var(--accent-stronger)]"
-                    : undefined
-                }
-                disabled={formalSubmit.isDisabled}
-                isLoading={formalSubmit.isLoading}
-                onClick={formalSubmit.onSubmit}
-              >
-                {formalSubmit.label ?? "医生确认后提交"}
-              </Button>
-            ) : null}
           </div>
         </Card>
       </div>
@@ -942,7 +870,9 @@ function PatientAssessmentSummaryScreen({
   const latestAd8 = assessments?.find(
     (record) => record.assessmentType === "AD-8",
   );
-  const latestRisk = latestAssessment?.riskGrades?.[0];
+  const latestRisk = latestAssessment?.riskGrades?.find(
+    (risk) => risk.isCurrent,
+  );
   const assessmentStatus = assessmentDoctorConfirmationStatus(latestAssessment);
   const assessmentDate = latestAssessment
     ? formatDateTime(latestAssessment.createdAt)
@@ -1048,18 +978,16 @@ function assessmentDoctorConfirmationStatus(assessment?: AssessmentRecord) {
   };
 }
 
+function patientAssessmentStatusLabel(assessment?: AssessmentRecord) {
+  if (!assessment) return "AI评估待完成";
+  if (assessment.status === "doctor_confirmed") return "已有正式评估";
+  if (assessment.status === "completed") return "待医生确认";
+  if (assessment.status === "returned_for_review") return "已退回复核";
+  return "评估状态待确认";
+}
+
 function isDoctorConfirmedAssessment(assessment: AssessmentRecord) {
-  const confirmation = assessment as AssessmentRecord & {
-    doctorConfirmedAt?: string | null;
-    doctorReviewStatus?: string | null;
-  };
-  return Boolean(
-    confirmation.doctorConfirmedAt ||
-    confirmation.doctorReviewStatus === "confirmed" ||
-    assessment.riskGrades?.some((risk) =>
-      Boolean(risk.confirmedAt || risk.confirmedById),
-    ),
-  );
+  return assessment.status === "doctor_confirmed";
 }
 
 function AiConversationPanel({
@@ -1229,61 +1157,108 @@ function AssessmentInputPanel({
 }) {
   return (
     <Card tone="workbench" className="mt-5">
-      <Badge label="评估结果录入" icon={ClipboardCheck} />
+      <Badge label="AI评估草稿" icon={ClipboardCheck} />
       <p className="mt-3 font-bold leading-7 text-[var(--ink-soft)]">
-        这里录入 MMSE/CDR
-        等量表、问答文本和评估分析摘要。智能建议会填入表单，仍需人工复核后保存。
+        这里按明确评估路径整理 MMSE/CDR 或 AD-8 量表、问答文本和 AI
+        分析摘要。内容只作为待医生复核的草稿，患者端不能保存为正式评估。
+      </p>
+      <p className="mt-3 text-sm font-black text-[var(--accent-strong)]">
+        评估路径：{form.assessmentType || "首次 AI 初筛将使用 MMSE/CDR"}
       </p>
       <div className="mt-5 grid gap-4 md:grid-cols-3">
-        <FormInput
-          label="MMSE（0-30）"
-          value={form.mmse}
-          onChange={(value) => onChange("mmse", value)}
-          type="number"
-          disabled={disabled}
-        />
-        <FormInput
-          label="CDR（0-3）"
-          value={form.cdr}
-          onChange={(value) => onChange("cdr", value)}
-          type="number"
-          disabled={disabled}
-        />
-        <FormInput
-          label="分析置信度（0-1）"
-          value={form.confidence}
-          onChange={(value) => onChange("confidence", value)}
-          type="number"
-          disabled={disabled}
-        />
-        <FormInput
-          label="记忆力（0-100）"
-          value={form.memory}
-          onChange={(value) => onChange("memory", value)}
-          type="number"
-          disabled={disabled}
-        />
-        <FormInput
-          label="定向力（0-100）"
-          value={form.orientation}
-          onChange={(value) => onChange("orientation", value)}
-          type="number"
-          disabled={disabled}
-        />
-        <FormInput
-          label="执行力（0-100）"
-          value={form.executive}
-          onChange={(value) => onChange("executive", value)}
-          type="number"
-          disabled={disabled}
-        />
-        <FormInput
-          label="语言表达（0-100）"
-          value={form.language}
-          onChange={(value) => onChange("language", value)}
-          type="number"
-          disabled={disabled}
-        />
+        {form.assessmentType === "AD-8" ? (
+          <>
+            <FormInput
+              label="AD-8 信息提供者姓名"
+              value={form.informantName}
+              onChange={(value) => onChange("informantName", value)}
+              disabled={disabled}
+            />
+            <FormInput
+              label="AD-8 信息提供者关系"
+              value={form.informantRelation}
+              onChange={(value) => onChange("informantRelation", value)}
+              disabled={disabled}
+            />
+            <FormInput
+              label="AD-8 评估来源"
+              value={form.assessmentSource}
+              onChange={(value) => onChange("assessmentSource", value)}
+              disabled={disabled}
+            />
+            <FormInput
+              label="AD-8 总分（0-8）"
+              value={form.ad8Total}
+              onChange={(value) => onChange("ad8Total", value)}
+              type="number"
+              disabled={disabled}
+            />
+            {ad8DraftFieldChoices.map(([field, label]) => (
+              <FormInput
+                key={field}
+                label={label}
+                value={form[field]}
+                onChange={(value) => onChange(field, value)}
+                type="number"
+                disabled={disabled}
+              />
+            ))}
+          </>
+        ) : form.assessmentType === "MMSE/CDR" ? (
+          <>
+            <FormInput
+              label="MMSE（0-30）"
+              value={form.mmse}
+              onChange={(value) => onChange("mmse", value)}
+              type="number"
+              disabled={disabled}
+            />
+            <FormInput
+              label="CDR（0-3）"
+              value={form.cdr}
+              onChange={(value) => onChange("cdr", value)}
+              type="number"
+              disabled={disabled}
+            />
+            <FormInput
+              label="记忆力（0-100）"
+              value={form.memory}
+              onChange={(value) => onChange("memory", value)}
+              type="number"
+              disabled={disabled}
+            />
+            <FormInput
+              label="定向力（0-100）"
+              value={form.orientation}
+              onChange={(value) => onChange("orientation", value)}
+              type="number"
+              disabled={disabled}
+            />
+            <FormInput
+              label="执行力（0-100）"
+              value={form.executive}
+              onChange={(value) => onChange("executive", value)}
+              type="number"
+              disabled={disabled}
+            />
+            <FormInput
+              label="语言表达（0-100）"
+              value={form.language}
+              onChange={(value) => onChange("language", value)}
+              type="number"
+              disabled={disabled}
+            />
+          </>
+        ) : null}
+        {showTechnicalEvidence ? (
+          <FormInput
+            label="分析置信度（0-1）"
+            value={form.confidence}
+            onChange={(value) => onChange("confidence", value)}
+            type="number"
+            disabled={disabled}
+          />
+        ) : null}
         <FormInput
           label="反应延迟（秒）"
           value={form.reactionDelaySeconds}
@@ -1291,12 +1266,14 @@ function AssessmentInputPanel({
           type="number"
           disabled={disabled}
         />
-        <FormInput
-          label={showTechnicalEvidence ? "来源/模型版本" : "评估来源"}
-          value={form.modelVersion}
-          onChange={(value) => onChange("modelVersion", value)}
-          disabled={disabled}
-        />
+        {showTechnicalEvidence ? (
+          <FormInput
+            label="来源/模型版本"
+            value={form.modelVersion}
+            onChange={(value) => onChange("modelVersion", value)}
+            disabled={disabled}
+          />
+        ) : null}
       </div>
       <div className="mt-5 grid gap-4 md:grid-cols-2">
         <FormTextarea
@@ -1313,158 +1290,6 @@ function AssessmentInputPanel({
         />
       </div>
       <AssessmentProgressPanel form={form} />
-    </Card>
-  );
-}
-
-function Ad8AssessmentPanel({
-  form,
-  latestAssessment,
-  onChange,
-  onSubmit,
-  isBusy,
-}: {
-  form: Ad8AssessmentFormState;
-  latestAssessment?: AssessmentRecord;
-  onChange: (field: Ad8AssessmentFormField, value: string) => void;
-  onSubmit: (form: Ad8AssessmentFormState) => Promise<void>;
-  isBusy: boolean;
-}) {
-  const totalScore = calculateAd8FormScore(form);
-  const formComplete = isAd8AssessmentSubmissionFormComplete(form);
-
-  function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!formComplete || isBusy) return;
-    void onSubmit(form);
-  }
-
-  return (
-    <Card tone="workbench" className="mt-5">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <Badge label="AD-8照护者访谈" icon={UsersRound} />
-          <h3 className="mt-4 text-3xl font-black text-[var(--ink-strong)]">
-            重度或表达受限患者筛查
-          </h3>
-          <p className="mt-3 max-w-4xl font-bold leading-7 text-[var(--ink-soft)]">
-            由评估人员询问家属或照护者近阶段变化。AD-8
-            是筛查记录，不作为诊断结论；
-            每一项都必须明确选择“有变化”或“无明显变化”，医生复核后保存 AD-8
-            正式筛查记录。
-          </p>
-        </div>
-        <StatusBadge status={latestAssessment ? "complete" : "pending"}>
-          {latestAssessment
-            ? `最近总分 ${clinicalScoreLabel(latestAssessment.scoreSummary.ad8Total, "/8")}`
-            : "待完成访谈"}
-        </StatusBadge>
-      </div>
-
-      <form onSubmit={submit}>
-        <div className="mt-6 grid gap-4 md:grid-cols-3">
-          <FormInput
-            label="信息提供者姓名"
-            value={form.informantName}
-            onChange={(value) => onChange("informantName", value)}
-          />
-          <FormInput
-            label="与患者关系"
-            value={form.informantRelation}
-            onChange={(value) => onChange("informantRelation", value)}
-          />
-          <FormSelect
-            label="访谈来源"
-            value={form.assessmentSource}
-            onChange={(value) => onChange("assessmentSource", value)}
-            options={[
-              ["", "请选择访谈来源"],
-              ["caregiver_interview", "照护者访谈"],
-              ["doctor_interview", "医师访谈"],
-              ["family_followup", "家属随访"],
-            ]}
-          />
-        </div>
-
-        <div className="mt-6 grid gap-4 xl:grid-cols-2">
-          {ad8Items.map((item, index) => (
-            <div
-              key={item.field}
-              className="rounded-[var(--radius-card)] border border-[var(--line-subtle)] bg-[var(--surface-paper)] p-4"
-            >
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="max-w-2xl">
-                  <p className="text-xs font-black text-[var(--accent-strong)]">
-                    AD-8 第 {index + 1} 项
-                  </p>
-                  <h4 className="mt-2 text-xl font-black text-[var(--ink-strong)]">
-                    {item.title}
-                  </h4>
-                  <p className="mt-2 text-sm font-bold leading-6 text-[var(--ink-soft)]">
-                    {item.description}
-                  </p>
-                </div>
-                <StatusBadge status={form[item.field] ? "complete" : "pending"}>
-                  {form[item.field] ? "已记录" : "待选择"}
-                </StatusBadge>
-              </div>
-              <Ad8AnswerField
-                value={form[item.field]}
-                onChange={(value) => onChange(item.field, value)}
-              />
-            </div>
-          ))}
-        </div>
-
-        <div className="mt-6 grid gap-4 md:grid-cols-2">
-          <FormTextarea
-            label="照护者访谈摘要"
-            value={form.summaryText}
-            onChange={(value) => onChange("summaryText", value)}
-          />
-          <FormTextarea
-            label="医生复核结论"
-            value={form.clinicianConclusion}
-            onChange={(value) => onChange("clinicianConclusion", value)}
-          />
-        </div>
-        <div className="mt-2 grid gap-4 md:grid-cols-[1fr_220px]">
-          <FormInput
-            label="复核置信度（0-1）"
-            value={form.confidence}
-            onChange={(value) => onChange("confidence", value)}
-            type="number"
-          />
-          <div className="mt-5 rounded-[var(--radius-card)] border border-[var(--line-strong)] bg-[var(--surface-muted)] p-4">
-            <p className="text-sm font-black text-[var(--ink-soft)]">
-              当前 AD-8 总分
-            </p>
-            <p className="mt-2 text-4xl font-black text-[var(--ink-strong)]">
-              {totalScore === null ? "待完整" : `${totalScore}/8`}
-            </p>
-            <p className="mt-2 text-sm font-bold leading-6 text-[var(--ink-subtle)]">
-              0-1 低风险，2-5 需重点关注，6-8 高风险筛查提示。
-            </p>
-          </div>
-        </div>
-
-        <div className="mt-6 flex flex-wrap items-center justify-between gap-4 rounded-[var(--radius-card)] border border-[var(--line-strong)] bg-[var(--surface-muted)] p-5">
-          <p className="max-w-3xl font-bold leading-7 text-[var(--ink-soft)]">
-            保存后会生成结构化 AD-8 筛查记录，并进入风险评级与康复方案匹配流程。
-          </p>
-          <Button
-            className="bg-[var(--ink-strong)] hover:bg-[var(--accent-strong)]"
-            disabled={!formComplete || isBusy}
-            type="submit"
-          >
-            {isBusy
-              ? "正在保存 AD-8"
-              : formComplete
-                ? "医生复核后保存 AD-8 正式筛查记录"
-                : "补齐 8 项访谈后可保存"}
-          </Button>
-        </div>
-      </form>
     </Card>
   );
 }
@@ -1591,7 +1416,7 @@ function AssessmentProgressPanel({ form }: { form: AssessmentFormState }) {
           value={isReadyForReview ? "待医生确认提交" : "评估信息未完整"}
           description={
             isReadyForReview
-              ? "确认无误后即可保存正式评估记录并生成后续方案。"
+              ? "正式评估仍由医生在医师工作台复核并提交。"
               : "请补齐量表分数、摘要、置信度和反应延迟。"
           }
           tone={isReadyForReview ? "success" : "warning"}
@@ -1654,45 +1479,6 @@ function AiConversationMessageBubble({
   );
 }
 
-function Ad8AnswerField({
-  value,
-  onChange,
-}: {
-  value: string;
-  onChange: (value: string) => void;
-}) {
-  const noId = useId();
-  const yesId = useId();
-  return (
-    <div className="mt-4 grid gap-3 sm:grid-cols-2">
-      {[
-        [noId, "0", "无明显变化"],
-        [yesId, "1", "有变化"],
-      ].map(([id, optionValue, label]) => (
-        <label
-          key={optionValue}
-          className={cn(
-            "flex min-h-14 cursor-pointer items-center justify-between gap-3 rounded-[var(--radius-card)] border px-4 py-3 font-black transition",
-            value === optionValue
-              ? "border-[var(--ink-strong)] bg-[var(--ink-strong)] text-[var(--ink-inverse)]"
-              : "border-[var(--line-subtle)] bg-[var(--surface-paper)] text-[var(--ink-soft)] hover:border-[var(--accent-strong)]",
-          )}
-          htmlFor={id}
-        >
-          <span>{label}</span>
-          <input
-            id={id}
-            type="radio"
-            checked={value === optionValue}
-            onChange={() => onChange(optionValue)}
-            className="h-5 w-5 accent-[var(--accent-strong)]"
-          />
-        </label>
-      ))}
-    </div>
-  );
-}
-
 function SummaryCard({
   title,
   value,
@@ -1751,37 +1537,6 @@ function FormInput({
   );
 }
 
-function FormSelect({
-  label,
-  value,
-  onChange,
-  options,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  options: Array<[string, string]>;
-}) {
-  const selectId = useId();
-  return (
-    <label className="block">
-      <span className="text-sm font-black text-[var(--ink-soft)]">{label}</span>
-      <select
-        id={selectId}
-        className="mt-2 min-h-12 w-full rounded-[var(--radius-control)] border border-[var(--line-subtle)] bg-[var(--surface-paper)] px-3 font-bold text-[var(--ink-strong)] outline-none focus:border-[var(--accent-strong)]"
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-      >
-        {options.map(([optionValue, optionLabel]) => (
-          <option key={optionValue} value={optionValue}>
-            {optionLabel}
-          </option>
-        ))}
-      </select>
-    </label>
-  );
-}
-
 function FormTextarea({
   label,
   value,
@@ -1808,92 +1563,10 @@ function FormTextarea({
   );
 }
 
-const ad8ItemFieldsForPage = [
-  "itemMemoryProblems",
-  "itemReducedInterest",
-  "itemRepeatsQuestions",
-  "itemTroubleLearningTools",
-  "itemForgetsMonthYear",
-  "itemHandlesFinancesPoorly",
-  "itemTroubleAppointments",
-  "itemDailyThinkingMemoryProblems",
-] as const satisfies readonly Ad8AssessmentFormField[];
-
-const ad8Items: Array<{
-  field: (typeof ad8ItemFieldsForPage)[number];
-  title: string;
-  description: string;
-}> = [
-  {
-    field: "itemMemoryProblems",
-    title: "判断力或记忆力出现改变",
-    description: "例如做决定、理解事情或记忆近期事件较以往明显下降。",
-  },
-  {
-    field: "itemReducedInterest",
-    title: "兴趣或参与度下降",
-    description: "对平时活动、家务或社交的主动性明显减少。",
-  },
-  {
-    field: "itemRepeatsQuestions",
-    title: "重复提问、重复讲述",
-    description: "短时间内反复询问同一问题或重复同一件事。",
-  },
-  {
-    field: "itemTroubleLearningTools",
-    title: "学习使用工具变困难",
-    description: "例如手机、遥控器、厨房电器或其他日常工具使用能力下降。",
-  },
-  {
-    field: "itemForgetsMonthYear",
-    title: "容易忘记月份或年份",
-    description: "对日期、月份、季节或年份判断较以往明显不稳定。",
-  },
-  {
-    field: "itemHandlesFinancesPoorly",
-    title: "处理财务或事务能力下降",
-    description: "例如缴费、找零、购物结算或整理账单比以往困难。",
-  },
-  {
-    field: "itemTroubleAppointments",
-    title: "记不住预约或安排",
-    description: "容易忘记看诊、吃药、家庭安排或重要约定。",
-  },
-  {
-    field: "itemDailyThinkingMemoryProblems",
-    title: "日常思考或记忆总体变差",
-    description: "照护者认为日常生活中思考、理解或记忆明显下降。",
-  },
-];
-
-function calculateAd8FormScore(form: Ad8AssessmentFormState) {
-  let total = 0;
-  for (const field of ad8ItemFieldsForPage) {
-    if (form[field] !== "0" && form[field] !== "1") {
-      return null;
-    }
-    total += Number(form[field]);
-  }
-  return total;
-}
-
 function readString(value: unknown, defaultValue: string) {
   return typeof value === "string" && value.trim()
     ? value.trim()
     : defaultValue;
-}
-
-function readOptionalNumber(value: unknown) {
-  return typeof value === "number" && Number.isFinite(value)
-    ? value
-    : undefined;
-}
-
-function formatScoreValue(value: string | number | null | undefined) {
-  if (value === null || value === undefined || value === "") {
-    return "待确认";
-  }
-  return String(value);
 }
 
 function formatDateTime(value?: string) {

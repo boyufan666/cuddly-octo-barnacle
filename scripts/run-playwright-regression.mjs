@@ -13,6 +13,67 @@ const playwrightRegressionOutputDirectory = resolve(
   "output/playwright",
 );
 const managedScreenshotPattern = /^web-regression-.*\.png$/;
+export const playwrightProviderEnvironmentNames = Object.freeze([
+  "AI_REQUIRED_FOR_LAUNCH",
+  "AI_HUMAN_REVIEW_REQUIRED",
+  "AI_PROVIDER",
+  "AI_MODEL_VERSION",
+  "AI_MODEL_ENDPOINT",
+  "AI_PROMPT_VERSION",
+  "AI_PROVIDER_TIMEOUT_MS",
+  "AI_PROVIDER_MAX_RESPONSE_BYTES",
+  "MIMO_API_KEY_REF",
+  "MIMO_API_KEY_FILE",
+  "MIMO_API_KEY",
+  "MIMO_ALLOWED_HOSTS",
+  "SPEECH_REQUIRED_FOR_LAUNCH",
+  "SPEECH_PROVIDER",
+  "SPEECH_TO_TEXT_ENDPOINT",
+  "SPEECH_MODEL_VERSION",
+  "SPEECH_PROVIDER_TIMEOUT_MS",
+  "SPEECH_PROVIDER_MAX_RESPONSE_BYTES",
+  "STT_MAX_DECODED_AUDIO_BYTES",
+  "STT_MAX_DURATION_SECONDS",
+  "TTS_REQUIRED_FOR_LAUNCH",
+  "TTS_PROVIDER",
+  "TTS_ENDPOINT",
+  "TTS_MODEL_VERSION",
+  "TTS_VOICE_ID",
+  "TTS_OUTPUT_FORMAT",
+  "TTS_PROVIDER_TIMEOUT_MS",
+  "TTS_PROVIDER_MAX_RESPONSE_BYTES",
+  "MIMO_KEY_VALUE_URL",
+  "MIMO_USAGE_KEY_PREFIX",
+  "MIMO_USAGE_WINDOW_MS",
+  "MIMO_KEY_VALUE_PROBE_TIMEOUT_MS",
+  "MIMO_USER_REQUEST_LIMIT",
+  "MIMO_PATIENT_REQUEST_LIMIT",
+  "MIMO_ORGANIZATION_REQUEST_LIMIT",
+  "MIMO_SPEECH_SECONDS_LIMIT",
+  "MIMO_TTS_CHARACTERS_LIMIT",
+  "MIMO_USER_BUDGET_UNITS_LIMIT",
+  "MIMO_PATIENT_BUDGET_UNITS_LIMIT",
+  "MIMO_ORGANIZATION_BUDGET_UNITS_LIMIT",
+  "MIMO_AI_COST_UNITS_PER_REQUEST",
+  "MIMO_SPEECH_COST_UNITS_PER_SECOND",
+  "MIMO_TTS_COST_UNITS_PER_CHARACTER",
+  "MIMO_HIGH_COST_USER_OPERATION_REQUEST_LIMIT",
+  "MIMO_HIGH_COST_USER_OPERATION_WINDOW_MS",
+  "PROVIDER_TELEMETRY_RETENTION_DAYS",
+  "PROVIDER_TELEMETRY_RETENTION_TIMEOUT_MS",
+]);
+
+export function collectPlaywrightProviderEnvironment(
+  environment = process.env,
+) {
+  return Object.fromEntries(
+    playwrightProviderEnvironmentNames.flatMap((name) => {
+      const value = environment[name];
+      return typeof value === "string" ? [[name, value]] : [];
+    }),
+  );
+}
+
 export const playwrightBusinessProjects = Object.freeze([
   "chromium-1280",
   "chromium-1366",
@@ -29,6 +90,10 @@ export const playwrightRegressionCommands = Object.freeze([
   Object.freeze({
     command: "pnpm",
     args: Object.freeze(["--filter", "@rehab-platform/db", "build"]),
+  }),
+  Object.freeze({
+    command: "pnpm",
+    args: Object.freeze(["--filter", "@rehab-platform/api", "build"]),
   }),
   ...playwrightBusinessProjects.flatMap((project) => [
     Object.freeze({
@@ -117,6 +182,7 @@ export function runPlaywrightRegression(
     SENSITIVE_DATA_KEY_REF: input.sensitiveDataKeyRef,
     SENSITIVE_DATA_KEY: input.sensitiveDataKey,
     NEXT_PUBLIC_API_BASE_URL: `http://127.0.0.1:${input.apiPort}`,
+    ...collectPlaywrightProviderEnvironment(env),
   };
   cleanArtifacts();
   for (const entry of playwrightRegressionCommands) {

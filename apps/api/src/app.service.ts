@@ -18,7 +18,8 @@ import {
   RoleCode,
   TrainingSessionStatus,
 } from '@prisma/client';
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash, hkdfSync, randomUUID, timingSafeEqual } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import { createSessionToken } from './auth-session';
 import {
   requireMimoApiKey,
@@ -55,6 +56,10 @@ import {
   type ProviderOperationSnapshot,
 } from './provider-operation.service';
 import {
+  createProviderOperationResponseHmac,
+  type ProviderOperationKind,
+} from './provider-operation';
+import {
   createPhoneLookupHmac,
   decryptSensitiveJson,
   encryptSensitiveJson,
@@ -85,6 +90,19 @@ const supportedFormalRuntimeTypes = [
   'browser_pose_canvas',
   'cognitive_web',
 ] as const;
+const supportedAssessmentPhysicalConditions = [
+  'wheelchair',
+  'upper_limb_limited',
+  'no_known_limitations',
+] as const;
+const providerOperationResponseHmacSalt = Buffer.from(
+  'rehab-provider-operation-hmac-v1',
+  'utf8',
+);
+const providerOperationResponseHmacInfo = Buffer.from(
+  'canonical-response-hmac',
+  'utf8',
+);
 const unityWebglRequiredMetricTypes = [
   'reaction_time_ms',
   'target_hit_rate',
@@ -275,17 +293,9 @@ const trainingReviewConclusions = [
   'excluded_from_analysis',
   'needs_retrain',
 ] as const;
-const clinicianAssessmentSources = [
-  'clinician_input',
-  'clinician_recorded_trial_assessment',
-] as const;
 const productionAiAssessmentSources = [
   'production_ai_assessment',
   'speech_ai_assessment',
-] as const;
-const allowedAssessmentSources = [
-  ...clinicianAssessmentSources,
-  ...productionAiAssessmentSources,
 ] as const;
 const speechAiAssessmentSources = ['speech_ai_assessment'] as const;
 const humanReviewConclusions = [
@@ -401,6 +411,8 @@ type TrainingResultEnvelopeRecord = Prisma.TrainingResultGetPayload<{
 }>;
 
 type FormalRuntimeType = (typeof supportedFormalRuntimeTypes)[number];
+type AssessmentPhysicalCondition =
+  (typeof supportedAssessmentPhysicalConditions)[number];
 type TrainingReviewConclusion = (typeof trainingReviewConclusions)[number];
 type ProductionAiAssessmentSource =
   (typeof productionAiAssessmentSources)[number];
@@ -499,6 +511,7 @@ type AssessmentDto = {
   assessmentType?: string;
   scoreSummary?: Prisma.InputJsonValue;
   rawInputSummary?: Prisma.InputJsonValue;
+  physicalConditions?: unknown;
 };
 
 type ReviewAssessmentDto = {
@@ -510,6 +523,7 @@ type ReviewAssessmentDto = {
 type AiAssessmentDraftDto = {
   patientId: string;
   assessmentType?: string;
+  physicalConditions?: unknown;
   transcript?: string;
   idempotencyKey?: string;
 };
@@ -517,6 +531,7 @@ type AiAssessmentDraftDto = {
 type StartAiConversationDto = {
   patientId: string;
   assessmentType?: string;
+  physicalConditions?: unknown;
 };
 
 type AppendAiConversationMessageDto = {
@@ -563,6 +578,7 @@ type CarePrecautionDto = {
 type AssessmentSpeechTranscriptDto = {
   patientId: string;
   assessmentType?: string;
+  physicalConditions?: unknown;
   audio?: Prisma.InputJsonValue;
   idempotencyKey?: string;
 };
@@ -749,6 +765,34 @@ type FormalPublishMetadataInput = {
   publishedStatus?: string;
 };
 
+type PatientTrainingGameContent = Pick<
+  GameContent,
+  | 'id'
+  | 'code'
+  | 'name'
+  | 'trainingTargets'
+  | 'tags'
+  | 'defaultDuration'
+  | 'defaultDifficulty'
+  | 'runtimeType'
+  | 'manifestUrl'
+  | 'buildBaseUrl'
+  | 'gameVersion'
+  | 'bridgeProtocolVersion'
+  | 'buildStatus'
+  | 'releaseChannel'
+  | 'supportsCamera'
+  | 'supportsMicrophone'
+  | 'supportedInputModes'
+  | 'requiredMetrics'
+  | 'difficultyPolicy'
+  | 'dynamicDifficultyTriggers'
+  | 'requiredPermissions'
+  | 'resultSchema'
+  | 'publishedStatus'
+  | 'status'
+>;
+
 type UpdateGameContentStatusDto = {
   status: string;
 };
@@ -890,7 +934,7 @@ export class AppService {
 
   async login(dto: LoginDto) {
     const account = this.validateAccount(dto?.account, '登录账号格式无效。');
-    const password = this.validatePassword(dto?.password, '登录密码');
+    const password = this.validateLoginPassword(dto?.password);
     const user = await this.prisma.user.findUnique({
       where: { account },
       select: {
@@ -915,6 +959,10 @@ export class AppService {
     });
 
     if (!user) {
+      throw new UnauthorizedException('账号或密码错误');
+    }
+
+    if (!user.passwordResetRequired && password.length < 8) {
       throw new UnauthorizedException('账号或密码错误');
     }
 
@@ -1803,6 +1851,10 @@ export class AppService {
 
   async getPatient(user: RequestUser, patientId: string) {
     await this.assertPatientAccess(user, patientId, 'full');
+    const patientOwnedRecordView = this.isPatientOwnedRecordView(
+      user,
+      patientId,
+    );
 
     const patient = await this.prisma.patientProfile.findUnique({
       where: { id: patientId },
@@ -1826,9 +1878,11 @@ export class AppService {
         },
         riskGrades: { where: { isCurrent: true }, take: 1 },
         rehabPlans: {
-          where: {
-            OR: [{ isCurrent: true }, { status: 'pending_confirm' }],
-          },
+          where: patientOwnedRecordView
+            ? { isCurrent: true, status: 'active' }
+            : {
+                OR: [{ isCurrent: true }, { status: 'pending_confirm' }],
+              },
           orderBy: [{ status: 'asc' }, { createdAt: 'desc' }],
           include: {
             items: {
@@ -1911,20 +1965,32 @@ export class AppService {
         },
       },
       riskGrades: patient.riskGrades.map((risk) =>
-        this.riskGradeResponse(risk),
+        patientOwnedRecordView
+          ? this.patientRiskGradeResponse(risk)
+          : this.riskGradeResponse(risk),
       ),
-      rehabPlans: patient.rehabPlans,
-      trainingSessions: patient.trainingSessions.map((session) => ({
-        ...session,
-        result: session.result
-          ? this.trainingResultResponse(session.result)
-          : null,
-      })),
+      rehabPlans: patientOwnedRecordView
+        ? patient.rehabPlans.map((plan) =>
+            this.serializeRehabPlanForPatientProgress(plan),
+          )
+        : patient.rehabPlans,
+      trainingSessions: patient.trainingSessions.map((session) =>
+        patientOwnedRecordView
+          ? this.serializeTrainingSessionForPatientProgress(session)
+          : {
+              ...session,
+              result: session.result
+                ? this.trainingResultResponse(session.result)
+                : null,
+            },
+      ),
       caregiverRelations: patient.caregiverRelations.map((relation) =>
         this.caregiverRelationResponse(relation),
       ),
       assessments: patient.assessments.map((assessment) =>
-        this.assessmentRecordResponse(assessment),
+        patientOwnedRecordView
+          ? this.serializeAssessmentForPatientProgress(assessment)
+          : this.assessmentRecordResponse(assessment),
       ),
       consents: patient.consents,
     };
@@ -2767,11 +2833,15 @@ export class AppService {
       dto.rawInputSummary,
       '缺少评估分析结果，不能创建风险评级记录。',
     );
+    const physicalConditions = this.requireExplicitAssessmentPhysicalConditions(
+      dto.physicalConditions,
+      '正式评估必须明确选择患者身体状况。',
+    );
     const source = this.requiredString(
       clientRawInputSummary.source,
       '缺少评估来源，不能创建评估记录。',
     );
-    this.assertAllowedAssessmentSource(source);
+    this.assertProductionAiAssessmentSource(source);
     const reviewedAt = new Date();
     const rawInputSummary = this.bindFormalAssessmentHumanReview(
       clientRawInputSummary,
@@ -2787,6 +2857,9 @@ export class AppService {
       rawInputSummary.analysisSummary,
       '缺少 AI 分析摘要，不能创建风险评级记录。',
     );
+    if (this.isAd8AssessmentType(assessmentType)) {
+      this.validateAd8Informant(rawInputSummary.informant);
+    }
     const modelVersion = this.requiredString(
       rawInputSummary.modelVersion,
       '缺少 AI 分析模型版本。',
@@ -2797,6 +2870,15 @@ export class AppService {
     );
     this.assertRange(confidence, 0, 1, 'AI 分析置信度必须在 0 到 1 之间。');
     this.assertProductionAssessmentEvidence(rawInputSummary, source);
+    await this.assertProductionAssessmentEvidenceBoundToProviderLedger(
+      dto.patientId,
+      scoreSummary,
+      rawInputSummary,
+      transcript,
+      analysisSummary,
+      physicalConditions,
+      source,
+    );
     if (this.isSpeechAiAssessmentSource(source)) {
       await this.assertCurrentConsent(dto.patientId, 'microphone_capture');
     }
@@ -2812,7 +2894,11 @@ export class AppService {
     const riskGradeId = randomUUID();
     const aiAnalysisId = randomUUID();
     const resultEnvelope = this.encryptSensitiveJsonField(
-      { scoreSummary, rawInputSummary },
+      {
+        scoreSummary,
+        rawInputSummary,
+        ...(physicalConditions === undefined ? {} : { physicalConditions }),
+      },
       {
         tableName: 'assessment_record',
         recordId: assessmentId,
@@ -2840,6 +2926,7 @@ export class AppService {
       reasonSummary,
       transcript,
       analysisSummary,
+      ...(physicalConditions === undefined ? {} : { physicalConditions }),
     };
     const outputEnvelope = this.encryptSensitiveJsonField(
       { outputSummary },
@@ -2871,6 +2958,14 @@ export class AppService {
             completedAt: true,
             createdAt: true,
           },
+        });
+
+        await tx.rehabPlan.updateMany({
+          where: {
+            patientId: dto.patientId,
+            status: { in: ['active', 'pending_confirm'] },
+          },
+          data: { isCurrent: false, status: 'ended' },
         });
 
         await tx.riskGradeRecord.updateMany({
@@ -2927,6 +3022,7 @@ export class AppService {
       id: assessmentId,
       scoreSummary,
       rawInputSummary,
+      ...(physicalConditions === undefined ? {} : { physicalConditions }),
     };
   }
 
@@ -3076,6 +3172,7 @@ export class AppService {
             confirmedById: null,
           },
           data: {
+            riskLevel: manualRiskLevel ?? currentRisk.riskLevel,
             manualRiskLevel: manualRiskLevel ?? currentRisk.riskLevel,
             confirmedById: user.id,
             confirmedAt: reviewedAt,
@@ -3105,6 +3202,9 @@ export class AppService {
             {
               scoreSummary: assessmentResult.scoreSummary,
               rawInputSummary,
+              ...(assessmentResult.physicalConditions === undefined
+                ? {}
+                : { physicalConditions: assessmentResult.physicalConditions }),
             },
             {
               tableName: 'assessment_record',
@@ -3192,17 +3292,25 @@ export class AppService {
   }
 
   private decryptAssessmentResult(recordId: string, envelope: unknown) {
+    const decrypted = decryptSensitiveJson<unknown>(
+      envelope,
+      {
+        tableName: 'assessment_record',
+        recordId,
+        fieldName: 'resultEnvelope',
+      },
+      this.sensitiveEncryptionKey,
+    );
+    const hasPhysicalConditions =
+      Boolean(decrypted) &&
+      typeof decrypted === 'object' &&
+      !Array.isArray(decrypted) &&
+      Object.prototype.hasOwnProperty.call(decrypted, 'physicalConditions');
     const payload = this.requireExactAssessmentEnvelopeObject(
-      decryptSensitiveJson<unknown>(
-        envelope,
-        {
-          tableName: 'assessment_record',
-          recordId,
-          fieldName: 'resultEnvelope',
-        },
-        this.sensitiveEncryptionKey,
-      ),
-      ['rawInputSummary', 'scoreSummary'],
+      decrypted,
+      hasPhysicalConditions
+        ? ['physicalConditions', 'rawInputSummary', 'scoreSummary']
+        : ['rawInputSummary', 'scoreSummary'],
       '评估结果加密载荷格式无效。',
     );
     return {
@@ -3214,7 +3322,27 @@ export class AppService {
         payload.rawInputSummary,
         '评估输入加密载荷格式无效。',
       ),
+      ...(hasPhysicalConditions
+        ? {
+            physicalConditions: this.requireAssessmentPhysicalConditions(
+              payload.physicalConditions,
+            ),
+          }
+        : {}),
     };
+  }
+
+  private requireAssessmentPhysicalConditions(value: unknown) {
+    if (
+      !Array.isArray(value) ||
+      value.some(
+        (condition) =>
+          typeof condition !== 'string' || condition.trim().length === 0,
+      )
+    ) {
+      throw new Error('评估身体状况加密载荷格式无效。');
+    }
+    return value as string[];
   }
 
   private decryptRiskReason(recordId: string, envelope: unknown) {
@@ -3372,6 +3500,89 @@ export class AppService {
     };
   }
 
+  private patientRiskGradeResponse(risk: {
+    id: string;
+    riskLevel: string;
+    systemRiskLevel: string;
+    manualRiskLevel: string | null;
+    isCurrent: boolean;
+    reasonEnvelope: unknown;
+    confirmedById: string | null;
+    confirmedAt: Date | null;
+  }) {
+    const decrypted = this.riskGradeResponse(risk);
+    return {
+      riskLevel: decrypted.riskLevel,
+      systemRiskLevel: decrypted.systemRiskLevel,
+      manualRiskLevel: decrypted.manualRiskLevel,
+      reasonSummary: decrypted.reasonSummary,
+      isCurrent: decrypted.isCurrent,
+      confirmedAt: decrypted.confirmedAt,
+    };
+  }
+
+  private serializeAssessmentForPatientProgress<
+    T extends {
+      id: string;
+      assessmentType: string;
+      status: string;
+      resultEnvelope: unknown;
+      startedAt: Date | null;
+      completedAt: Date | null;
+      createdAt: Date;
+      riskGrades?: Array<{
+        id: string;
+        riskLevel: string;
+        systemRiskLevel: string;
+        manualRiskLevel: string | null;
+        isCurrent: boolean;
+        reasonEnvelope: unknown;
+        confirmedById: string | null;
+        confirmedAt: Date | null;
+      }>;
+      aiAnalyses?: Array<{
+        id: string;
+        analysisScene: string;
+        confidence: number;
+        inputEnvelope: unknown;
+        outputEnvelope: unknown;
+      }>;
+    },
+  >(assessment: T) {
+    const result = this.decryptAssessmentResult(
+      assessment.id,
+      assessment.resultEnvelope,
+    );
+    const isDoctorConfirmed = assessment.status === 'doctor_confirmed';
+    const confirmedRiskGrades = isDoctorConfirmed
+      ? (assessment.riskGrades ?? [])
+          .filter((risk) => Boolean(risk.confirmedAt || risk.confirmedById))
+          .map((risk) => this.patientRiskGradeResponse(risk))
+      : [];
+    const safeAiAnalyses = isDoctorConfirmed
+      ? (assessment.aiAnalyses ?? []).map((analysis) => ({
+          id: analysis.id,
+          analysisScene: analysis.analysisScene,
+          confidence: analysis.confidence,
+        }))
+      : [];
+
+    return {
+      id: assessment.id,
+      assessmentType: assessment.assessmentType,
+      status: assessment.status,
+      scoreSummary: isDoctorConfirmed ? result.scoreSummary : {},
+      ...(result.physicalConditions === undefined
+        ? {}
+        : { physicalConditions: result.physicalConditions }),
+      startedAt: assessment.startedAt,
+      completedAt: assessment.completedAt,
+      createdAt: assessment.createdAt,
+      riskGrades: confirmedRiskGrades,
+      ...(safeAiAnalyses.length ? { aiAnalyses: safeAiAnalyses } : {}),
+    };
+  }
+
   async createAiAssessmentDraft(user: RequestUser, dto: AiAssessmentDraftDto) {
     await this.assertPatientAccess(user, dto.patientId, 'full');
 
@@ -3379,19 +3590,30 @@ export class AppService {
     await this.assertCurrentConsent(dto.patientId, 'ai_processing');
 
     const config = this.requireAiRuntimeConfig();
-    const assessmentType =
-      this.optionalString(dto.assessmentType, '评估类型必须是文本。') ??
-      'MMSE/CDR';
+    const assessmentType = this.normalizeAiConversationAssessmentType(
+      this.requiredString(dto.assessmentType, '评估类型不能为空。'),
+    );
     const transcript = this.requiredString(
       dto.transcript,
       'AI 评估草稿必须提供评估转写或临床摘要。',
     );
+    const selectedPhysicalConditions =
+      this.requireExplicitAssessmentPhysicalConditions(
+        dto.physicalConditions,
+        'AI 评估草稿必须明确选择患者身体状况。',
+      );
     const providerOperation = await this.acceptProviderOperation(
       user,
       dto.patientId,
       'assessment_draft',
       dto.idempotencyKey,
-      { assessmentType, transcript },
+      {
+        assessmentType,
+        transcript,
+        ...(selectedPhysicalConditions === undefined
+          ? {}
+          : { physicalConditions: selectedPhysicalConditions }),
+      },
       {
         provider: config.provider,
         modelVersion: config.modelVersion,
@@ -3442,6 +3664,7 @@ export class AppService {
         config,
         assessmentType,
         transcript,
+        selectedPhysicalConditions,
       );
     } catch (error) {
       if (error instanceof ProviderResponseRejectedException) {
@@ -3506,6 +3729,7 @@ export class AppService {
     let scoreSummary: Prisma.JsonObject;
     let analysisSummary: string;
     let confidence: number;
+    let providerPhysicalConditions: string[] | undefined;
     try {
       const draftPayload = this.parseAiAssessmentDraftPayload(modelResponse);
       const providerScoreSummary = this.requiredJsonObject(
@@ -3525,6 +3749,13 @@ export class AppService {
         'AI 评估草稿缺少置信度。',
       );
       this.assertRange(confidence, 0, 1, 'AI 分析置信度必须在 0 到 1 之间。');
+      providerPhysicalConditions =
+        draftPayload.physicalConditions === undefined
+          ? undefined
+          : this.validateStringArrayAllowEmpty(
+              draftPayload.physicalConditions,
+              'AI 评估草稿 physicalConditions 必须是字符串数组。',
+            );
     } catch (error) {
       await this.finalizeProviderOperation(providerOperation, {
         status: 'response_rejected',
@@ -3565,6 +3796,9 @@ export class AppService {
       analysisSummary,
       modelVersion: config.modelVersion,
       confidence,
+      ...(selectedPhysicalConditions === undefined
+        ? {}
+        : { physicalConditions: selectedPhysicalConditions }),
       evidence: {
         provider: config.provider,
         model: config.modelVersion,
@@ -3578,6 +3812,11 @@ export class AppService {
           required: true,
           status: 'pending_human_review',
         },
+        ...(providerPhysicalConditions === undefined
+          ? {}
+          : {
+              providerIdentifiedPhysicalConditions: providerPhysicalConditions,
+            }),
       },
     };
 
@@ -3588,6 +3827,9 @@ export class AppService {
       riskLevel,
       scoreSummary,
       rawInputSummary,
+      ...(selectedPhysicalConditions === undefined
+        ? {}
+        : { physicalConditions: selectedPhysicalConditions }),
     };
     const auditWriteFailure = new ProviderAuditWriteFailure('ai');
     try {
@@ -3711,8 +3953,11 @@ export class AppService {
 
     const config = this.requireAiRuntimeConfig();
     const assessmentType = this.normalizeAiConversationAssessmentType(
-      this.optionalString(dto.assessmentType, '评估类型必须是文本。') ??
-        'MMSE/CDR',
+      this.requiredString(dto.assessmentType, '评估类型不能为空。'),
+    );
+    const physicalConditions = this.requireExplicitAssessmentPhysicalConditions(
+      dto.physicalConditions,
+      'AI 会话必须明确选择患者身体状况。',
     );
 
     const sessionId = randomUUID();
@@ -3737,6 +3982,9 @@ export class AppService {
             privacyConsent,
             aiProcessingConsent,
           ]),
+          ...(physicalConditions === undefined
+            ? {}
+            : { assessmentContext: { physicalConditions } }),
         },
       },
       select: {
@@ -3844,6 +4092,8 @@ export class AppService {
       .sort((left, right) => left.turnIndex - right.turnIndex);
     const { metadata: sessionMetadata, turnCount: observedTurnCount } =
       this.requiredAiConversationTurnState(session.metadata);
+    const physicalConditions =
+      this.readAiConversationPhysicalConditions(sessionMetadata);
     if (latestTurnIndex !== observedTurnCount) {
       throw new ConflictException('AI 会话消息版本与会话状态不一致。');
     }
@@ -3860,6 +4110,7 @@ export class AppService {
         observedTurnCount,
         content,
         contentSnapshot,
+        ...(physicalConditions === undefined ? {} : { physicalConditions }),
         previousMessageHashes: previousMessageViews.map((message) => ({
           turnIndex: message.turnIndex,
           role: message.role,
@@ -3935,6 +4186,7 @@ export class AppService {
         assessmentType,
         previousMessageViews,
         content,
+        physicalConditions,
       );
     } catch (error) {
       if (error instanceof ProviderResponseRejectedException) {
@@ -4160,6 +4412,12 @@ export class AppService {
           assistantMessage:
             this.aiConversationMessageResponse(assistantMessage),
         };
+        const providerEvidenceResult = {
+          sessionId: id,
+          userMessage: this.aiConversationProviderMessageResponse(userMessage),
+          assistantMessage:
+            this.aiConversationProviderMessageResponse(assistantMessage),
+        };
         await this.finalizeProviderOperationInTransaction(
           tx,
           providerOperation,
@@ -4169,7 +4427,7 @@ export class AppService {
             providerCallId: modelResponse.callId,
             response: {
               providerContent: modelResponse.content,
-              result: response,
+              result: providerEvidenceResult,
             },
           },
         );
@@ -4358,6 +4616,7 @@ export class AppService {
       select: {
         id: true,
         patientId: true,
+        assessmentType: true,
         status: true,
         summaryEnvelope: true,
         reviewEnvelope: true,
@@ -4385,6 +4644,45 @@ export class AppService {
       dto.reviewNote,
       'AI 会话复核说明不能为空。',
     );
+    if (conclusion === 'approved') {
+      const formalAssessments = await this.prisma.assessmentRecord.findMany({
+        where: {
+          patientId: session.patientId,
+          assessmentType: session.assessmentType,
+          status: 'completed',
+        },
+        orderBy: { completedAt: 'desc' },
+        select: { id: true, resultEnvelope: true },
+      });
+      const hasLinkedFormalAssessment = formalAssessments.some(
+        (formalAssessment) => {
+          const formalAssessmentResult = this.decryptAssessmentResult(
+            formalAssessment.id,
+            formalAssessment.resultEnvelope,
+          );
+          const conversationEvidence =
+            formalAssessmentResult.rawInputSummary.conversationEvidence;
+          if (
+            !conversationEvidence ||
+            typeof conversationEvidence !== 'object' ||
+            Array.isArray(conversationEvidence)
+          ) {
+            return false;
+          }
+          return (
+            conversationEvidence.sessionId === id &&
+            conversationEvidence.patientId === session.patientId &&
+            conversationEvidence.assessmentType === session.assessmentType &&
+            conversationEvidence.status === 'pending_human_review'
+          );
+        },
+      );
+      if (!hasLinkedFormalAssessment) {
+        throw new BadRequestException(
+          '请先保存本次 AI 对话生成的待复核正式评估，再批准 AI 对话。',
+        );
+      }
+    }
     const reviewedAt = new Date();
     const metadata = this.asJsonObject(session.metadata);
     this.decryptAiConversationSummary(id, session.summaryEnvelope);
@@ -4484,6 +4782,107 @@ export class AppService {
     });
   }
 
+  async getAiConversationAssessmentDraft(user: RequestUser, sessionId: string) {
+    const id = this.requiredString(sessionId, 'AI 会话 ID 不能为空。');
+    const session = await this.prisma.aiConversationSession.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        patientId: true,
+        assessmentType: true,
+        status: true,
+        summaryEnvelope: true,
+        metadata: true,
+        messages: {
+          orderBy: { turnIndex: 'asc' },
+          select: {
+            id: true,
+            sessionId: true,
+            turnIndex: true,
+            role: true,
+            contentEnvelope: true,
+            createdAt: true,
+          },
+        },
+      },
+    });
+    if (!session) {
+      throw new NotFoundException('AI 会话不存在。');
+    }
+    await this.assertResponsibleDoctorAccess(
+      user,
+      session.patientId,
+      'ai_conversation_session',
+      'ai_conversation_review_required',
+    );
+    if (session.status !== 'pending_human_review') {
+      throw new ConflictException('AI 会话尚未提交医生复核或已完成复核。');
+    }
+
+    const assessmentType = this.normalizeAiConversationAssessmentType(
+      session.assessmentType,
+    );
+    const physicalConditions = this.readAiConversationPhysicalConditions(
+      this.requiredJsonObject(session.metadata, 'AI 会话元数据无效。'),
+    );
+    const summary = this.decryptAiConversationSummary(
+      session.id,
+      session.summaryEnvelope,
+    );
+    const messages = session.messages
+      .map((message) => this.aiConversationMessageResponse(message))
+      .sort((left, right) => left.turnIndex - right.turnIndex);
+    const transcript = this.buildAiConversationAssessmentDraftTranscript({
+      assessmentType,
+      messages,
+      sessionId: session.id,
+      summary,
+      physicalConditions,
+    });
+    const expectedRequest = {
+      assessmentType,
+      transcript,
+      physicalConditions,
+    };
+    const candidates = await this.prisma.providerOperation.findMany({
+      where: {
+        patientId: session.patientId,
+        operation: 'assessment_draft',
+        status: 'completed',
+      },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        provider: true,
+        modelVersion: true,
+        endpointHost: true,
+        apiKeyRef: true,
+        promptVersion: true,
+        providerCallId: true,
+        requestCiphertext: true,
+        responseCiphertext: true,
+        responseHmac: true,
+      },
+    });
+    const matches = candidates.filter((candidate) =>
+      isDeepStrictEqual(
+        this.readProviderOperationRequest(candidate, 'AI 评估草稿'),
+        expectedRequest,
+      ),
+    );
+    if (!matches.length) return null;
+    if (matches.length !== 1) {
+      throw new ConflictException(
+        '同一 AI 会话存在多份匹配的已完成评估草稿证据，已阻止恢复。',
+      );
+    }
+    return this.recoverAiConversationAssessmentDraft(
+      matches[0],
+      expectedRequest,
+      session.patientId,
+    );
+  }
+
   async listPatientAiConversations(user: RequestUser, patientId: string) {
     const id = this.requiredString(patientId, '患者 ID 不能为空。');
     await this.assertPatientAccess(user, id, 'full');
@@ -4524,7 +4923,9 @@ export class AppService {
       },
     });
     return sessions.map((session) =>
-      this.aiConversationSessionResponse(session),
+      this.isPatientOwnedRecordView(user, id)
+        ? this.aiConversationPatientResponse(session)
+        : this.aiConversationSessionResponse(session),
     );
   }
 
@@ -4535,12 +4936,58 @@ export class AppService {
     },
   >(message: T) {
     const { contentEnvelope, ...safeMessage } = message;
+    return {
+      ...safeMessage,
+      ...this.decryptAiConversationMessageContent(message.id, contentEnvelope),
+    };
+  }
+
+  private aiConversationProviderMessageResponse(message: {
+    id: string;
+    sessionId: string;
+    turnIndex: number;
+    role: string;
+    contentEnvelope: unknown;
+    createdAt: Date;
+  }) {
+    return {
+      ...this.aiConversationMessageResponse(message),
+      createdAt: message.createdAt.toISOString(),
+    };
+  }
+
+  private aiConversationPatientMessageResponse(message: {
+    id: string;
+    sessionId: string;
+    turnIndex: number;
+    role: string;
+    contentEnvelope: unknown;
+    createdAt: Date;
+  }) {
+    const { content } = this.decryptAiConversationMessageContent(
+      message.id,
+      message.contentEnvelope,
+    );
+    return {
+      id: message.id,
+      sessionId: message.sessionId,
+      turnIndex: message.turnIndex,
+      role: message.role,
+      content,
+      createdAt: message.createdAt,
+    };
+  }
+
+  private decryptAiConversationMessageContent(
+    recordId: string,
+    envelope: unknown,
+  ) {
     const payload = this.requireExactAiConversationObject(
       decryptSensitiveJson<unknown>(
-        contentEnvelope,
+        envelope,
         {
           tableName: 'ai_conversation_message',
-          recordId: message.id,
+          recordId,
           fieldName: 'contentEnvelope',
         },
         this.sensitiveEncryptionKey,
@@ -4549,7 +4996,6 @@ export class AppService {
       'AI 会话消息加密载荷格式无效。',
     );
     return {
-      ...safeMessage,
       content: this.requiredString(
         payload.content,
         'AI 会话消息加密内容无效。',
@@ -4579,6 +5025,26 @@ export class AppService {
       throw new BadRequestException('AI 会话消息版本数据无效。');
     }
     return { metadata, turnCount };
+  }
+
+  private readAiConversationPhysicalConditions(
+    metadata: Prisma.JsonObject,
+  ): AssessmentPhysicalCondition[] {
+    const context = metadata.assessmentContext;
+    if (context === undefined) {
+      throw new BadRequestException('AI 会话缺少身体状况安全上下文。');
+    }
+    const assessmentContext = this.requiredJsonObject(
+      context,
+      'AI 会话评估上下文必须是结构化对象。',
+    );
+    if (assessmentContext.physicalConditions === undefined) {
+      throw new BadRequestException('AI 会话缺少身体状况安全上下文。');
+    }
+    return this.requireExplicitAssessmentPhysicalConditions(
+      assessmentContext.physicalConditions,
+      'AI 会话必须明确选择患者身体状况。',
+    );
   }
 
   private decryptAiConversationSummary(recordId: string, envelope: unknown) {
@@ -4658,6 +5124,74 @@ export class AppService {
     };
   }
 
+  private aiConversationPatientResponse<
+    T extends {
+      id: string;
+      patientId: string;
+      assessmentType?: string;
+      status: string;
+      startedAt?: Date;
+      completedAt?: Date | null;
+      summaryEnvelope: unknown;
+      reviewEnvelope: unknown;
+      createdAt?: Date;
+      updatedAt?: Date;
+      messages?: Array<{
+        id: string;
+        sessionId: string;
+        turnIndex: number;
+        role: string;
+        contentEnvelope: unknown;
+        createdAt: Date;
+      }>;
+    },
+  >(session: T) {
+    const requiresCompletedContent = [
+      'pending_human_review',
+      'reviewed',
+    ].includes(session.status);
+    if (
+      requiresCompletedContent &&
+      (session.summaryEnvelope === null || session.reviewEnvelope === null)
+    ) {
+      throw new BadRequestException('AI 会话缺少加密总结或复核内容。');
+    }
+    return {
+      id: session.id,
+      patientId: session.patientId,
+      status: session.status,
+      summary:
+        session.summaryEnvelope === null
+          ? null
+          : this.decryptAiConversationSummary(
+              session.id,
+              session.summaryEnvelope,
+            ),
+      ...(session.assessmentType === undefined
+        ? {}
+        : { assessmentType: session.assessmentType }),
+      ...(session.startedAt === undefined
+        ? {}
+        : { startedAt: session.startedAt }),
+      ...(session.completedAt === undefined
+        ? {}
+        : { completedAt: session.completedAt }),
+      ...(session.createdAt === undefined
+        ? {}
+        : { createdAt: session.createdAt }),
+      ...(session.updatedAt === undefined
+        ? {}
+        : { updatedAt: session.updatedAt }),
+      ...(session.messages
+        ? {
+            messages: session.messages.map((message) =>
+              this.aiConversationPatientMessageResponse(message),
+            ),
+          }
+        : undefined),
+    };
+  }
+
   private requireExactAiConversationObject(
     value: unknown,
     expectedKeys: string[],
@@ -4724,9 +5258,13 @@ export class AppService {
 
     const config = this.requireSpeechRuntimeConfig();
     const audio = this.validateSpeechAudioInput(dto.audio, config.inputLimits);
-    const assessmentType =
-      this.optionalString(dto.assessmentType, '评估类型必须是文本。') ??
-      'MMSE/CDR';
+    const assessmentType = this.normalizeAiConversationAssessmentType(
+      this.requiredString(dto.assessmentType, '评估类型不能为空。'),
+    );
+    const physicalConditions = this.requireExplicitAssessmentPhysicalConditions(
+      dto.physicalConditions,
+      '语音评估必须明确选择患者身体状况。',
+    );
     const providerOperation = await this.acceptProviderOperation(
       user,
       dto.patientId,
@@ -4734,6 +5272,7 @@ export class AppService {
       dto.idempotencyKey,
       {
         assessmentType,
+        physicalConditions,
         audio: {
           contentHash: this.hashBase64ForEvidence(audio.contentBase64),
           mimeType: audio.mimeType,
@@ -4900,6 +5439,7 @@ export class AppService {
     const result = {
       patientId: dto.patientId,
       assessmentType,
+      physicalConditions,
       status: 'transcribed' as const,
       transcript,
       speechEvidence,
@@ -5355,7 +5895,9 @@ export class AppService {
       },
     });
     return assessments.map((assessment) =>
-      this.assessmentRecordResponse(assessment),
+      this.isPatientOwnedRecordView(user, patientId)
+        ? this.serializeAssessmentForPatientProgress(assessment)
+        : this.assessmentRecordResponse(assessment),
     );
   }
 
@@ -5373,8 +5915,16 @@ export class AppService {
       select: {
         id: true,
         riskLevel: true,
+        systemRiskLevel: true,
+        manualRiskLevel: true,
         confirmedById: true,
         confirmedAt: true,
+        assessment: {
+          select: {
+            id: true,
+            resultEnvelope: true,
+          },
+        },
       },
     });
     if (!currentRisk) {
@@ -5406,12 +5956,34 @@ export class AppService {
       );
     }
 
-    const selectedGames = games
+    const assessmentResult = this.decryptAssessmentResult(
+      currentRisk.assessment.id,
+      currentRisk.assessment.resultEnvelope,
+    );
+    const physicalConditions = this.requireExplicitAssessmentPhysicalConditions(
+      assessmentResult.physicalConditions,
+      '当前评估缺少身体状况安全结论，请重新完成评估后再生成康复方案。',
+    );
+    const effectiveRiskLevel =
+      currentRisk.manualRiskLevel ?? currentRisk.riskLevel;
+    const safeGames = this.filterGamesByPhysicalConditions(
+      games,
+      physicalConditions,
+    );
+    if (physicalConditions?.length && !safeGames.length) {
+      throw new BadRequestException(
+        '当前身体状况没有已配置安全准入条件的正式训练游戏，不能生成康复方案。',
+      );
+    }
+
+    const selectedGames = safeGames
       .map((game) => ({
         game,
         score: this.scoreGame(
-          [...game.trainingTargets, ...game.tags],
-          currentRisk.riskLevel,
+          game.trainingTargets,
+          game.tags,
+          effectiveRiskLevel,
+          physicalConditions,
         ),
       }))
       .sort((a, b) => this.compareGameRecommendationCandidates(a, b))
@@ -5426,16 +5998,17 @@ export class AppService {
             planName: '系统推荐个性化康复计划',
             status: 'pending_confirm',
             isCurrent: false,
-            weekFrequency: currentRisk.riskLevel === 'high' ? 3 : 4,
-            dailyDuration: currentRisk.riskLevel === 'high' ? 16 : 24,
+            weekFrequency: effectiveRiskLevel === 'high' ? 3 : 4,
+            dailyDuration: effectiveRiskLevel === 'high' ? 16 : 24,
             difficultyLadder: {
               mode: 'rule_based',
-              firstWeek: currentRisk.riskLevel === 'high' ? 'low' : 'moderate',
+              firstWeek: effectiveRiskLevel === 'high' ? 'low' : 'moderate',
             },
-            recommendationReason:
-              '根据认知评级、游戏标签和训练目标生成，可由医师调整。',
+            recommendationReason: physicalConditions?.length
+              ? `根据认知评级、患者身体状况（${physicalConditions.join('、')}）的游戏安全准入标签和训练目标生成，可由医师调整。`
+              : '根据认知评级、游戏标签和训练目标生成，可由医师调整。',
             items: {
-              create: selectedGames.map(({ game }, index) => ({
+              create: selectedGames.map(({ game, score }, index) => ({
                 gameContentId: game.id,
                 sequence: index + 1,
                 durationMinutes: game.defaultDuration,
@@ -5443,6 +6016,19 @@ export class AppService {
                 difficulty: game.defaultDifficulty,
                 adaptiveRules: {
                   source: 'rule_based',
+                  physicalConditions: physicalConditions ?? [],
+                  physicalConditionSafety: physicalConditions?.length
+                    ? {
+                        requiredTags: physicalConditions.map(
+                          (condition) => `safety:${condition}_compatible`,
+                        ),
+                        matched: true,
+                      }
+                    : {
+                        requiredTags: [],
+                        matched: true,
+                      },
+                  recommendationScore: score,
                   increaseWhenAccuracyAbove: 0.9,
                   reduceWhenMissesAbove: 5,
                 },
@@ -5486,7 +6072,7 @@ export class AppService {
       where: { id: planId },
       include: {
         patient: { select: { id: true, responsibleDoctorId: true } },
-        items: true,
+        items: { include: { gameContent: true } },
       },
     });
     if (!plan) throw new NotFoundException('计划不存在');
@@ -5498,6 +6084,89 @@ export class AppService {
     );
     if (plan.status !== 'pending_confirm' || plan.isCurrent) {
       throw new ConflictException('康复方案状态已变化。');
+    }
+
+    const dailyDuration = this.requiredInteger(
+      dto.dailyDuration,
+      '每日训练时长必须是整数。',
+    );
+    this.assertRange(
+      dailyDuration,
+      1,
+      240,
+      '每日训练时长必须在 1 到 240 分钟之间。',
+    );
+    const weekFrequency = this.requiredInteger(
+      dto.weekFrequency,
+      '每周训练频次必须是整数。',
+    );
+    this.assertRange(weekFrequency, 1, 7, '每周训练频次必须在 1 到 7 次之间。');
+    const adjustmentReason = this.requiredString(
+      dto.adjustmentReason,
+      '医生调整说明不能为空。',
+    );
+    const currentRisk = await this.prisma.riskGradeRecord.findFirst({
+      where: { patientId: plan.patientId, isCurrent: true },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        confirmedById: true,
+        confirmedAt: true,
+        assessment: { select: { id: true, resultEnvelope: true } },
+      },
+    });
+    if (!currentRisk?.confirmedById || !currentRisk.confirmedAt) {
+      throw new BadRequestException(
+        '当前风险评级尚未经过医师确认，不能启用康复方案。',
+      );
+    }
+    const physicalConditions = this.requireExplicitAssessmentPhysicalConditions(
+      this.decryptAssessmentResult(
+        currentRisk.assessment.id,
+        currentRisk.assessment.resultEnvelope,
+      ).physicalConditions,
+      '当前评估缺少身体状况安全结论，不能启用康复方案。',
+    );
+    this.assertGamesSafeForPhysicalConditions(
+      plan.items.map((item) => item.gameContent),
+      physicalConditions,
+    );
+    const itemAdjustments = dto.itemAdjustments ?? [];
+    const seenAdjustmentGameIds = new Set<string>();
+    for (const item of itemAdjustments) {
+      const gameContentId = this.requiredString(
+        item.gameContentId,
+        '计划调整缺少训练游戏。',
+      );
+      if (seenAdjustmentGameIds.has(gameContentId)) {
+        throw new BadRequestException('同一训练游戏不能重复调整。');
+      }
+      seenAdjustmentGameIds.add(gameContentId);
+      if (
+        !plan.items.some((planItem) => planItem.gameContentId === gameContentId)
+      ) {
+        throw new BadRequestException('计划调整项不属于当前康复方案。');
+      }
+      const durationMinutes = this.requiredInteger(
+        item.durationMinutes,
+        '训练项目时长必须是整数。',
+      );
+      this.assertRange(
+        durationMinutes,
+        1,
+        240,
+        '训练项目时长必须在 1 到 240 分钟之间。',
+      );
+      const frequencyPerWeek = this.requiredInteger(
+        item.frequencyPerWeek,
+        '训练项目频次必须是整数。',
+      );
+      this.assertRange(
+        frequencyPerWeek,
+        1,
+        7,
+        '训练项目频次必须在 1 到 7 次之间。',
+      );
+      this.requiredString(item.difficulty, '训练项目难度不能为空。');
     }
 
     return this.prisma
@@ -5520,8 +6189,8 @@ export class AppService {
           },
           data: {
             doctorId: actingDoctorId,
-            dailyDuration: dto.dailyDuration,
-            weekFrequency: dto.weekFrequency,
+            dailyDuration,
+            weekFrequency,
             difficultyLadder,
             status: 'active',
             isCurrent: true,
@@ -5532,9 +6201,9 @@ export class AppService {
           throw new ConflictException('康复方案状态已变化。');
         }
 
-        if (dto.itemAdjustments?.length) {
-          for (const item of dto.itemAdjustments) {
-            await tx.rehabPlanItem.updateMany({
+        if (itemAdjustments.length) {
+          for (const item of itemAdjustments) {
+            const updated = await tx.rehabPlanItem.updateMany({
               where: { rehabPlanId: planId, gameContentId: item.gameContentId },
               data: {
                 durationMinutes: item.durationMinutes,
@@ -5542,6 +6211,9 @@ export class AppService {
                 difficulty: item.difficulty,
               },
             });
+            if (updated.count !== 1) {
+              throw new ConflictException('康复方案训练项目已发生变化。');
+            }
           }
         }
 
@@ -5556,12 +6228,12 @@ export class AppService {
               items: plan.items,
             },
             adjustedSnapshot: {
-              dailyDuration: dto.dailyDuration,
-              weekFrequency: dto.weekFrequency,
+              dailyDuration,
+              weekFrequency,
               difficultyLadder,
-              itemAdjustments: dto.itemAdjustments ?? [],
+              itemAdjustments,
             },
-            adjustmentReason: dto.adjustmentReason,
+            adjustmentReason,
           },
         });
         const confirmed = await tx.rehabPlan.findUnique({
@@ -5644,20 +6316,35 @@ export class AppService {
     const currentRisk = await this.prisma.riskGradeRecord.findFirst({
       where: { patientId: dto.patientId, isCurrent: true },
       orderBy: { createdAt: 'desc' },
-      select: { assessmentId: true },
+      select: {
+        assessmentId: true,
+        riskLevel: true,
+        manualRiskLevel: true,
+        confirmedById: true,
+        confirmedAt: true,
+        assessment: { select: { id: true, resultEnvelope: true } },
+      },
     });
-    if (!currentRisk?.assessmentId) {
-      throw new BadRequestException(
-        '缺少已确认评估来源，不能生成动态难度证据。',
-      );
-    }
+    const trainingAssessment = this.assertConfirmedAssessmentForFormalTraining(
+      currentRisk,
+      '缺少已确认评估来源，不能开始正式训练。',
+    );
+    const physicalConditions = trainingAssessment.physicalConditions;
+    this.assertCollectionProtocolMatchesAssessment(
+      collectionBatch.protocol,
+      trainingAssessment,
+    );
+    this.assertGamesSafeForPhysicalConditions(
+      [planItem.gameContent],
+      physicalConditions,
+    );
 
     const runtimeContext = this.buildTrainingRuntimeContext(
       dto,
       planItem,
       planItem.gameContent,
       collectionBatch,
-      currentRisk.assessmentId,
+      trainingAssessment.assessmentId,
     );
 
     const idempotencyKey = this.optionalString(
@@ -6315,12 +7002,18 @@ export class AppService {
           },
     );
 
-    const validResults = responseSessions
-      .filter((session) => this.hasCompletedTrainingResult(session))
+    const completedResults = responseSessions
+      .filter(
+        (session) =>
+          session.sessionStatus === 'completed' && Boolean(session.result),
+      )
       .map((session) => session.result)
       .filter((result): result is NonNullable<typeof result> =>
         Boolean(result),
       );
+    const validResults = completedResults.filter(
+      (result) => result.qualityFlag === 'valid' && !result.abnormalFlag,
+    );
 
     return {
       sessions: responseSessions,
@@ -6335,8 +7028,9 @@ export class AppService {
                 validResults.length,
             )
           : 0,
-        abnormalCount: validResults.filter((result) => result.abnormalFlag)
-          .length,
+        abnormalCount: completedResults.filter(
+          (result) => result.abnormalFlag || result.qualityFlag !== 'valid',
+        ).length,
       },
     };
   }
@@ -6650,6 +7344,37 @@ export class AppService {
     };
   }
 
+  private serializeGameContentForPatientTraining(
+    gameContent: PatientTrainingGameContent,
+  ) {
+    return {
+      id: gameContent.id,
+      code: gameContent.code,
+      name: gameContent.name,
+      trainingTargets: gameContent.trainingTargets,
+      tags: gameContent.tags,
+      defaultDuration: gameContent.defaultDuration,
+      defaultDifficulty: gameContent.defaultDifficulty,
+      runtimeType: gameContent.runtimeType,
+      manifestUrl: gameContent.manifestUrl,
+      buildBaseUrl: gameContent.buildBaseUrl,
+      gameVersion: gameContent.gameVersion,
+      bridgeProtocolVersion: gameContent.bridgeProtocolVersion,
+      buildStatus: gameContent.buildStatus,
+      releaseChannel: gameContent.releaseChannel,
+      supportsCamera: gameContent.supportsCamera,
+      supportsMicrophone: gameContent.supportsMicrophone,
+      supportedInputModes: gameContent.supportedInputModes,
+      requiredMetrics: gameContent.requiredMetrics,
+      difficultyPolicy: gameContent.difficultyPolicy,
+      dynamicDifficultyTriggers: gameContent.dynamicDifficultyTriggers,
+      requiredPermissions: gameContent.requiredPermissions,
+      resultSchema: gameContent.resultSchema,
+      publishedStatus: gameContent.publishedStatus,
+      status: gameContent.status,
+    };
+  }
+
   private serializeTrainingResultForProgress(
     result: TrainingResultEnvelopeRecord | null,
   ) {
@@ -6665,13 +7390,9 @@ export class AppService {
       exerciseIntensity: reviewedResult.exerciseIntensity,
       abnormalFlag: reviewedResult.abnormalFlag,
       qualityFlag: reviewedResult.qualityFlag,
-      qualityReasons: Array.isArray(reviewedResult.qualityReasons)
-        ? reviewedResult.qualityReasons
-        : [],
       reviewStatus: reviewedResult.reviewStatus,
       reviewConclusion: reviewedResult.reviewConclusion,
       reviewNote: reviewedResult.reviewNote,
-      reviewedByUserId: reviewedResult.reviewedByUserId,
       reviewedAt: reviewedResult.reviewedAt,
       createdAt: reviewedResult.createdAt,
     };
@@ -6808,6 +7529,119 @@ export class AppService {
     };
   }
 
+  private serializeRehabPlanForPatientProgress(plan: {
+    id: string;
+    patientId: string;
+    planName: string;
+    status: string;
+    isCurrent: boolean;
+    weekFrequency: number;
+    dailyDuration: number;
+    recommendationReason: string;
+    confirmedAt?: Date | null;
+    createdAt?: Date;
+    updatedAt?: Date;
+    items: Array<{
+      id: string;
+      rehabPlanId: string;
+      gameContentId: string;
+      sequence: number;
+      durationMinutes: number;
+      frequencyPerWeek: number;
+      difficulty: string;
+      gameContent: PatientTrainingGameContent;
+    }>;
+  }) {
+    return {
+      id: plan.id,
+      patientId: plan.patientId,
+      planName: plan.planName,
+      status: plan.status,
+      isCurrent: plan.isCurrent,
+      weekFrequency: plan.weekFrequency,
+      dailyDuration: plan.dailyDuration,
+      recommendationReason: plan.recommendationReason,
+      confirmedAt: plan.confirmedAt,
+      createdAt: plan.createdAt,
+      updatedAt: plan.updatedAt,
+      items: plan.items.map((item) => ({
+        id: item.id,
+        rehabPlanId: item.rehabPlanId,
+        gameContentId: item.gameContentId,
+        sequence: item.sequence,
+        durationMinutes: item.durationMinutes,
+        frequencyPerWeek: item.frequencyPerWeek,
+        difficulty: item.difficulty,
+        gameContent: this.serializeGameContentForPatientTraining(
+          item.gameContent,
+        ),
+      })),
+    };
+  }
+
+  private serializeCollectionBatchForPatientProgress(batch: {
+    id: string;
+    patientId: string;
+    rehabPlanId: string;
+    planItemId: string;
+    gameContentId: string;
+    protocolId: string;
+    conditionId: string;
+    protocolVersion: string;
+    status: string;
+    startedAt: Date | null;
+    completedAt: Date | null;
+    createdAt: Date;
+    updatedAt: Date;
+    protocol?: {
+      id: string;
+      gameContentId: string | null;
+      runtimeType: string;
+      status: string;
+    } | null;
+    gameContent?: {
+      id: string;
+      name: string;
+      trainingTargets?: unknown;
+      tags?: unknown;
+      defaultDuration?: number;
+      defaultDifficulty?: string;
+    } | null;
+  }) {
+    return {
+      id: batch.id,
+      patientId: batch.patientId,
+      rehabPlanId: batch.rehabPlanId,
+      planItemId: batch.planItemId,
+      gameContentId: batch.gameContentId,
+      protocolId: batch.protocolId,
+      conditionId: batch.conditionId,
+      protocolVersion: batch.protocolVersion,
+      status: batch.status,
+      startedAt: batch.startedAt,
+      completedAt: batch.completedAt,
+      createdAt: batch.createdAt,
+      updatedAt: batch.updatedAt,
+      ...(batch.protocol
+        ? {
+            protocol: {
+              id: batch.protocol.id,
+              gameContentId: batch.protocol.gameContentId,
+              runtimeType: batch.protocol.runtimeType,
+              status: batch.protocol.status,
+            },
+          }
+        : {}),
+      ...(batch.gameContent
+        ? {
+            gameContent: this.serializeGameContentForProgress(
+              batch.gameContent,
+            ),
+          }
+        : {}),
+    };
+  }
+
   private serializeRehabPlanForCaregiverProgress(plan: {
     id: string;
     planName: string;
@@ -6927,8 +7761,6 @@ export class AppService {
         throw new ForbiddenException('角色权限不足');
       }
       if (
-        dataset === 'assessments' ||
-        dataset === 'training-records' ||
         filters.riskLevel !== undefined ||
         filters.qualityFlag !== undefined
       ) {
@@ -7888,6 +8720,27 @@ export class AppService {
     this.assertFormalCollectionSnapshot(protocol.condition, '采集条件快照');
     this.assertFormalCollectionSnapshot(protocol, '采集协议快照');
 
+    const currentRisk = await this.prisma.riskGradeRecord.findFirst({
+      where: { patientId: dto.patientId, isCurrent: true },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        assessmentId: true,
+        riskLevel: true,
+        manualRiskLevel: true,
+        confirmedById: true,
+        confirmedAt: true,
+        assessment: { select: { id: true, resultEnvelope: true } },
+      },
+    });
+    const trainingAssessment = this.assertConfirmedAssessmentForFormalTraining(
+      currentRisk,
+      '缺少已确认评估来源，不能创建正式采集批次。',
+    );
+    this.assertCollectionProtocolMatchesAssessment(
+      protocol,
+      trainingAssessment,
+    );
+
     const conditionSnapshot = this.buildConditionSnapshot(protocol.condition);
     const protocolSnapshot = this.buildProtocolSnapshot(protocol);
     const consentSnapshot = await this.assertTrainingRuntimeConsents(
@@ -7998,11 +8851,16 @@ export class AppService {
 
   async listPatientCollectionBatches(user: RequestUser, patientId: string) {
     await this.assertPatientAccess(user, patientId, 'full');
-    return this.prisma.collectionBatch.findMany({
+    const batches = await this.prisma.collectionBatch.findMany({
       where: { patientId },
       orderBy: { createdAt: 'desc' },
       include: { protocol: true, condition: true, gameContent: true },
     });
+    return this.isPatientOwnedRecordView(user, patientId)
+      ? batches.map((batch) =>
+          this.serializeCollectionBatchForPatientProgress(batch),
+        )
+      : batches;
   }
 
   private async assertPatientAccess(
@@ -8240,7 +9098,10 @@ export class AppService {
       if (role.roleCode === 'patient') {
         context.patientIds.push(role.relatedObjectId);
       }
-      if (role.roleCode === 'caregiver') {
+      if (
+        role.roleCode === 'caregiver' &&
+        role.relatedObjectType === 'patient'
+      ) {
         context.caregiverPatientIds.push(role.relatedObjectId);
       }
       if (role.roleCode === 'doctor') {
@@ -8572,7 +9433,14 @@ export class AppService {
   private hasCompletedTrainingResult(
     session: TrainingSessionForCompletionSummary,
   ) {
-    return session.sessionStatus === 'completed' && Boolean(session.result);
+    const result = session.result;
+    return (
+      session.sessionStatus === 'completed' &&
+      result !== null &&
+      result !== undefined &&
+      result.qualityFlag === 'valid' &&
+      result.abnormalFlag === false
+    );
   }
 
   private assertGameReadyForFormalTraining(game: GameContent) {
@@ -8724,6 +9592,125 @@ export class AppService {
     if (nonProductionMarkerPattern.test(raw)) {
       throw new BadRequestException(
         `${label} 不能包含 mock、demo、local、manual 或 fallback。`,
+      );
+    }
+  }
+
+  private assertConfirmedAssessmentForFormalTraining(
+    currentRisk: {
+      assessmentId: string | null;
+      riskLevel: string;
+      manualRiskLevel: string | null;
+      confirmedById: string | null;
+      confirmedAt: Date | null;
+      assessment: { id: string; resultEnvelope: unknown } | null;
+    } | null,
+    missingAssessmentMessage: string,
+  ) {
+    if (
+      !currentRisk?.assessmentId ||
+      !currentRisk.confirmedById ||
+      !currentRisk.confirmedAt ||
+      !currentRisk.assessment ||
+      currentRisk.assessment.id !== currentRisk.assessmentId
+    ) {
+      throw new BadRequestException(missingAssessmentMessage);
+    }
+
+    const riskLevel = this.requireFormalTrainingRiskLevel(
+      currentRisk.manualRiskLevel ?? currentRisk.riskLevel,
+    );
+    const physicalConditions = this.requireExplicitAssessmentPhysicalConditions(
+      this.decryptAssessmentResult(
+        currentRisk.assessment.id,
+        currentRisk.assessment.resultEnvelope,
+      ).physicalConditions,
+      '当前评估缺少身体状况安全结论，不能进行正式训练。',
+    );
+
+    return {
+      assessmentId: currentRisk.assessmentId,
+      riskLevel,
+      physicalConditions,
+    };
+  }
+
+  private requireFormalTrainingRiskLevel(value: unknown): RiskLevel {
+    const riskLevel = this.requiredString(
+      value,
+      '当前风险评级缺少有效 riskLevel，不能进行正式训练。',
+    );
+    if (!['low', 'moderate', 'high'].includes(riskLevel)) {
+      throw new BadRequestException(
+        '当前风险评级缺少有效 riskLevel，不能进行正式训练。',
+      );
+    }
+    return riskLevel as RiskLevel;
+  }
+
+  private validateCollectionProtocolRiskLevels(value: unknown): RiskLevel[] {
+    if (!Array.isArray(value) || !value.length) {
+      throw new BadRequestException(
+        '采集协议 conditionRules.riskLevels 必须是非空数组。',
+      );
+    }
+    const riskLevels = Array.from(
+      new Set(
+        value.map((item) =>
+          this.requiredString(
+            item,
+            '采集协议 conditionRules.riskLevels 必须是风险等级数组。',
+          ),
+        ),
+      ),
+    );
+    if (
+      riskLevels.some(
+        (riskLevel) => !['low', 'moderate', 'high'].includes(riskLevel),
+      )
+    ) {
+      throw new BadRequestException(
+        '采集协议 conditionRules.riskLevels 只能包含 low、moderate 或 high。',
+      );
+    }
+    return riskLevels as RiskLevel[];
+  }
+
+  private assertCollectionProtocolMatchesAssessment(
+    protocol: { conditionRules: unknown },
+    assessment: {
+      riskLevel: RiskLevel;
+      physicalConditions: AssessmentPhysicalCondition[];
+    },
+  ) {
+    const conditionRules = this.requiredJsonObject(
+      protocol.conditionRules,
+      '采集协议缺少 conditionRules，不能进行正式训练。',
+    );
+    const allowedPhysicalConditions = this.validateAssessmentPhysicalConditions(
+      conditionRules.physicalConditions,
+      '采集协议 conditionRules.physicalConditions 必须是身体状况数组。',
+    );
+    if (!allowedPhysicalConditions.length) {
+      throw new BadRequestException(
+        '采集协议 conditionRules.physicalConditions 不能为空。',
+      );
+    }
+    const allowedRiskLevels = this.validateCollectionProtocolRiskLevels(
+      conditionRules.riskLevels,
+    );
+
+    const disallowedPhysicalConditions = assessment.physicalConditions.filter(
+      (condition) => !allowedPhysicalConditions.includes(condition),
+    );
+    if (disallowedPhysicalConditions.length) {
+      throw new BadRequestException(
+        `患者身体状况不满足采集协议 conditionRules：${disallowedPhysicalConditions.join('、')}。`,
+      );
+    }
+    if (!allowedRiskLevels.includes(assessment.riskLevel)) {
+      throw new BadRequestException(
+        `患者风险等级不满足采集协议 conditionRules：${assessment.riskLevel}。`,
       );
     }
   }
@@ -11854,6 +12841,48 @@ export class AppService {
     );
   }
 
+  private validateAssessmentPhysicalConditions(
+    value: unknown,
+    message: string,
+  ): AssessmentPhysicalCondition[] {
+    const normalized = this.validateStringArrayAllowEmpty(value, message);
+    const unsupported = normalized.filter(
+      (condition): condition is string =>
+        !supportedAssessmentPhysicalConditions.includes(
+          condition as AssessmentPhysicalCondition,
+        ),
+    );
+    if (unsupported.length) {
+      throw new BadRequestException(
+        `${message}仅支持：${supportedAssessmentPhysicalConditions.join('、')}。`,
+      );
+    }
+    return normalized as AssessmentPhysicalCondition[];
+  }
+
+  private requireExplicitAssessmentPhysicalConditions(
+    value: unknown,
+    message: string,
+  ): AssessmentPhysicalCondition[] {
+    if (value === undefined) {
+      throw new BadRequestException(message);
+    }
+    const normalized = this.validateAssessmentPhysicalConditions(
+      value,
+      'physicalConditions 必须是字符串数组。',
+    );
+    if (!normalized.length) {
+      throw new BadRequestException(message);
+    }
+    const hasNoKnownLimitations = normalized.includes('no_known_limitations');
+    if (hasNoKnownLimitations && normalized.length !== 1) {
+      throw new BadRequestException(
+        '无特殊限制不能与轮椅或上肢活动不便同时选择。',
+      );
+    }
+    return normalized;
+  }
+
   private validateRequiredMetrics(value: unknown, requireNonEmpty = false) {
     if (!Array.isArray(value)) {
       throw new BadRequestException('requiredMetrics 必须是数组。');
@@ -12140,8 +13169,9 @@ export class AppService {
     }
 
     const mmse = this.requiredNumber(scoreSummary.mmse, 'MMSE 分数不能为空。');
-    if (mmse < 18) return 'high';
-    if (mmse < 24) return 'moderate';
+    const cdr = this.requiredNumber(scoreSummary.cdr, 'CDR 分数不能为空。');
+    if (mmse < 18 || cdr >= 2) return 'high';
+    if (mmse < 24 || cdr >= 1) return 'moderate';
     return 'low';
   }
 
@@ -12173,8 +13203,48 @@ export class AppService {
         : '低风险';
   }
 
-  private scoreGame(tags: string[], riskLevel: RiskLevel) {
-    const text = tags.join(',');
+  private filterGamesByPhysicalConditions(
+    games: GameContent[],
+    physicalConditions: AssessmentPhysicalCondition[] | undefined,
+  ) {
+    if (!physicalConditions?.length) return [];
+    if (physicalConditions.includes('no_known_limitations')) return games;
+    return games.filter((game) =>
+      physicalConditions.every((condition) =>
+        game.tags.some(
+          (tag) =>
+            this.normalizeGameMatchTerm(tag) ===
+            `safety:${condition}_compatible`,
+        ),
+      ),
+    );
+  }
+
+  private assertGamesSafeForPhysicalConditions(
+    games: GameContent[],
+    physicalConditions: AssessmentPhysicalCondition[],
+  ) {
+    const unsafeGames = games.filter(
+      (game) =>
+        this.filterGamesByPhysicalConditions([game], physicalConditions)
+          .length === 0,
+    );
+    if (unsafeGames.length) {
+      throw new BadRequestException(
+        `训练方案包含与患者身体状况不匹配的训练内容：${unsafeGames
+          .map((game) => game.name)
+          .join('、')}。`,
+      );
+    }
+  }
+
+  private scoreGame(
+    trainingTargets: string[],
+    tags: string[],
+    riskLevel: RiskLevel,
+    physicalConditions: string[] | undefined,
+  ) {
+    const text = [...trainingTargets, ...tags].join(',');
     let score = 50;
     if (this.includesAnyTrainingTag(text, ['近记忆', '记忆', 'memory'])) {
       score += 20;
@@ -12201,7 +13271,37 @@ export class AppService {
     ) {
       score += 10;
     }
+    score +=
+      this.countPhysicalConditionMatches(physicalConditions, trainingTargets) *
+      30;
+    score += this.countPhysicalConditionMatches(physicalConditions, tags) * 20;
     return score;
+  }
+
+  private countPhysicalConditionMatches(
+    physicalConditions: string[] | undefined,
+    gameAttributes: string[],
+  ) {
+    if (physicalConditions === undefined) return 0;
+    const normalizedAttributes = gameAttributes
+      .map((attribute) => this.normalizeGameMatchTerm(attribute))
+      .filter((attribute) => !attribute.startsWith('safety:'));
+    return physicalConditions.filter((condition) => {
+      const normalizedCondition = this.normalizeGameMatchTerm(condition);
+      return normalizedAttributes.some(
+        (attribute) =>
+          attribute === normalizedCondition ||
+          attribute.includes(normalizedCondition) ||
+          normalizedCondition.includes(attribute),
+      );
+    }).length;
+  }
+
+  private normalizeGameMatchTerm(value: string) {
+    return value
+      .trim()
+      .toLocaleLowerCase('zh-CN')
+      .replace(/[\s-]+/g, '_');
   }
 
   private includesAnyTrainingTag(text: string, tags: string[]) {
@@ -13136,6 +14236,16 @@ export class AppService {
     return this.validatePassword(value, `${label}初始密码`);
   }
 
+  private validateLoginPassword(value: unknown) {
+    if (typeof value !== 'string') {
+      throw new BadRequestException('登录密码必须是文本。');
+    }
+    if (value.length < 1 || value.length > 128) {
+      throw new BadRequestException('登录密码长度必须在 1 到 128 位之间。');
+    }
+    return value;
+  }
+
   private validatePassword(value: unknown, label: string) {
     try {
       return validateCredentialPassword(value);
@@ -13236,14 +14346,23 @@ export class AppService {
     return normalized;
   }
 
+  private validateAd8Informant(value: unknown) {
+    const informant = this.requiredJsonObject(
+      value,
+      'AD-8 必须记录信息提供者，不能跳过家属/照护者访谈来源。',
+    );
+    this.requiredString(informant.name, 'AD-8 信息提供者姓名不能为空。');
+    this.requiredString(informant.relation, 'AD-8 信息提供者关系不能为空。');
+  }
+
   private isAd8AssessmentType(assessmentType: string) {
     return assessmentType.trim().toUpperCase() === 'AD-8';
   }
 
-  private assertAllowedAssessmentSource(source: string) {
-    if (!allowedAssessmentSources.includes(source as never)) {
+  private assertProductionAiAssessmentSource(source: string) {
+    if (!this.isProductionAiAssessmentSource(source)) {
       throw new BadRequestException(
-        '评估来源必须为已确认的结构化录入或已接入生产 AI/语音来源。',
+        '正式评估来源必须为 production_ai_assessment 或 speech_ai_assessment。',
       );
     }
   }
@@ -13261,7 +14380,14 @@ export class AppService {
     runtime: ProviderOperationRuntimeMetadata,
     expectedBusinessObject?: { type: string; id: string; version: string },
   ): Promise<AcceptedProviderOperation | undefined> {
-    if (process.env.NODE_ENV !== 'production') {
+    // The customer Mac launcher uses local Secret values and therefore does
+    // not run with NODE_ENV=production. Real provider calls still need the
+    // same operation-ledger evidence in that environment so a returned AI
+    // draft can be bound to the formal assessment it creates.
+    if (
+      !this.providerOperationService &&
+      process.env.NODE_ENV !== 'production'
+    ) {
       return undefined;
     }
 
@@ -13830,6 +14956,7 @@ export class AppService {
     config: AiRuntimeConfig,
     assessmentType: string,
     transcript: string,
+    physicalConditions?: string[],
   ) {
     const responseBody = await this.requestMimoProviderJson(
       config.chatCompletionsEndpoint,
@@ -13845,18 +14972,34 @@ export class AppService {
         body: JSON.stringify({
           model: config.modelVersion,
           temperature: 0.1,
+          thinking: { type: 'disabled' },
+          max_completion_tokens: 1024,
           response_format: { type: 'json_object' },
           messages: [
             {
               role: 'system',
               content:
-                '你是认知康复平台的评估助手。只返回 JSON，不要返回 Markdown。JSON 必须包含 scoreSummary、analysisSummary、confidence。',
+                '你是认知康复平台的评估助手。只返回 JSON，不要返回 Markdown。用户 JSON 的 assessmentType 决定唯一允许使用的量表路径和 scoreSummary 字段：不得自行切换量表、混用其他路径字段或省略必填字段。JSON 必须包含 scoreSummary、analysisSummary、confidence；可包含 physicalConditions 字符串数组，用于列出评估中明确识别的身体状况。所有 scoreSummary 字段和 confidence 必须是 JSON number，不能使用文本或数字字符串。confidence 必须在 0 到 1（含边界）之间，例如 0.82；禁止使用 "high"、"medium"、"low" 或任何其他文本。若 assessmentType 为 AD-8，必须先将 8 个题项逐项相加，再将精确相等的整数写入 ad8Total；不一致的结果不得返回。',
             },
             {
               role: 'user',
               content: JSON.stringify({
                 assessmentType,
                 transcript,
+                ...(physicalConditions === undefined
+                  ? {}
+                  : { physicalConditions }),
+                responseContract: {
+                  assessmentType:
+                    '必须严格使用请求中的 assessmentType，不能自行切换量表路径。',
+                  scoreSummary:
+                    '必须且只能包含 requiredScoreSummaryFields 中列出的 JSON number 字段，并逐项满足 scoreRules。',
+                  analysisSummary: '中文评估摘要字符串。',
+                  confidence:
+                    '0 到 1（含边界）的 JSON number，例如 0.82；不得使用文本或字符串。',
+                  physicalConditions:
+                    '可选，且仅在有明确证据时提供字符串数组。',
+                },
                 ...this.assessmentModelScoreInstructions(assessmentType),
               }),
             },
@@ -13883,6 +15026,7 @@ export class AppService {
     assessmentType: string,
     previousMessages: Array<{ role: string; content: string }>,
     content: string,
+    physicalConditions?: string[],
   ) {
     const responseBody = await this.requestMimoProviderJson(
       config.chatCompletionsEndpoint,
@@ -13898,6 +15042,8 @@ export class AppService {
         body: JSON.stringify({
           model: config.modelVersion,
           temperature: 0.2,
+          thinking: { type: 'disabled' },
+          max_completion_tokens: 1024,
           response_format: { type: 'json_object' },
           messages: [
             {
@@ -13909,6 +15055,9 @@ export class AppService {
               role: 'user',
               content: JSON.stringify({
                 assessmentType,
+                ...(physicalConditions === undefined
+                  ? {}
+                  : { physicalConditions }),
                 previousTurns: previousMessages.map((message) => ({
                   role: message.role,
                   content: message.content,
@@ -13982,6 +15131,13 @@ export class AppService {
           itemTroubleAppointments: '0 or 1',
           itemDailyThinkingMemoryProblems: '0 or 1',
         },
+        validationChecklist: [
+          'assessmentType must remain AD-8',
+          'scoreSummary must contain exactly ad8Total plus the 8 named AD-8 item fields',
+          'every AD-8 item score must be the JSON number 0 or 1',
+          'calculate ad8Total as the arithmetic sum of the 8 item scores before returning',
+          'ad8Total must exactly equal that sum',
+        ],
       };
     }
 
@@ -14002,6 +15158,12 @@ export class AppService {
         executive: '0-100',
         language: '0-100',
       },
+      validationChecklist: [
+        'assessmentType must remain MMSE/CDR',
+        'scoreSummary must contain exactly mmse, cdr, memory, orientation, executive, and language',
+        'every scoreSummary field must be a JSON number within scoreRules',
+        'do not return any AD-8 field',
+      ],
     };
   }
 
@@ -14277,6 +15439,487 @@ export class AppService {
         '语音 AI 评估必须提供语音转写供应商调用证据。',
       );
       this.assertProductionSpeechCallEvidence(speech);
+    }
+  }
+
+  private async assertProductionAssessmentEvidenceBoundToProviderLedger(
+    patientId: string,
+    scoreSummary: Prisma.JsonObject,
+    rawInputSummary: Prisma.JsonObject,
+    transcript: string,
+    analysisSummary: string,
+    physicalConditions: AssessmentPhysicalCondition[],
+    source: string,
+  ) {
+    if (!this.isProductionAiAssessmentSource(source)) {
+      return;
+    }
+
+    const evidence = this.requiredJsonObject(
+      rawInputSummary.evidence,
+      '生产 AI/语音评估必须提供供应商调用证据。',
+    );
+    const aiEvidence = this.isSpeechAiAssessmentSource(source)
+      ? this.requiredJsonObject(
+          evidence.ai,
+          '语音 AI 评估必须提供 AI 供应商调用证据。',
+        )
+      : evidence;
+
+    const aiResult = await this.assertProviderLedgerEvidence(
+      patientId,
+      'assessment_draft',
+      aiEvidence,
+      'AI 评估供应商调用',
+    );
+    this.assertAiAssessmentLedgerResultMatches(
+      aiResult,
+      scoreSummary,
+      transcript,
+      analysisSummary,
+      physicalConditions,
+    );
+    if (this.isSpeechAiAssessmentSource(source)) {
+      const speechEvidence = this.requiredJsonObject(
+        evidence.speech,
+        '语音 AI 评估必须提供语音转写供应商调用证据。',
+      );
+      const speechResult = await this.assertProviderLedgerEvidence(
+        patientId,
+        'speech_transcript',
+        speechEvidence,
+        '语音转写供应商调用',
+      );
+      this.assertSpeechAssessmentLedgerResultMatches(
+        speechResult,
+        transcript,
+        physicalConditions,
+      );
+    }
+  }
+
+  private async assertProviderLedgerEvidence(
+    patientId: string,
+    operation: Extract<
+      ProviderOperationKind,
+      'assessment_draft' | 'speech_transcript'
+    >,
+    evidence: Prisma.JsonObject,
+    label: string,
+  ) {
+    const provider = this.requiredProductionEvidenceText(
+      evidence.provider,
+      `${label}供应商`,
+    );
+    const modelVersion = this.requiredProductionEvidenceText(
+      evidence.modelVersion,
+      `${label}模型版本`,
+    );
+    const callId = this.requiredProductionEvidenceText(
+      evidence.callId,
+      `${label}调用 ID`,
+    );
+    const endpointRef = this.assertProductionEvidenceHttpsRef(
+      evidence.endpointRef,
+      `${label} endpoint`,
+    );
+    const endpointHost = new URL(endpointRef).host;
+    const ledgerOperation = await this.prisma.providerOperation.findFirst({
+      where: {
+        patientId,
+        operation,
+        providerCallId: callId,
+        status: 'completed',
+      },
+      select: {
+        id: true,
+        provider: true,
+        modelVersion: true,
+        endpointHost: true,
+        responseCiphertext: true,
+        responseHmac: true,
+      },
+    });
+    if (!ledgerOperation) {
+      throw new BadRequestException(
+        `${label}未在供应商操作账本中找到已完成且匹配的调用记录。`,
+      );
+    }
+    if (
+      ledgerOperation.provider !== provider ||
+      ledgerOperation.modelVersion !== modelVersion ||
+      ledgerOperation.endpointHost !== endpointHost
+    ) {
+      throw new BadRequestException(
+        `${label}证据与供应商操作账本不匹配，不能入库。`,
+      );
+    }
+    return this.readProviderOperationResponseResult(ledgerOperation, label);
+  }
+
+  private readProviderOperationResponseResult(
+    ledgerOperation: {
+      id: string;
+      responseCiphertext: Prisma.JsonValue | null;
+      responseHmac: string | null;
+    },
+    label: string,
+  ) {
+    try {
+      const response = decryptSensitiveJson<unknown>(
+        ledgerOperation.responseCiphertext,
+        {
+          tableName: 'provider_operation',
+          recordId: ledgerOperation.id,
+          fieldName: 'responseCiphertext',
+        },
+        this.sensitiveEncryptionKey,
+      );
+      this.assertProviderOperationResponseHmac(
+        ledgerOperation.id,
+        response,
+        ledgerOperation.responseHmac,
+      );
+      const payload = this.requiredJsonObject(
+        response,
+        `${label}账本响应证据格式无效。`,
+      );
+      return this.requiredJsonObject(
+        payload.result,
+        `${label}账本响应缺少结构化结果。`,
+      );
+    } catch {
+      throw new BadRequestException(`${label}账本响应证据无法验证，不能入库。`);
+    }
+  }
+
+  private readProviderOperationRequest(
+    ledgerOperation: { id: string; requestCiphertext: Prisma.JsonValue },
+    label: string,
+  ) {
+    try {
+      return this.requiredJsonObject(
+        decryptSensitiveJson<unknown>(
+          ledgerOperation.requestCiphertext,
+          {
+            tableName: 'provider_operation',
+            recordId: ledgerOperation.id,
+            fieldName: 'requestCiphertext',
+          },
+          this.sensitiveEncryptionKey,
+        ),
+        `${label}账本请求证据格式无效。`,
+      );
+    } catch {
+      throw new BadRequestException(`${label}账本请求证据无法验证，不能恢复。`);
+    }
+  }
+
+  private recoverAiConversationAssessmentDraft(
+    ledgerOperation: {
+      id: string;
+      provider: string;
+      modelVersion: string;
+      endpointHost: string;
+      apiKeyRef: string;
+      promptVersion: string | null;
+      providerCallId: string | null;
+      responseCiphertext: Prisma.JsonValue | null;
+      responseHmac: string | null;
+    },
+    expectedRequest: {
+      assessmentType: string;
+      transcript: string;
+      physicalConditions: AssessmentPhysicalCondition[];
+    },
+    expectedPatientId: string,
+  ) {
+    const result = this.readProviderOperationResponseResult(
+      ledgerOperation,
+      'AI 评估草稿',
+    );
+    const patientId = this.requiredString(
+      result.patientId,
+      'AI 评估草稿账本响应缺少患者 ID。',
+    );
+    if (patientId !== expectedPatientId) {
+      throw new BadRequestException(
+        'AI 评估草稿账本响应的患者与当前会话不一致。',
+      );
+    }
+    const assessmentType = this.normalizeAiConversationAssessmentType(
+      this.requiredString(
+        result.assessmentType,
+        'AI 评估草稿账本响应缺少评估类型。',
+      ),
+    );
+    if (assessmentType !== expectedRequest.assessmentType) {
+      throw new BadRequestException(
+        'AI 评估草稿账本响应的评估类型与当前会话不一致。',
+      );
+    }
+    const status = this.requiredString(
+      result.status,
+      'AI 评估草稿账本响应缺少人工复核状态。',
+    );
+    if (status !== 'pending_human_review') {
+      throw new BadRequestException(
+        'AI 评估草稿账本响应不处于待人工复核状态，不能恢复。',
+      );
+    }
+    const scoreSummary = this.normalizeAssessmentScoreSummaryByType(
+      assessmentType,
+      this.requiredJsonObject(
+        result.scoreSummary,
+        'AI 评估草稿账本响应缺少结构化评分。',
+      ),
+    );
+    const calculatedRiskLevel = this.calculateRiskLevel(
+      assessmentType,
+      scoreSummary,
+    );
+    const riskLevel = this.requiredString(
+      result.riskLevel,
+      'AI 评估草稿账本响应缺少风险建议。',
+    );
+    if (riskLevel !== calculatedRiskLevel) {
+      throw new BadRequestException(
+        'AI 评估草稿账本响应的风险建议与结构化评分不一致。',
+      );
+    }
+    const rawInputSummary = this.requiredJsonObject(
+      result.rawInputSummary,
+      'AI 评估草稿账本响应缺少分析输入摘要。',
+    );
+    if (rawInputSummary.source !== 'production_ai_assessment') {
+      throw new BadRequestException('AI 评估草稿账本响应来源无效。');
+    }
+    const transcript = this.requiredString(
+      rawInputSummary.transcript,
+      'AI 评估草稿账本响应缺少对话转写。',
+    );
+    if (transcript !== expectedRequest.transcript) {
+      throw new BadRequestException(
+        'AI 评估草稿账本响应的对话转写与当前会话不一致。',
+      );
+    }
+    this.requiredString(
+      rawInputSummary.analysisSummary,
+      'AI 评估草稿账本响应缺少分析摘要。',
+    );
+    const confidence = this.requiredNumber(
+      rawInputSummary.confidence,
+      'AI 评估草稿账本响应缺少置信度。',
+    );
+    this.assertRange(
+      confidence,
+      0,
+      1,
+      'AI 评估草稿账本响应置信度必须在 0 到 1 之间。',
+    );
+    const physicalConditions = this.requireExplicitAssessmentPhysicalConditions(
+      result.physicalConditions,
+      'AI 评估草稿账本响应缺少身体状况。',
+    );
+    if (
+      !isDeepStrictEqual(physicalConditions, expectedRequest.physicalConditions)
+    ) {
+      throw new BadRequestException(
+        'AI 评估草稿账本响应的身体状况与当前会话不一致。',
+      );
+    }
+    const evidence = this.requiredJsonObject(
+      rawInputSummary.evidence,
+      'AI 评估草稿账本响应缺少供应商证据。',
+    );
+    const endpointRef = this.assertProductionEvidenceHttpsRef(
+      evidence.endpointRef,
+      'AI 评估草稿账本响应 endpoint',
+    );
+    if (
+      this.requiredProductionEvidenceText(
+        evidence.provider,
+        'AI 评估草稿供应商',
+      ) !== ledgerOperation.provider ||
+      this.requiredProductionEvidenceText(
+        evidence.modelVersion,
+        'AI 评估草稿模型版本',
+      ) !== ledgerOperation.modelVersion ||
+      new URL(endpointRef).host !== ledgerOperation.endpointHost ||
+      this.requiredProductionEvidenceText(
+        evidence.apiKeyRef,
+        'AI 评估草稿密钥引用',
+      ) !== ledgerOperation.apiKeyRef ||
+      this.requiredProductionEvidenceText(
+        evidence.promptVersion,
+        'AI 评估草稿提示词版本',
+      ) !== ledgerOperation.promptVersion ||
+      this.requiredProductionEvidenceText(
+        evidence.callId,
+        'AI 评估草稿调用 ID',
+      ) !== ledgerOperation.providerCallId
+    ) {
+      throw new BadRequestException(
+        'AI 评估草稿账本响应的供应商证据与调用记录不一致。',
+      );
+    }
+    return {
+      patientId,
+      assessmentType,
+      status: 'pending_human_review' as const,
+      riskLevel: calculatedRiskLevel,
+      scoreSummary,
+      rawInputSummary,
+      physicalConditions,
+    };
+  }
+
+  private buildAiConversationAssessmentDraftTranscript(input: {
+    assessmentType: string;
+    messages: Array<{ turnIndex: number; role: string; content: string }>;
+    sessionId: string;
+    summary: string;
+    physicalConditions: AssessmentPhysicalCondition[];
+  }) {
+    return [
+      `AI 对话会话：${input.sessionId}`,
+      `评估类型：${input.assessmentType}`,
+      `身体状况：${input.physicalConditions.join('、') || '未选择'}`,
+      `对话摘要：${input.summary}`,
+      '对话消息：',
+      ...input.messages.map(
+        (message) =>
+          `[${message.turnIndex}] ${message.role === 'assistant' ? 'AI' : '患者/录入者'}：${message.content}`,
+      ),
+    ].join('\n');
+  }
+
+  private assertProviderOperationResponseHmac(
+    operationId: string,
+    response: unknown,
+    responseHmac: string | null,
+  ) {
+    if (!responseHmac || !/^[0-9a-f]{64}$/.test(responseHmac)) {
+      throw new Error('Invalid provider operation response HMAC.');
+    }
+    const hmacKey = Buffer.from(
+      hkdfSync(
+        'sha256',
+        this.sensitiveEncryptionKey.key,
+        providerOperationResponseHmacSalt,
+        providerOperationResponseHmacInfo,
+        32,
+      ),
+    );
+    const expectedHmac = createProviderOperationResponseHmac(
+      operationId,
+      response,
+      hmacKey,
+    );
+    if (
+      !timingSafeEqual(
+        Buffer.from(responseHmac, 'hex'),
+        Buffer.from(expectedHmac, 'hex'),
+      )
+    ) {
+      throw new Error('Provider operation response HMAC mismatch.');
+    }
+  }
+
+  private assertAiAssessmentLedgerResultMatches(
+    result: Prisma.JsonObject,
+    scoreSummary: Prisma.JsonObject,
+    transcript: string,
+    analysisSummary: string,
+    physicalConditions: AssessmentPhysicalCondition[],
+  ) {
+    const ledgerScoreSummary = this.requiredJsonObject(
+      result.scoreSummary,
+      'AI 评估供应商调用账本响应缺少评分结果。',
+    );
+    const ledgerRawInputSummary = this.requiredJsonObject(
+      result.rawInputSummary,
+      'AI 评估供应商调用账本响应缺少分析结果。',
+    );
+    const ledgerTranscript = this.requiredString(
+      ledgerRawInputSummary.transcript,
+      'AI 评估供应商调用账本响应缺少转写内容。',
+    );
+    const ledgerAnalysisSummary = this.requiredString(
+      ledgerRawInputSummary.analysisSummary,
+      'AI 评估供应商调用账本响应缺少分析摘要。',
+    );
+    const ledgerPhysicalConditions =
+      this.requireExplicitAssessmentPhysicalConditions(
+        result.physicalConditions,
+        'AI 评估供应商调用账本响应缺少身体状况。',
+      );
+
+    this.assertProviderAssessmentFieldMatches(
+      scoreSummary,
+      ledgerScoreSummary,
+      'scoreSummary',
+      'AI 评估',
+    );
+    this.assertProviderAssessmentFieldMatches(
+      transcript,
+      ledgerTranscript,
+      'transcript',
+      'AI 评估',
+    );
+    this.assertProviderAssessmentFieldMatches(
+      analysisSummary,
+      ledgerAnalysisSummary,
+      'analysisSummary',
+      'AI 评估',
+    );
+    this.assertProviderAssessmentFieldMatches(
+      physicalConditions,
+      ledgerPhysicalConditions,
+      'physicalConditions',
+      'AI 评估',
+    );
+  }
+
+  private assertSpeechAssessmentLedgerResultMatches(
+    result: Prisma.JsonObject,
+    transcript: string,
+    physicalConditions: AssessmentPhysicalCondition[],
+  ) {
+    const ledgerTranscript = this.requiredString(
+      result.transcript,
+      '语音转写供应商调用账本响应缺少转写内容。',
+    );
+    const ledgerPhysicalConditions =
+      this.requireExplicitAssessmentPhysicalConditions(
+        result.physicalConditions,
+        '语音转写供应商调用账本响应缺少身体状况。',
+      );
+
+    this.assertProviderAssessmentFieldMatches(
+      transcript,
+      ledgerTranscript,
+      'transcript',
+      '语音转写',
+    );
+    this.assertProviderAssessmentFieldMatches(
+      physicalConditions,
+      ledgerPhysicalConditions,
+      'physicalConditions',
+      '语音转写',
+    );
+  }
+
+  private assertProviderAssessmentFieldMatches(
+    submittedValue: unknown,
+    ledgerValue: unknown,
+    fieldName: string,
+    sourceLabel: string,
+  ) {
+    if (!isDeepStrictEqual(submittedValue, ledgerValue)) {
+      throw new BadRequestException(
+        `正式评估 ${fieldName} 与${sourceLabel}供应商调用账本响应不一致，不能入库。`,
+      );
     }
   }
 
@@ -15076,6 +16719,9 @@ export class AppService {
         'exerciseIntensity',
         'abnormalFlag',
         'qualityFlag',
+        'resultStatus',
+        'reviewStatus',
+        'reviewConclusion',
         'startedAt',
       ],
       consents: [
@@ -15145,7 +16791,10 @@ export class AppService {
           decryptedPatient.caregiverName,
         ),
         maskedCaregiverPhone: this.maskPhone(decryptedPatient.caregiverPhone),
-        responsibleDoctor,
+        responsibleDoctor:
+          responsibleDoctor === '未绑定'
+            ? responsibleDoctor
+            : this.maskName(responsibleDoctor),
         status: patient.status,
         createdAt: patient.createdAt.toISOString(),
       };
@@ -15155,7 +16804,9 @@ export class AppService {
   private async exportAssessments(
     filters: ExportFilters,
   ): Promise<ExportRow[]> {
-    const where: Prisma.AssessmentRecordWhereInput = {};
+    const where: Prisma.AssessmentRecordWhereInput = {
+      status: 'doctor_confirmed',
+    };
     if (filters.patientId) where.patientId = filters.patientId;
     if (filters.dateFrom || filters.dateTo) {
       where.createdAt = {};
@@ -15163,7 +16814,13 @@ export class AppService {
       if (filters.dateTo) where.createdAt.lte = filters.dateTo;
     }
     if (filters.riskLevel) {
-      where.riskGrades = { some: { riskLevel: filters.riskLevel } };
+      where.riskGrades = {
+        some: {
+          riskLevel: filters.riskLevel,
+          confirmedById: { not: null },
+          confirmedAt: { not: null },
+        },
+      };
     }
 
     const assessments = await this.prisma.assessmentRecord.findMany({
@@ -15178,6 +16835,10 @@ export class AppService {
         createdAt: true,
         patient: { select: { id: true, identityEnvelope: true } },
         riskGrades: {
+          where: {
+            confirmedById: { not: null },
+            confirmedAt: { not: null },
+          },
           orderBy: { createdAt: 'desc' },
           take: 1,
           select: { riskLevel: true },
@@ -15221,7 +16882,9 @@ export class AppService {
   private async exportTrainingRecords(
     filters: ExportFilters,
   ): Promise<ExportRow[]> {
-    const where: Prisma.TrainingSessionWhereInput = {};
+    const where: Prisma.TrainingSessionWhereInput = {
+      sessionStatus: 'completed',
+    };
     if (filters.patientId) where.patientId = filters.patientId;
     if (filters.dateFrom || filters.dateTo) {
       where.startedAt = {};
@@ -15243,35 +16906,66 @@ export class AppService {
       where,
       orderBy: { startedAt: 'desc' },
       take: filters.limit,
-      include: {
+      select: {
+        id: true,
+        patientId: true,
+        sessionStatus: true,
+        syncStatus: true,
+        startedAt: true,
         patient: { select: { id: true, identityEnvelope: true } },
         gameContent: { select: { name: true } },
-        result: true,
+        result: {
+          select: {
+            score: true,
+            completionRate: true,
+            durationSeconds: true,
+            reactionTimeMs: true,
+            motionAccuracy: true,
+            exerciseIntensity: true,
+            abnormalFlag: true,
+            qualityFlag: true,
+            reviewStatus: true,
+            reviewConclusion: true,
+          },
+        },
       },
     });
 
-    return sessions.map((session) => ({
-      sessionExportId: this.exportStableId('session', session.id),
-      patientExportId: this.exportStableId('patient', session.patientId),
-      maskedPatientName: this.maskName(
-        this.decryptPatientIdentity(
-          session.patient.id,
-          session.patient.identityEnvelope,
-        ).name,
-      ),
-      gameName: session.gameContent.name,
-      sessionStatus: session.sessionStatus,
-      syncStatus: session.syncStatus,
-      score: session.result?.score ?? null,
-      completionRate: session.result?.completionRate ?? null,
-      durationSeconds: session.result?.durationSeconds ?? null,
-      reactionTimeMs: session.result?.reactionTimeMs ?? null,
-      motionAccuracy: session.result?.motionAccuracy ?? null,
-      exerciseIntensity: session.result?.exerciseIntensity ?? null,
-      abnormalFlag: session.result?.abnormalFlag ?? null,
-      qualityFlag: session.result?.qualityFlag ?? null,
-      startedAt: session.startedAt.toISOString(),
-    }));
+    return sessions.map((session) => {
+      const result = session.result;
+      const resultStatus = result
+        ? result.abnormalFlag
+          ? 'abnormal'
+          : result.qualityFlag === 'valid'
+            ? 'valid'
+            : 'review_required'
+        : null;
+      return {
+        sessionExportId: this.exportStableId('session', session.id),
+        patientExportId: this.exportStableId('patient', session.patientId),
+        maskedPatientName: this.maskName(
+          this.decryptPatientIdentity(
+            session.patient.id,
+            session.patient.identityEnvelope,
+          ).name,
+        ),
+        gameName: session.gameContent.name,
+        sessionStatus: session.sessionStatus,
+        syncStatus: session.syncStatus,
+        score: result?.score ?? null,
+        completionRate: result?.completionRate ?? null,
+        durationSeconds: result?.durationSeconds ?? null,
+        reactionTimeMs: result?.reactionTimeMs ?? null,
+        motionAccuracy: result?.motionAccuracy ?? null,
+        exerciseIntensity: result?.exerciseIntensity ?? null,
+        abnormalFlag: result?.abnormalFlag ?? null,
+        qualityFlag: result?.qualityFlag ?? null,
+        resultStatus,
+        reviewStatus: result?.reviewStatus ?? null,
+        reviewConclusion: result?.reviewConclusion ?? null,
+        startedAt: session.startedAt.toISOString(),
+      };
+    });
   }
 
   private async exportConsents(filters: ExportFilters): Promise<ExportRow[]> {

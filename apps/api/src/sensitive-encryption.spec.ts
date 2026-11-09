@@ -360,6 +360,59 @@ describe('API sensitive encryption boundary', () => {
         validateProductionRuntimeConfiguration(env, { secretDirectory }),
       ).not.toThrow();
 
+      const localPassword = 'unit-test-redis-password-32-bytes-long';
+      const localRedis = `redis://:${localPassword}@127.0.0.1:6379`;
+      for (const suffix of ['', '/0', '/2']) {
+        expect(() =>
+          validateProductionRuntimeConfiguration(
+            {
+              ...env,
+              DEPLOYMENT_MODE: 'single-host',
+              MIMO_KEY_VALUE_URL: localRedis + suffix,
+            },
+            { secretDirectory },
+          ),
+        ).not.toThrow();
+      }
+      // Local Redis requires explicit opt-in; the original production policy remains.
+      expect(() =>
+        validateProductionRuntimeConfiguration(
+          { ...env, MIMO_KEY_VALUE_URL: localRedis },
+          { secretDirectory },
+        ),
+      ).toThrow(/private Render Key Value host/);
+      for (const mode of ['', 'render', 'single-host ', 'unknown']) {
+        expect(() =>
+          validateProductionRuntimeConfiguration(
+            { ...env, DEPLOYMENT_MODE: mode },
+            { secretDirectory },
+          ),
+        ).toThrow(/DEPLOYMENT_MODE/);
+      }
+      for (const url of [
+        'redis://127.0.0.1:6379',
+        'redis://:short@127.0.0.1:6379',
+        `redis://:${localPassword}@localhost:6379`,
+        `redis://:${localPassword}@[::1]:6379`,
+        `redis://:${localPassword}@key-value.internal:6379`,
+        `redis://:${localPassword}@192.168.1.2:6379`,
+        `redis://:${localPassword}@127.0.0.1:6380`,
+        `redis://:${localPassword}@127.0.0.1`,
+        localRedis.replace('redis:', 'rediss:'),
+        `${localRedis}/-1`,
+        `${localRedis}/abc`,
+        `${localRedis}?host=remote.example`,
+        `${localRedis}#fragment`,
+        `redis://:%invalid@127.0.0.1:6379`,
+      ]) {
+        expect(() =>
+          validateProductionRuntimeConfiguration(
+            { ...env, DEPLOYMENT_MODE: 'single-host', MIMO_KEY_VALUE_URL: url },
+            { secretDirectory },
+          ),
+        ).toThrow(/MIMO_KEY_VALUE_URL/);
+      }
+
       for (const name of [
         'STT_MAX_DECODED_AUDIO_BYTES',
         'STT_MAX_DURATION_SECONDS',

@@ -1,0 +1,23 @@
+[Unit]
+Description=Rehabilitation platform Web
+After=network-online.target rehab-api.service
+
+[Service]
+User=rehab
+Group=rehab
+WorkingDirectory=/opt/rehab/current/apps/web
+Environment=NODE_ENV=production
+Environment=NEXT_PUBLIC_API_BASE_URL=https://hd117.com
+ExecStart=/usr/local/bin/node --max-old-space-size=256 node_modules/next/dist/bin/next start --hostname 127.0.0.1 --port 3000
+Restart=on-failure
+RestartSec=5
+MemoryMax=384M
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/rehab/current/apps/web/.next/cache
+
+[Install]
+WantedBy=multi-user.target

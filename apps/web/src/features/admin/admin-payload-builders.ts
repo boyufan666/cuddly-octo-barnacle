@@ -390,9 +390,6 @@ export function buildCollectionProtocolPayload(
 export function buildDataExportPayload(
   form: DataExportFormState,
 ): DataExportRequest {
-  if (form.dataset === "assessments" || form.dataset === "training-records") {
-    throw new Error("后台导出不提供患者级临床正文或精确指标。");
-  }
   const reason = form.reason.trim();
   if (!reason) {
     throw new Error("请填写导出原因，便于审计追溯。");

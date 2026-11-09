@@ -9,6 +9,7 @@ import type {
   ProviderOperationService,
 } from './provider-operation.service';
 import type { ProviderTelemetryService } from './provider-telemetry.service';
+import { encryptSensitiveJson } from './sensitive-encryption';
 
 const sensitiveEncryptionKey = {
   kid: 'secret-manager://rehab/unit-provider-operation-app-key',
@@ -70,6 +71,7 @@ function restoreEnvironment() {
 
 function acceptedOperation(
   status: AcceptedProviderOperation['status'] = 'accepted',
+  operation: AcceptedProviderOperation['operation'] = 'assessment_draft',
 ): AcceptedProviderOperation {
   const now = new Date('2026-07-22T12:00:00.000Z');
   return {
@@ -77,7 +79,7 @@ function acceptedOperation(
     organizationId: 'organization-id',
     patientId: 'patient-profile-id',
     actorUserId: doctorUser.id,
-    operation: 'assessment_draft',
+    operation,
     clientIdempotencyKey: 'assessment-request-000001',
     status,
     provider: 'xiaomi-mimo',
@@ -131,6 +133,14 @@ function createService(
           status: 'granted',
           revokedAt: null,
         }),
+    },
+    aiConversationSession: {
+      findUnique: jest.fn(),
+      updateMany: jest.fn(),
+    },
+    aiConversationMessage: {
+      findMany: jest.fn(),
+      create: jest.fn(),
     },
     auditLog: { create: jest.fn().mockResolvedValue({ id: 'audit-id' }) },
     $transaction: jest.fn(),
@@ -232,6 +242,7 @@ describe('AppService production provider operation ledger', () => {
       service.createAiAssessmentDraft(doctorUser, {
         patientId: 'patient-profile-id',
         assessmentType: 'MMSE/CDR',
+        physicalConditions: ['no_known_limitations'],
         transcript: '患者完成量表，回忆与执行功能表现下降。',
         idempotencyKey: 'assessment-request-000001',
       }),
@@ -263,6 +274,167 @@ describe('AppService production provider operation ledger', () => {
         operationId: '67e55044-10b1-426f-9247-bb680e5fe0c8',
         status: 'completed',
         providerCallId: 'mimo-provider-call-001',
+      }),
+    );
+  });
+
+  it('serializes conversation message timestamps before persisting provider evidence', async () => {
+    configureProductionAi();
+    const { prisma, providerOperations, service } = createService();
+    stubAiRuntimeConfig(service);
+
+    const sessionId = '03cf5f98-e250-4e42-87dd-27c40c5433a1';
+    const userMessageCreatedAt = new Date('2026-07-23T09:01:00.000Z');
+    const assistantMessageCreatedAt = new Date('2026-07-23T09:02:00.000Z');
+    prisma.aiConversationSession.findUnique.mockResolvedValue({
+      id: sessionId,
+      patientId: 'patient-profile-id',
+      assessmentType: 'MMSE/CDR',
+      status: 'active',
+      metadata: {
+        turnCount: 0,
+        assessmentContext: { physicalConditions: ['no_known_limitations'] },
+      },
+    });
+    prisma.aiConversationMessage.findMany.mockResolvedValue([]);
+    prisma.aiConversationSession.updateMany.mockResolvedValue({ count: 1 });
+    prisma.aiConversationMessage.create
+      .mockImplementationOnce(({ data }: { data: Record<string, unknown> }) =>
+        Promise.resolve({ ...data, createdAt: userMessageCreatedAt }),
+      )
+      .mockImplementationOnce(({ data }: { data: Record<string, unknown> }) =>
+        Promise.resolve({ ...data, createdAt: assistantMessageCreatedAt }),
+      );
+    providerOperations.createOrReadAccepted.mockResolvedValueOnce(
+      acceptedOperation('accepted', 'conversation_turn'),
+    );
+    providerOperations.reserve.mockResolvedValueOnce(
+      acceptedOperation('reserved', 'conversation_turn'),
+    );
+    providerOperations.markDispatching.mockResolvedValueOnce(
+      acceptedOperation('dispatching', 'conversation_turn'),
+    );
+    providerOperations.finalizeInTransaction.mockImplementationOnce(
+      (_tx: unknown, input: { operationId: string; response?: unknown }) => {
+        expect(input.response).toBeDefined();
+        expect(() =>
+          encryptSensitiveJson(
+            input.response,
+            {
+              tableName: 'provider_operation',
+              recordId: input.operationId,
+              fieldName: 'responseCiphertext',
+            },
+            sensitiveEncryptionKey,
+          ),
+        ).not.toThrow();
+
+        const result = (
+          input.response as {
+            result: {
+              userMessage: { createdAt: string };
+              assistantMessage: { createdAt: string };
+            };
+          }
+        ).result;
+        expect(result.userMessage.createdAt).toBe(
+          userMessageCreatedAt.toISOString(),
+        );
+        expect(result.assistantMessage.createdAt).toBe(
+          assistantMessageCreatedAt.toISOString(),
+        );
+        return acceptedOperation('completed', 'conversation_turn');
+      },
+    );
+    const fetchSpy = jest.spyOn(globalThis, 'fetch').mockResolvedValue(
+      providerJsonResponse({
+        id: 'mimo-conversation-call-001',
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                reply: '请继续描述最近一周的睡眠、用药和日常活动情况。',
+                evidence: { focus: ['memory'] },
+              }),
+            },
+          },
+        ],
+      }),
+    );
+
+    await expect(
+      service.appendAiConversationMessage(doctorUser, sessionId, {
+        content: '最近经常忘记日期。',
+        idempotencyKey: 'conversation-request-000001',
+      }),
+    ).resolves.toMatchObject({
+      sessionId,
+      userMessage: { createdAt: userMessageCreatedAt },
+      assistantMessage: { createdAt: assistantMessageCreatedAt },
+    });
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(providerOperations.finalizeInTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it('records the provider operation ledger in the local customer runtime', async () => {
+    configureProductionAi();
+    process.env.NODE_ENV = 'development';
+    const { providerOperations, reserve, service } = createService();
+    stubAiRuntimeConfig(service);
+    const fetchSpy = jest.spyOn(globalThis, 'fetch').mockResolvedValue(
+      providerJsonResponse({
+        id: 'mimo-local-provider-call-001',
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                scoreSummary: {
+                  mmse: 22,
+                  cdr: 1,
+                  memory: 48,
+                  orientation: 58,
+                  executive: 52,
+                  language: 73,
+                },
+                analysisSummary: '建议医生复核本地 AI 评估草稿。',
+                confidence: 0.84,
+              }),
+            },
+          },
+        ],
+      }),
+    );
+
+    await expect(
+      service.createAiAssessmentDraft(doctorUser, {
+        patientId: 'patient-profile-id',
+        assessmentType: 'MMSE/CDR',
+        physicalConditions: ['no_known_limitations'],
+        transcript: '患者完成本地演示评估，回忆与执行功能表现下降。',
+        idempotencyKey: 'local-assessment-request-000001',
+      }),
+    ).resolves.toMatchObject({
+      patientId: 'patient-profile-id',
+      status: 'pending_human_review',
+    });
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(reserve).not.toHaveBeenCalled();
+    expect(providerOperations.createOrReadAccepted).toHaveBeenCalledTimes(1);
+    expect(providerOperations.reserve).toHaveBeenCalledWith(
+      '67e55044-10b1-426f-9247-bb680e5fe0c8',
+    );
+    expect(providerOperations.markDispatching).toHaveBeenCalledWith(
+      '67e55044-10b1-426f-9247-bb680e5fe0c8',
+      expect.any(Date),
+    );
+    expect(providerOperations.finalizeInTransaction).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        operationId: '67e55044-10b1-426f-9247-bb680e5fe0c8',
+        status: 'completed',
+        providerCallId: 'mimo-local-provider-call-001',
       }),
     );
   });
@@ -302,6 +474,7 @@ describe('AppService production provider operation ledger', () => {
       service.createAiAssessmentDraft(doctorUser, {
         patientId: 'patient-profile-id',
         assessmentType: 'MMSE/CDR',
+        physicalConditions: ['no_known_limitations'],
         transcript: '患者完成量表，回忆与执行功能表现下降。',
         idempotencyKey: 'assessment-request-000001',
       }),
@@ -369,6 +542,8 @@ describe('AppService production provider operation ledger', () => {
     await expect(
       service.createAiAssessmentDraft(doctorUser, {
         patientId: 'patient-profile-id',
+        assessmentType: 'MMSE/CDR',
+        physicalConditions: ['no_known_limitations'],
         transcript: '患者完成量表，回忆与执行功能表现下降。',
         idempotencyKey: 'assessment-request-000001',
       }),
@@ -394,6 +569,8 @@ describe('AppService production provider operation ledger', () => {
     await expect(
       service.createAiAssessmentDraft(doctorUser, {
         patientId: 'patient-profile-id',
+        assessmentType: 'MMSE/CDR',
+        physicalConditions: ['no_known_limitations'],
         transcript: '患者完成量表，回忆与执行功能表现下降。',
         idempotencyKey: 'assessment-request-000001',
       }),
@@ -416,6 +593,8 @@ describe('AppService production provider operation ledger', () => {
     await expect(
       service.createAiAssessmentDraft(doctorUser, {
         patientId: 'patient-profile-id',
+        assessmentType: 'MMSE/CDR',
+        physicalConditions: ['no_known_limitations'],
         transcript: '患者完成量表，回忆与执行功能表现下降。',
         idempotencyKey: 'short',
       }),

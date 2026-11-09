@@ -247,14 +247,14 @@ test("seed does not append duplicate mutable clinical records", async () => {
     "utf8",
   );
   const forbiddenCreatePatterns = [
-    /prisma\.consentRecord\.create\(/,
-    /prisma\.assessmentRecord\.create\(/,
-    /prisma\.riskGradeRecord\.create\(/,
-    /prisma\.aiAnalysisRecord\.create\(/,
-    /prisma\.rehabPlan\.create\(/,
-    /prisma\.rehabPlanItem\.create\(/,
-    /prisma\.planAdjustmentRecord\.create\(/,
-    /prisma\.auditLog\.createMany\(/,
+    /database\.consentRecord\.create\(/,
+    /database\.assessmentRecord\.create\(/,
+    /database\.riskGradeRecord\.create\(/,
+    /database\.aiAnalysisRecord\.create\(/,
+    /database\.rehabPlan\.create\(/,
+    /database\.rehabPlanItem\.create\(/,
+    /database\.planAdjustmentRecord\.create\(/,
+    /database\.auditLog\.createMany\(/,
   ];
 
   for (const pattern of forbiddenCreatePatterns) {
@@ -268,14 +268,71 @@ test("seed does not append duplicate mutable clinical records", async () => {
   assert.match(seedSource, /SEED-/);
 });
 
+test("customer initialization keeps the formal game library behind an empty-database boundary", async () => {
+  const seedSource = await readFile(
+    join(rootDir, "packages/db/prisma/seed.ts"),
+    "utf8",
+  );
+  const initializeSeedBlock = extractFunctionBlock(
+    seedSource,
+    "async function initializeSeed(",
+  );
+  const mainBlock = extractFunctionBlock(seedSource, "async function main()");
+  const mainOnlyGames = initializeSeedBlock.indexOf(
+    '...(config.mode === "main"',
+  );
+  const customerHistoryGuard = initializeSeedBlock.indexOf(
+    'if (config.mode === "customer") return;',
+  );
+  const assessmentHistory = initializeSeedBlock.indexOf(
+    "const assessmentResultPayload",
+  );
+
+  assert.notEqual(mainOnlyGames, -1, "missing main-only game boundary");
+  for (const code of formalPlanVarietyGameCodes) {
+    const gamePosition = initializeSeedBlock.indexOf(
+      `where: { code: "${code}" }`,
+    );
+    assert.ok(
+      gamePosition > 0 && gamePosition < mainOnlyGames,
+      `${code} must remain in the formal library shared with customer seed`,
+    );
+  }
+  for (const code of ["memory_basket", "path_treasure"]) {
+    const gamePosition = initializeSeedBlock.indexOf(
+      `where: { code: "${code}" }`,
+    );
+    assert.ok(
+      gamePosition > mainOnlyGames && gamePosition < customerHistoryGuard,
+      `${code} must remain main-only seed content`,
+    );
+  }
+  assert.ok(
+    customerHistoryGuard > mainOnlyGames &&
+      customerHistoryGuard < assessmentHistory,
+    "customer seed must stop before clinical regression history",
+  );
+
+  const emptyDatabaseCheck = mainBlock.indexOf(
+    "await assertCustomerDatabaseIsEmpty(database);",
+  );
+  const customerInitialization = mainBlock.indexOf(
+    "await initializeSeed(database, config, encryptionKey);",
+  );
+  assert.ok(
+    emptyDatabaseCheck > 0 && emptyDatabaseCheck < customerInitialization,
+    "customer seed must verify an empty database before initialization",
+  );
+});
+
 function extractGameUpsertBlock(seedSource, code) {
   const startMarker = `where: { code: "${code}" }`;
   const start = seedSource.indexOf(startMarker);
   assert.notEqual(start, -1, `seed is missing ${code}`);
-  const nextUpsert = seedSource.indexOf("prisma.gameContent.upsert({", start + 1);
-  return nextUpsert === -1
-    ? seedSource.slice(start)
-    : seedSource.slice(start, nextUpsert);
+  const upsertMarker = "database.gameContent.upsert({";
+  const upsertStart = seedSource.lastIndexOf(upsertMarker, start);
+  assert.notEqual(upsertStart, -1, `seed is missing the ${code} upsert helper`);
+  return extractBracedBlock(seedSource, seedSource.indexOf("{", upsertStart));
 }
 
 function extractConstObject(source, name) {
@@ -299,6 +356,17 @@ function extractObjectPropertyBlock(source, propertyName) {
   const start = source.indexOf(marker);
   assert.notEqual(start, -1, `missing object property: ${propertyName}`);
   const bodyStart = source.indexOf("{", start);
+  return extractBracedBlock(source, bodyStart);
+}
+
+function extractFunctionBlock(source, signature) {
+  const start = source.indexOf(signature);
+  assert.notEqual(start, -1, `missing function: ${signature}`);
+  return extractBracedBlock(source, source.indexOf("{", start));
+}
+
+function extractBracedBlock(source, bodyStart) {
+  assert.notEqual(bodyStart, -1, "missing block opening brace");
   let depth = 0;
   for (let index = bodyStart; index < source.length; index += 1) {
     const char = source[index];
@@ -310,7 +378,7 @@ function extractObjectPropertyBlock(source, propertyName) {
       }
     }
   }
-  assert.fail(`unterminated object property: ${propertyName}`);
+  assert.fail("unterminated source block");
 }
 
 function countProperty(source, propertyName) {

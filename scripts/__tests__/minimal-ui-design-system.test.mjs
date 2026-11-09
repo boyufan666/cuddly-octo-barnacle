@@ -163,7 +163,7 @@ test("shared components support compact premium surfaces", async () => {
   }
 });
 
-test("dynamic patient-facing text wraps in dense patient surfaces", async () => {
+test("dynamic patient-facing text and physician feedback wrap in dense patient surfaces", async () => {
   const assessmentSource = await readFile(
     join(rootDir, "apps/web/src/features/patient/AssessmentDialoguePage.tsx"),
     "utf8",
@@ -217,8 +217,30 @@ test("dynamic patient-facing text wraps in dense patient surfaces", async () => 
   );
   assert.match(
     resultSource,
-    /<p className="[^"]*break-words[^"]*"[^>]*>\{value\}<\/p>/,
+    /<p className="[^"]*break-words[^"]*"[^>]*>\s*\{value\}\s*<\/p>/,
     "training result fact values must wrap long dynamic values",
+  );
+  assert.match(
+    resultSource,
+    /<p className="[^"]*whitespace-pre-wrap[^"]*break-words[^"]*"[^>]*>\s*\{doctorReview\.reviewNote\}/,
+    "patient-visible physician feedback must preserve line breaks and wrap long review notes",
+  );
+  for (const conclusion of [
+    "accepted_valid",
+    "confirmed_abnormal",
+    "excluded_from_analysis",
+    "needs_retrain",
+  ]) {
+    assert.match(
+      resultSource,
+      new RegExp(`case "${conclusion}"`),
+      `patient feedback must explicitly map ${conclusion}`,
+    );
+  }
+  assert.doesNotMatch(
+    resultSource,
+    /\{(?:result|doctorReview)\.(?:reviewedByUserId|rawPayloadHash|qualityReasons|gameRunId)\}/,
+    "patient feedback must not render physician ids or internal training evidence",
   );
 });
 

@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import {
   canSubmitDesensitizedExport,
   exportDatasetOptions,
@@ -22,7 +23,7 @@ test("operator export options hide audit logs without audit read permission", ()
 
   assert.deepEqual(
     options.map(([dataset]) => dataset),
-    ["patients", "consents"],
+    ["patients", "assessments", "training-records", "consents"],
   );
 });
 
@@ -31,7 +32,7 @@ test("audited export options include audit logs only for audit readers", () => {
 
   assert.deepEqual(
     options.map(([dataset]) => dataset),
-    ["patients", "consents", "audit-logs"],
+    ["patients", "assessments", "training-records", "consents", "audit-logs"],
   );
 });
 
@@ -62,6 +63,14 @@ test("desensitized export submit requires data permission available dataset and 
   );
   assert.equal(
     canSubmitDesensitizedExport({
+      canExportAuditLogs: true,
+      canExportData: true,
+      form: { ...baseForm, reason: "abc" },
+    }),
+    false,
+  );
+  assert.equal(
+    canSubmitDesensitizedExport({
       canExportAuditLogs: false,
       canExportData: true,
       form: baseForm,
@@ -78,26 +87,55 @@ test("desensitized export submit requires data permission available dataset and 
         canExportData: true,
         form,
       }),
-      false,
+      true,
     );
   }
 });
 
-test("export payload builder rejects clinical datasets", () => {
-  for (const form of [
-    { ...baseForm, dataset: "assessments" as const },
-    { ...baseForm, dataset: "training-records" as const },
-  ]) {
-    assert.throws(
-      () => buildDataExportPayload(form),
-      /不提供患者级临床正文或精确指标/,
-    );
+test("admin export entry is independent from audit-read permission", async () => {
+  const source = await readFile(
+    new URL("./AdminOverviewPage.tsx", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(source, /\{permissions\.canExportData \? \(/);
+  assert.match(
+    source,
+    /canExportAuditLogs=\{permissions\.canReadAuditLogs\}[\s\S]*canExportData=\{permissions\.canExportData\}/,
+  );
+  assert.doesNotMatch(
+    source,
+    /permissions\.canExportData && permissions\.canReadAuditLogs \? \([\s\S]*DesensitizedExportPanel/,
+  );
+});
+
+test("export payload builder allows desensitized assessment and training datasets", () => {
+  for (const dataset of ["assessments", "training-records"] as const) {
+    const formWithUnapprovedRuntimeFields = {
+      ...baseForm,
+      dataset,
+      dateFrom: "2026-07-17T08:30",
+      dateTo: "2026-07-17T09:30",
+      limit: "25",
+      patientId: "  patient-id  ",
+      clinicalText: "raw clinical narrative",
+      provider: "internal-ai-provider",
+      callId: "provider-call-id",
+      endpoint: "https://provider.invalid",
+      rawTrainingPayload: { samples: [1, 2, 3] },
+      deviceInternalFields: { serialNumber: "device-serial" },
+    };
+
+    assert.deepEqual(buildDataExportPayload(formWithUnapprovedRuntimeFields), {
+      dataset,
+      format: "csv",
+      reason: "clinical review",
+      dateFrom: new Date("2026-07-17T08:30").toISOString(),
+      dateTo: new Date("2026-07-17T09:30").toISOString(),
+      patientId: "patient-id",
+      limit: 25,
+    });
   }
-  assert.deepEqual(buildDataExportPayload(baseForm), {
-    dataset: "patients",
-    format: "csv",
-    reason: "clinical review",
-  });
 });
 
 test("export payload builder canonicalizes every supplied field before transport", () => {
@@ -119,5 +157,33 @@ test("export payload builder canonicalizes every supplied field before transport
       patientId: "patient-id",
       limit: 1,
     },
+  );
+});
+
+test("export payload builder preserves purpose date and limit validation", () => {
+  assert.throws(
+    () => buildDataExportPayload({ ...baseForm, reason: "  " }),
+    /请填写导出原因/,
+  );
+  assert.throws(
+    () => buildDataExportPayload({ ...baseForm, limit: "0" }),
+    /导出条数必须是 1 到 500 的整数/,
+  );
+  assert.throws(
+    () => buildDataExportPayload({ ...baseForm, limit: "501" }),
+    /导出条数必须是 1 到 500 的整数/,
+  );
+  assert.throws(
+    () => buildDataExportPayload({ ...baseForm, dateFrom: "not-a-date" }),
+    /开始时间格式无效/,
+  );
+  assert.throws(
+    () =>
+      buildDataExportPayload({
+        ...baseForm,
+        dateFrom: "2026-07-18T08:30",
+        dateTo: "2026-07-17T09:30",
+      }),
+    /导出开始时间不能晚于结束时间/,
   );
 });

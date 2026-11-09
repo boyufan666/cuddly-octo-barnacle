@@ -37,7 +37,7 @@ test.before(() => {
 });
 
 test("abort requires a bounded reason and a second explicit confirmation", async () => {
-  const browser = await chromium.launch({ channel: "chrome", headless: true });
+  const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
   page.setDefaultTimeout(2_000);
   try {
@@ -74,7 +74,7 @@ test("abort requires a bounded reason and a second explicit confirmation", async
 });
 
 test("successful abort clears the local reason before a future active session", async () => {
-  const browser = await chromium.launch({ channel: "chrome", headless: true });
+  const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
   page.setDefaultTimeout(2_000);
   try {

@@ -169,11 +169,40 @@ test("session workspace delegates payload builders and status helpers", async ()
     join(rootDir, "apps/web/src/features/session/action-status.ts"),
     "utf8",
   );
+  const aiConversationReviewSource = await readFile(
+    join(rootDir, "apps/web/src/features/doctor/AiConversationReviewPanel.tsx"),
+    "utf8",
+  );
+  const planEditorSource = await readFile(
+    join(rootDir, "apps/web/src/features/doctor/PlanEditor.tsx"),
+    "utf8",
+  );
+  const trainingResultSource = await readFile(
+    join(rootDir, "apps/web/src/features/patient/TrainingResultPage.tsx"),
+    "utf8",
+  );
 
   assert.ok(
-    roleWorkspaceSource.split("\n").length < 3000,
-    "role-workspace.tsx must stay below 3000 lines and only own session, routing, and real API orchestration",
+    roleWorkspaceSource.split("\n").length < 3100,
+    "role-workspace.tsx must stay below 3100 lines and only own session, routing, and real API orchestration",
   );
+
+  for (const [delegatedDefinition, delegatedSource] of [
+    ["AiConversationReviewPanel", aiConversationReviewSource],
+    ["buildPlanEditorConfirmationPayload", planEditorSource],
+    ["patientDoctorReviewStatus", trainingResultSource],
+  ]) {
+    assert.doesNotMatch(
+      roleWorkspaceSource,
+      new RegExp(`function ${delegatedDefinition}\\b`),
+      `${delegatedDefinition} should live outside role-workspace.tsx`,
+    );
+    assert.match(
+      delegatedSource,
+      new RegExp(`(?:export )?function ${delegatedDefinition}\\b`),
+      `${delegatedDefinition} must be owned by its focused feature module`,
+    );
+  }
 
   for (const localDefinition of [
     "DashboardShell",

@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { Test } from '@nestjs/testing';
-import { createHash } from 'node:crypto';
+import { createHash, hkdfSync } from 'node:crypto';
 import { AppService } from './app.service';
 import { SENSITIVE_ENCRYPTION_KEY } from './config';
 import { hashCredential } from './credential-security';
@@ -23,6 +23,7 @@ import {
   ProviderResponseRejectedException,
   ProviderUnavailableException,
 } from './provider-outcome';
+import { createProviderOperationResponseHmac } from './provider-operation';
 
 type SubmitTrainingResultLike = {
   score: number;
@@ -110,6 +111,37 @@ const testSensitiveEncryptionKey: SensitiveEncryptionKey = {
   kid: 'secret-manager://rehab/unit-sensitive-key',
   key: Buffer.alloc(32, 11),
 };
+
+function createProviderOperationResponseEvidence(
+  operationId: string,
+  response: unknown,
+) {
+  const hmacKey = Buffer.from(
+    hkdfSync(
+      'sha256',
+      testSensitiveEncryptionKey.key,
+      Buffer.from('rehab-provider-operation-hmac-v1', 'utf8'),
+      Buffer.from('canonical-response-hmac', 'utf8'),
+      32,
+    ),
+  );
+  return {
+    responseCiphertext: encryptSensitiveJson(
+      response,
+      {
+        tableName: 'provider_operation',
+        recordId: operationId,
+        fieldName: 'responseCiphertext',
+      },
+      testSensitiveEncryptionKey,
+    ),
+    responseHmac: createProviderOperationResponseHmac(
+      operationId,
+      response,
+      hmacKey,
+    ),
+  };
+}
 
 const adminUser: RequestUser = {
   id: 'admin-user-id',
@@ -201,6 +233,76 @@ const auditorAdminUser: RequestUser = {
     },
   ],
 };
+
+describe('AppService caregiver access context', () => {
+  it('includes only caregiver bindings whose related object is a patient', async () => {
+    const caregiverRelationFindMany = jest.fn().mockResolvedValue([
+      {
+        patientId: 'patient-profile-id',
+        scope: { reminders: true, progress: false },
+      },
+    ]);
+    const service = new AppService(
+      {
+        caregiverRelation: { findMany: caregiverRelationFindMany },
+      } as unknown as PrismaService,
+      testSensitiveEncryptionKey,
+    );
+    const result = await service.me({
+      ...caregiverUser,
+      roles: [
+        {
+          roleCode: 'caregiver',
+          relatedObjectType: 'pending_caregiver',
+          relatedObjectId: 'caregiver-user-id',
+        },
+        {
+          roleCode: 'caregiver',
+          relatedObjectType: 'patient',
+          relatedObjectId: 'patient-profile-id',
+        },
+      ],
+    });
+
+    expect(result.context.caregiverPatientIds).toEqual(['patient-profile-id']);
+    expect(result.context.caregiverScopes).toEqual({
+      'patient-profile-id': { reminders: true, progress: false },
+    });
+    expect(caregiverRelationFindMany).toHaveBeenCalledWith({
+      where: {
+        caregiverUserId: 'caregiver-user-id',
+        patientId: { in: ['patient-profile-id'] },
+        authorizationStatus: 'active',
+        revokedAt: null,
+      },
+      select: { patientId: true, scope: true },
+    });
+  });
+
+  it('does not query patient authorization for a pending caregiver binding', async () => {
+    const caregiverRelationFindMany = jest.fn();
+    const service = new AppService(
+      {
+        caregiverRelation: { findMany: caregiverRelationFindMany },
+      } as unknown as PrismaService,
+      testSensitiveEncryptionKey,
+    );
+    const result = await service.me({
+      ...caregiverUser,
+      roles: [
+        {
+          roleCode: 'caregiver',
+          relatedObjectType: 'pending_caregiver',
+          relatedObjectId: 'caregiver-user-id',
+        },
+      ],
+    });
+
+    expect(result.context.caregiverPatientIds).toEqual([]);
+    expect(result.context.caregiverScopes).toEqual({});
+    expect(caregiverRelationFindMany).not.toHaveBeenCalled();
+  });
+});
 
 describe('AppService sensitive encryption key injection', () => {
   it('fails construction when the sensitive encryption key provider is absent', async () => {
@@ -1082,6 +1184,129 @@ describe('AppService encrypted identity reads', () => {
     );
     expect(query).not.toContain('displayName');
     expect(query).not.toContain('mobilePhone":true');
+  });
+
+  it('returns only public formal training game metadata in patient rehab plans', async () => {
+    const actor: RequestUser = {
+      ...patientUser,
+      roles: [
+        {
+          roleCode: 'patient',
+          relatedObjectType: 'patient',
+          relatedObjectId: patientId,
+        },
+      ],
+    };
+    const publicGameContent = {
+      id: 'game-id',
+      code: 'rhythm_reach_3d',
+      name: '节奏触达',
+      trainingTargets: ['上肢触达', '反应速度'],
+      tags: ['上肢', '反应'],
+      defaultDuration: 10,
+      defaultDifficulty: '基础',
+      runtimeType: 'unity_webgl',
+      manifestUrl: '/unity/rhythm_reach_3d/0.1.0/manifest.json',
+      buildBaseUrl: '/unity/rhythm_reach_3d/0.1.0',
+      gameVersion: '0.1.0',
+      bridgeProtocolVersion: '1.0.0',
+      buildStatus: 'released',
+      releaseChannel: 'production',
+      supportsCamera: true,
+      supportsMicrophone: false,
+      supportedInputModes: ['camera_pose'],
+      requiredMetrics: [
+        { metricType: 'reaction_time_ms', unit: 'ms' },
+        { metricType: 'target_hit_rate', unit: 'ratio' },
+        { metricType: 'arm_raise_accuracy', unit: 'ratio' },
+        { metricType: 'duration_seconds', unit: 'seconds' },
+        { metricType: 'difficulty_level', unit: 'level' },
+      ],
+      difficultyPolicy: { source: 'clinician_approved_plan' },
+      dynamicDifficultyTriggers: ['accuracy_low'],
+      requiredPermissions: ['camera_capture'],
+      resultSchema: { schemaVersion: '1.0.0' },
+      publishedStatus: 'published',
+      status: 'active',
+      runtimeConfigSnapshot: { providerPayload: 'technical-evidence' },
+      artifactChecksums: { loader: 'sha256-secret-evidence' },
+      signingKey: 'must-not-be-returned',
+    };
+    const prisma = {
+      patientProfile: {
+        findUnique: jest.fn().mockResolvedValue({
+          ...patientDetailFixture(null),
+          rehabPlans: [
+            {
+              id: 'plan-id',
+              patientId,
+              doctorId: 'doctor-profile-id',
+              planName: '上肢训练计划',
+              status: 'active',
+              isCurrent: true,
+              weekFrequency: 4,
+              dailyDuration: 20,
+              difficultyLadder: { internal: 'clinical-evidence' },
+              recommendationReason: '按医嘱完成训练',
+              confirmedAt: new Date('2026-08-24T08:00:00.000Z'),
+              createdAt: new Date('2026-08-23T08:00:00.000Z'),
+              updatedAt: new Date('2026-08-24T08:00:00.000Z'),
+              items: [
+                {
+                  id: 'plan-item-id',
+                  rehabPlanId: 'plan-id',
+                  gameContentId: 'game-id',
+                  sequence: 1,
+                  durationMinutes: 10,
+                  frequencyPerWeek: 4,
+                  difficulty: '基础',
+                  adaptiveRules: { internal: 'technical-evidence' },
+                  gameContent: publicGameContent,
+                },
+              ],
+            },
+          ],
+        }),
+      },
+      auditLog: { create: jest.fn() },
+    };
+    const service = new AppService(
+      prisma as unknown as PrismaService,
+      testSensitiveEncryptionKey,
+    );
+
+    const result = await service.getPatient(actor, patientId);
+    const gameContent = result.rehabPlans[0].items[0].gameContent;
+
+    expect(gameContent).toEqual({
+      id: publicGameContent.id,
+      code: publicGameContent.code,
+      name: publicGameContent.name,
+      trainingTargets: publicGameContent.trainingTargets,
+      tags: publicGameContent.tags,
+      defaultDuration: publicGameContent.defaultDuration,
+      defaultDifficulty: publicGameContent.defaultDifficulty,
+      runtimeType: publicGameContent.runtimeType,
+      manifestUrl: publicGameContent.manifestUrl,
+      buildBaseUrl: publicGameContent.buildBaseUrl,
+      gameVersion: publicGameContent.gameVersion,
+      bridgeProtocolVersion: publicGameContent.bridgeProtocolVersion,
+      buildStatus: publicGameContent.buildStatus,
+      releaseChannel: publicGameContent.releaseChannel,
+      supportsCamera: publicGameContent.supportsCamera,
+      supportsMicrophone: publicGameContent.supportsMicrophone,
+      supportedInputModes: publicGameContent.supportedInputModes,
+      requiredMetrics: publicGameContent.requiredMetrics,
+      difficultyPolicy: publicGameContent.difficultyPolicy,
+      dynamicDifficultyTriggers: publicGameContent.dynamicDifficultyTriggers,
+      requiredPermissions: publicGameContent.requiredPermissions,
+      resultSchema: publicGameContent.resultSchema,
+      publishedStatus: publicGameContent.publishedStatus,
+      status: publicGameContent.status,
+    });
+    expect(JSON.stringify(gameContent)).not.toMatch(
+      /runtimeConfigSnapshot|artifactChecksums|signingKey|technical-evidence|sha256-secret-evidence|must-not-be-returned/,
+    );
   });
 
   it('returns explicit null optional contact fields when patient detail has no contact envelope', async () => {
@@ -4741,7 +4966,10 @@ describe('AppService training write permissions', () => {
     requiredConsentTypes: ['privacy_policy', 'camera_capture'],
     requiredInputModes: ['camera_pose'],
     requiredMetrics: unityGameContent.requiredMetrics,
-    conditionRules: { requireUpperBodyInFrame: true },
+    conditionRules: {
+      physicalConditions: ['no_known_limitations'],
+      riskLevels: ['low', 'moderate', 'high'],
+    },
     samplingConfig: { sampleRateHz: 30 },
     qualityGate: { minConfidence: 0.8 },
     status: 'active',
@@ -4819,12 +5047,33 @@ describe('AppService training write permissions', () => {
           rehabPlanId: 'plan-id',
           gameContentId: 'game-id',
           sequence: 1,
+          gameContent: unityGameContent,
         },
       ],
     };
     prisma.patientProfile.findUnique.mockResolvedValue({
       id: 'patient-profile-id',
       responsibleDoctorId: 'doctor-profile-id',
+    });
+    prisma.riskGradeRecord.findFirst.mockResolvedValue({
+      confirmedById: 'doctor-user-id',
+      confirmedAt: new Date('2026-06-10T07:30:00.000Z'),
+      assessment: {
+        id: '283713da-322c-462f-9784-42da468f3dd4',
+        resultEnvelope: encryptSensitiveJson(
+          {
+            scoreSummary: { mmse: 22, cdr: 1 },
+            rawInputSummary: { source: 'production_ai_assessment' },
+            physicalConditions: ['no_known_limitations'],
+          },
+          {
+            tableName: 'assessment_record',
+            recordId: '283713da-322c-462f-9784-42da468f3dd4',
+            fieldName: 'resultEnvelope',
+          },
+          testSensitiveEncryptionKey,
+        ),
+      },
     });
     const confirmedPlan = {
       ...pendingPlan,
@@ -5017,7 +5266,7 @@ describe('AppService training write permissions', () => {
       resultContractVersion: 'rehab-unity-result-v2',
       collectionBatchId: 'collection-batch-id',
       minConfidence: 0.8,
-      assessmentSourceId: 'assessment-approved-001',
+      assessmentSourceId: '283713da-322c-462f-9784-42da468f3dd4',
       startingLevelSource: 'clinician_approved_plan',
       startingDifficultyLevel: 2,
       ...overrides,
@@ -5118,10 +5367,28 @@ describe('AppService training write permissions', () => {
     prisma.riskGradeRecord.findFirst.mockResolvedValue({
       id: 'risk-id',
       patientId: 'patient-profile-id',
-      assessmentId: 'assessment-approved-001',
+      assessmentId: '283713da-322c-462f-9784-42da468f3dd4',
       riskLevel: 'moderate',
       isCurrent: true,
+      confirmedById: 'doctor-user-id',
+      confirmedAt: new Date('2026-05-20T05:30:00.000Z'),
       createdAt: new Date('2026-05-20T05:00:00.000Z'),
+      assessment: {
+        id: '283713da-322c-462f-9784-42da468f3dd4',
+        resultEnvelope: encryptSensitiveJson(
+          {
+            scoreSummary: { mmse: 22, cdr: 1 },
+            rawInputSummary: { source: 'production_ai_assessment' },
+            physicalConditions: ['no_known_limitations'],
+          },
+          {
+            tableName: 'assessment_record',
+            recordId: '283713da-322c-462f-9784-42da468f3dd4',
+            fieldName: 'resultEnvelope',
+          },
+          testSensitiveEncryptionKey,
+        ),
+      },
     });
     prisma.achievement.upsert.mockResolvedValue({ id: 'achievement-id' });
     prisma.trainingSession.upsert.mockImplementation(
@@ -5262,7 +5529,7 @@ describe('AppService training write permissions', () => {
           startingLevel: 2,
           startingLevelSource: 'clinician_approved_plan',
           approvedPlanItemId: 'plan-item-id',
-          assessmentSourceId: 'assessment-approved-001',
+          assessmentSourceId: '283713da-322c-462f-9784-42da468f3dd4',
           triggerReason: 'accuracy_high',
           before: {
             speed: 1,
@@ -5292,7 +5559,7 @@ describe('AppService training write permissions', () => {
       requiredMetrics: browserPoseGameContent.requiredMetrics,
       approvedPlanItemId: 'plan-item-id',
       prescribedDurationSeconds: 480,
-      assessmentSourceId: 'assessment-approved-001',
+      assessmentSourceId: '283713da-322c-462f-9784-42da468f3dd4',
       startingLevelSource: 'clinician_approved_plan',
       startingDifficultyLevel: 2,
       ...overrides,
@@ -5309,7 +5576,7 @@ describe('AppService training write permissions', () => {
           startingLevel: 2,
           startingLevelSource: 'clinician_approved_plan',
           approvedPlanItemId: 'plan-item-id',
-          assessmentSourceId: 'assessment-approved-001',
+          assessmentSourceId: '283713da-322c-462f-9784-42da468f3dd4',
           triggerReason: 'accuracy_high',
           before: {
             speed: 1,
@@ -5512,7 +5779,7 @@ describe('AppService training write permissions', () => {
           startingLevel: 2,
           startingLevelSource: 'clinician_approved_plan',
           approvedPlanItemId: 'plan-item-id',
-          assessmentSourceId: 'assessment-approved-001',
+          assessmentSourceId: '283713da-322c-462f-9784-42da468f3dd4',
           triggerReason: 'accuracy_high',
           before: {
             speed: 1.231,
@@ -5661,7 +5928,7 @@ describe('AppService training write permissions', () => {
       startingLevel: 2,
       startingLevelSource: 'clinician_approved_plan',
       approvedPlanItemId: 'plan-item-id',
-      assessmentSourceId: 'assessment-approved-001',
+      assessmentSourceId: '283713da-322c-462f-9784-42da468f3dd4',
       triggerReason: 'accuracy_high',
       before: {
         speed: 1.6,
@@ -5771,7 +6038,7 @@ describe('AppService training write permissions', () => {
           startingLevel: 2,
           startingLevelSource: 'clinician_approved_plan',
           approvedPlanItemId: 'plan-item-id',
-          assessmentSourceId: 'assessment-approved-001',
+          assessmentSourceId: '283713da-322c-462f-9784-42da468f3dd4',
           triggerReason: 'accuracy_low',
           before: {
             speed: 1.231,
@@ -5802,7 +6069,7 @@ describe('AppService training write permissions', () => {
           startingLevel: 2,
           startingLevelSource: 'clinician_approved_plan',
           approvedPlanItemId: 'plan-item-id',
-          assessmentSourceId: 'assessment-approved-001',
+          assessmentSourceId: '283713da-322c-462f-9784-42da468f3dd4',
           triggerReason: 'accuracy_low',
           before: {
             speed: 1,
@@ -6066,7 +6333,10 @@ describe('AppService training write permissions', () => {
           requiredConsentTypes: ['privacy_policy', 'camera_capture'],
           requiredInputModes: ['camera_pose'],
           requiredMetrics: unityGameContent.requiredMetrics,
-          conditionRules: { requireUpperBodyInFrame: true },
+          conditionRules: {
+            physicalConditions: ['no_known_limitations'],
+            riskLevels: ['low', 'moderate', 'high'],
+          },
           samplingConfig: { sampleRateHz: 30 },
           qualityGate: { minConfidence: 0.8 },
         }),
@@ -6137,7 +6407,10 @@ describe('AppService training write permissions', () => {
             requiredConsentTypes: ['privacy_policy', 'camera_capture'],
             requiredInputModes: ['camera_pose'],
             requiredMetrics: unityGameContent.requiredMetrics,
-            conditionRules: { requireUpperBodyInFrame: true },
+            conditionRules: {
+              physicalConditions: ['no_known_limitations'],
+              riskLevels: ['low', 'moderate', 'high'],
+            },
             samplingConfig: { sampleRateHz: 30 },
             qualityGate,
           }),
@@ -6197,7 +6470,10 @@ describe('AppService training write permissions', () => {
           requiredConsentTypes: ['privacy_policy', 'camera_capture'],
           requiredInputModes: ['camera_pose'],
           requiredMetrics: unityGameContent.requiredMetrics,
-          conditionRules: { requireUpperBodyInFrame: true },
+          conditionRules: {
+            physicalConditions: ['no_known_limitations'],
+            riskLevels: ['low', 'moderate', 'high'],
+          },
           samplingConfig: { sampleRateHz: 30 },
           qualityGate: { minConfidence: 0.8 },
           ...patch,
@@ -6275,6 +6551,53 @@ describe('AppService training write permissions', () => {
         }),
       });
     });
+
+    it.each([
+      [
+        'missing physical condition rules',
+        {
+          riskLevels: ['low', 'moderate', 'high'],
+        },
+      ],
+      [
+        'physical condition mismatch',
+        {
+          physicalConditions: ['upper_limb_limited'],
+          riskLevels: ['low', 'moderate', 'high'],
+        },
+      ],
+      [
+        'risk level mismatch',
+        {
+          physicalConditions: ['no_known_limitations'],
+          riskLevels: ['high'],
+        },
+      ],
+    ])(
+      'rejects collection batch creation when protocol conditionRules have %s',
+      async (_label, conditionRules) => {
+        const { prisma, service } = createService();
+        mockTrainingAccess(prisma);
+        prisma.collectionProtocol.findFirst.mockResolvedValue({
+          ...formalCollectionProtocol,
+          conditionRules,
+        });
+
+        await expect(
+          service.createCollectionBatch(doctorUser, {
+            patientId: 'patient-profile-id',
+            rehabPlanId: 'plan-id',
+            planItemId: 'plan-item-id',
+            gameContentId: 'game-id',
+            protocolId: 'protocol-id',
+          }),
+        ).rejects.toBeInstanceOf(BadRequestException);
+
+        expect(prisma.collectionBatch.create).not.toHaveBeenCalled();
+        expect(prisma.collectionBatch.upsert).not.toHaveBeenCalled();
+        expect(prisma.auditLog.create).not.toHaveBeenCalled();
+      },
+    );
 
     it('rejects collection batch creation before required consent snapshot can be frozen', async () => {
       const { prisma, service } = createService();
@@ -6713,6 +7036,54 @@ describe('AppService training write permissions', () => {
       },
       {},
     ],
+    [
+      'missing physical condition rules',
+      {},
+      (prisma: ReturnType<typeof createService>['prisma']) => {
+        prisma.collectionBatch.findUnique.mockResolvedValue({
+          ...formalCollectionBatch,
+          protocol: {
+            ...formalCollectionProtocol,
+            conditionRules: { riskLevels: ['low', 'moderate', 'high'] },
+          },
+        });
+      },
+      {},
+    ],
+    [
+      'physical condition mismatch',
+      {},
+      (prisma: ReturnType<typeof createService>['prisma']) => {
+        prisma.collectionBatch.findUnique.mockResolvedValue({
+          ...formalCollectionBatch,
+          protocol: {
+            ...formalCollectionProtocol,
+            conditionRules: {
+              physicalConditions: ['upper_limb_limited'],
+              riskLevels: ['low', 'moderate', 'high'],
+            },
+          },
+        });
+      },
+      {},
+    ],
+    [
+      'risk level mismatch',
+      {},
+      (prisma: ReturnType<typeof createService>['prisma']) => {
+        prisma.collectionBatch.findUnique.mockResolvedValue({
+          ...formalCollectionBatch,
+          protocol: {
+            ...formalCollectionProtocol,
+            conditionRules: {
+              physicalConditions: ['no_known_limitations'],
+              riskLevels: ['high'],
+            },
+          },
+        });
+      },
+      {},
+    ],
   ])(
     'rejects starting formal training with %s',
     async (_label, dtoPatch, override, options) => {
@@ -7094,7 +7465,7 @@ describe('AppService training write permissions', () => {
       expect(snapshot).toEqual(
         objectContaining({
           approvedPlanItemId: 'plan-item-id',
-          assessmentSourceId: 'assessment-approved-001',
+          assessmentSourceId: '283713da-322c-462f-9784-42da468f3dd4',
           startingLevelSource: 'clinician_approved_plan',
           startingDifficultyLevel: expectedStartingDifficultyLevel,
         }),
@@ -8929,7 +9300,7 @@ describe('AppService training write permissions', () => {
       true,
       (dto: ReturnType<typeof validCognitiveTrainingResultDto>) => {
         const event = dto.metricsSummary.dynamicDifficultyEvidence.events[0];
-        event.assessmentSourceId = ' assessment-approved-001 ';
+        event.assessmentSourceId = ' 283713da-322c-462f-9784-42da468f3dd4 ';
       },
     ],
     [
@@ -9640,7 +10011,7 @@ describe('AppService training write permissions', () => {
       startingLevel: 2,
       startingLevelSource: 'clinician_approved_plan',
       approvedPlanItemId: 'plan-item-id',
-      assessmentSourceId: 'assessment-approved-001',
+      assessmentSourceId: '283713da-322c-462f-9784-42da468f3dd4',
       triggerReason: 'accuracy_low',
       before: {
         speed: 1.231,
@@ -9738,7 +10109,7 @@ describe('AppService training write permissions', () => {
       startingLevel: 2,
       startingLevelSource: 'clinician_approved_plan',
       approvedPlanItemId: 'plan-item-id',
-      assessmentSourceId: 'assessment-approved-001',
+      assessmentSourceId: '283713da-322c-462f-9784-42da468f3dd4',
       triggerReason: 'accuracy_high',
       before: {
         speed: 2.133,
@@ -10353,6 +10724,29 @@ describe('AppService training result review', () => {
 });
 
 describe('AppService rehab plan recommendation game readiness', () => {
+  const recommendationAssessmentId = '6c795e85-32b0-43f5-954d-60c8ddc44e88';
+
+  function recommendationAssessment(
+    physicalConditions: string[] = ['no_known_limitations'],
+  ) {
+    return {
+      id: recommendationAssessmentId,
+      resultEnvelope: encryptSensitiveJson(
+        {
+          scoreSummary: { mmse: 22, cdr: 1 },
+          rawInputSummary: { source: 'production_ai_assessment' },
+          physicalConditions,
+        },
+        {
+          tableName: 'assessment_record',
+          recordId: recommendationAssessmentId,
+          fieldName: 'resultEnvelope',
+        },
+        testSensitiveEncryptionKey,
+      ),
+    };
+  }
+
   type RecommendationPrismaMock = {
     patientProfile: {
       findUnique: jest.Mock;
@@ -10548,7 +10942,13 @@ describe('AppService rehab plan recommendation game readiness', () => {
     code: 'memory_path',
     name: '记忆路径',
     trainingTargets: ['memory', 'sequence', 'executive'],
-    tags: ['近记忆', '序列回忆', '低强度'],
+    tags: [
+      '近记忆',
+      '序列回忆',
+      '低强度',
+      'safety:wheelchair_compatible',
+      'safety:upper_limb_limited_compatible',
+    ],
     defaultDuration: 8,
     defaultDifficulty: '三步路径',
     runtimeType: 'cognitive_web',
@@ -10583,6 +10983,7 @@ describe('AppService rehab plan recommendation game readiness', () => {
       confirmedById: 'doctor-user-id',
       confirmedAt: new Date('2026-05-20T05:30:00.000Z'),
       createdAt: new Date('2026-05-20T06:00:00.000Z'),
+      assessment: recommendationAssessment(),
     });
     prisma.gameContent.findMany.mockResolvedValue([
       releasedUnityGame,
@@ -10682,6 +11083,7 @@ describe('AppService rehab plan recommendation game readiness', () => {
       confirmedById: 'doctor-user-id',
       confirmedAt: new Date('2026-05-20T05:30:00.000Z'),
       createdAt: new Date('2026-05-20T06:00:00.000Z'),
+      assessment: recommendationAssessment(),
     });
     prisma.gameContent.findMany.mockResolvedValue([
       {
@@ -10762,6 +11164,7 @@ describe('AppService rehab plan recommendation game readiness', () => {
       confirmedById: 'doctor-user-id',
       confirmedAt: new Date('2026-05-20T05:30:00.000Z'),
       createdAt: new Date('2026-05-20T06:00:00.000Z'),
+      assessment: recommendationAssessment(),
     });
     prisma.gameContent.findMany.mockResolvedValue([
       {
@@ -10833,6 +11236,7 @@ describe('AppService rehab plan recommendation game readiness', () => {
       confirmedById: 'doctor-user-id',
       confirmedAt: new Date('2026-05-20T05:30:00.000Z'),
       createdAt: new Date('2026-05-20T06:00:00.000Z'),
+      assessment: recommendationAssessment(),
     });
     prisma.gameContent.findMany.mockResolvedValue([
       {
@@ -10885,6 +11289,140 @@ describe('AppService rehab plan recommendation game readiness', () => {
     );
   });
 
+  it('matches assessment physical conditions against both game training targets and tags', async () => {
+    const { prisma, service } = createService();
+    const targetMatchedGame = {
+      ...releasedBrowserPoseGame,
+      id: 'target-matched-game-id',
+      code: 'target_matched_game',
+      name: '目标匹配训练',
+      trainingTargets: ['upper_limb'],
+      tags: [
+        'reaction',
+        'moderate_intensity',
+        'safety:upper_limb_limited_compatible',
+      ],
+      createdAt: new Date('2026-05-18T08:00:00.000Z'),
+      updatedAt: new Date('2026-05-18T08:00:00.000Z'),
+    };
+    const tagMatchedGame = {
+      ...releasedBrowserPoseGame,
+      id: 'tag-matched-game-id',
+      code: 'tag_matched_game',
+      name: '标签匹配训练',
+      trainingTargets: ['reaction'],
+      tags: [
+        'upper_limb',
+        'moderate_intensity',
+        'safety:upper_limb_limited_compatible',
+      ],
+      createdAt: new Date('2026-05-17T08:00:00.000Z'),
+      updatedAt: new Date('2026-05-17T08:00:00.000Z'),
+    };
+    const newestUnmatchedGame = {
+      ...releasedUnityGame,
+      id: 'newest-unmatched-game-id',
+      code: 'newest_unmatched_game',
+      name: '最新未匹配训练',
+      createdAt: new Date('2026-05-30T08:00:00.000Z'),
+      updatedAt: new Date('2026-05-30T08:00:00.000Z'),
+    };
+    prisma.patientProfile.findUnique.mockResolvedValue({
+      id: 'patient-profile-id',
+      userId: 'patient-user-id',
+      responsibleDoctorId: 'doctor-profile-id',
+    });
+    prisma.riskGradeRecord.findFirst.mockResolvedValue({
+      id: 'risk-id',
+      patientId: 'patient-profile-id',
+      riskLevel: 'moderate',
+      isCurrent: true,
+      confirmedById: 'doctor-user-id',
+      confirmedAt: new Date('2026-05-20T05:30:00.000Z'),
+      createdAt: new Date('2026-05-20T06:00:00.000Z'),
+      assessment: recommendationAssessment(['upper_limb_limited']),
+    });
+    prisma.gameContent.findMany.mockResolvedValue([
+      newestUnmatchedGame,
+      releasedCognitiveGame,
+      targetMatchedGame,
+      tagMatchedGame,
+    ]);
+    prisma.rehabPlan.create.mockImplementation(({ data }) =>
+      Promise.resolve({
+        id: 'plan-id',
+        ...data,
+        items: data.items.create.map((item) => ({
+          ...item,
+          gameContent: releasedBrowserPoseGame,
+        })),
+      }),
+    );
+
+    await service.recommendPlan(doctorUser, {
+      patientId: 'patient-profile-id',
+    });
+
+    const createdItems =
+      prisma.rehabPlan.create.mock.calls[0][0].data.items.create;
+    expect(createdItems.map((item) => item.gameContentId)).toEqual([
+      'target-matched-game-id',
+      'tag-matched-game-id',
+      'cognitive-game-id',
+    ]);
+    expect(createdItems).not.toEqual(
+      expect.arrayContaining([
+        objectContaining({ gameContentId: 'newest-unmatched-game-id' }),
+      ]),
+    );
+    expect(createdItems).toEqual(
+      expect.arrayContaining([
+        objectContaining({
+          adaptiveRules: objectContaining({
+            physicalConditions: ['upper_limb_limited'],
+            physicalConditionSafety: {
+              requiredTags: ['safety:upper_limb_limited_compatible'],
+              matched: true,
+            },
+          }),
+        }),
+      ]),
+    );
+  });
+
+  it('blocks recommendation when no game has explicit physical-condition safety tags', async () => {
+    const { prisma, service } = createService();
+    prisma.patientProfile.findUnique.mockResolvedValue({
+      id: 'patient-profile-id',
+      userId: 'patient-user-id',
+      responsibleDoctorId: 'doctor-profile-id',
+    });
+    prisma.riskGradeRecord.findFirst.mockResolvedValue({
+      id: 'risk-id',
+      patientId: 'patient-profile-id',
+      riskLevel: 'moderate',
+      isCurrent: true,
+      confirmedById: 'doctor-user-id',
+      confirmedAt: new Date('2026-05-20T05:30:00.000Z'),
+      createdAt: new Date('2026-05-20T06:00:00.000Z'),
+      assessment: recommendationAssessment(['wheelchair']),
+    });
+    prisma.gameContent.findMany.mockResolvedValue([
+      releasedUnityGame,
+      releasedBrowserPoseGame,
+    ]);
+
+    await expect(
+      service.recommendPlan(doctorUser, {
+        patientId: 'patient-profile-id',
+      }),
+    ).rejects.toThrow(
+      '当前身体状况没有已配置安全准入条件的正式训练游戏，不能生成康复方案。',
+    );
+
+    expect(prisma.rehabPlan.create).not.toHaveBeenCalled();
+  });
+
   it('rejects recommendation when the patient has no current risk grade', async () => {
     const { prisma, service } = createService();
     prisma.patientProfile.findUnique.mockResolvedValue({
@@ -10916,10 +11454,39 @@ describe('AppService assessment consent requirements', () => {
       },
       assessmentRecord: {
         create: jest.fn(),
-        findMany: jest.fn(),
+        findMany: jest.fn().mockResolvedValue([]),
         findUnique: jest.fn(),
+        findFirst: jest
+          .fn()
+          .mockResolvedValue({ id: 'confirmed-assessment-id' }),
         update: jest.fn(),
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+      providerOperation: {
+        findFirst: jest.fn().mockImplementation(
+          ({
+            where,
+          }: {
+            where: {
+              patientId: string;
+              operation: 'assessment_draft' | 'speech_transcript';
+              providerCallId: string;
+              status: 'completed';
+            };
+          }) =>
+            Promise.resolve(
+              where.patientId !== 'patient-profile-id' ||
+                where.status !== 'completed'
+                ? null
+                : providerLedgerRecordForCall(
+                    where.operation,
+                    where.providerCallId,
+                  ),
+            ),
+        ),
+      },
+      rehabPlan: {
+        updateMany: jest.fn().mockResolvedValue({ count: 0 }),
       },
       riskGradeRecord: {
         findFirst: jest.fn(),
@@ -10963,6 +11530,7 @@ describe('AppService assessment consent requirements', () => {
   const assessmentDto = {
     patientId: 'patient-profile-id',
     assessmentType: 'MMSE/CDR',
+    physicalConditions: ['no_known_limitations'],
     scoreSummary: {
       mmse: 22,
       cdr: 1,
@@ -10979,6 +11547,174 @@ describe('AppService assessment consent requirements', () => {
       confidence: 0.84,
     },
   };
+
+  const productionAssessmentDto = {
+    ...assessmentDto,
+    physicalConditions: ['upper_limb_limited'],
+    rawInputSummary: {
+      ...assessmentDto.rawInputSummary,
+      source: 'production_ai_assessment',
+      modelVersion: 'MiMo-V2.5',
+      evidence: {
+        provider: 'xiaomi-mimo',
+        model: 'MiMo-V2.5',
+        modelVersion: 'MiMo-V2.5',
+        callId: 'ai-call-20260815-001',
+        endpointRef: 'https://token-plan-cn.xiaomimimo.com/v1/chat/completions',
+        promptVersion: 'cognitive-assessment-mimo-2026-08',
+        calledAt: '2026-08-15T08:00:00.000Z',
+        humanReview: {
+          required: true,
+          reviewerUserId: doctorUser.id,
+          reviewedAt: '2026-08-15T08:03:00.000Z',
+          conclusion: 'approved',
+        },
+      },
+    },
+  };
+
+  const providerLedgerOperationIds = {
+    aiMay: '6c8e5d10-4a7b-4a2f-8d9e-001122334455',
+    speechMay: '7d9f6e21-5b8c-4b30-9eaf-112233445566',
+    aiAugust: '8ea07f32-6c9d-4c41-afb0-223344556677',
+    sparkMay: '9fb18043-7dae-4d52-b0c1-334455667788',
+  } as const;
+
+  function providerLedgerRecord({
+    id,
+    provider,
+    modelVersion,
+    endpointHost,
+    result,
+  }: {
+    id: string;
+    provider: string;
+    modelVersion: string;
+    endpointHost: string;
+    result: Record<string, unknown>;
+  }) {
+    const response = {
+      providerContent: '{"status":"ok"}',
+      result,
+    };
+    return {
+      id,
+      provider,
+      modelVersion,
+      endpointHost,
+      ...createProviderOperationResponseEvidence(id, response),
+    };
+  }
+
+  function providerLedgerRecordForCall(
+    operation: 'assessment_draft' | 'speech_transcript',
+    providerCallId: string,
+  ) {
+    if (
+      operation === 'speech_transcript' &&
+      providerCallId === 'speech-call-20260524-001'
+    ) {
+      return providerLedgerRecord({
+        id: providerLedgerOperationIds.speechMay,
+        provider: 'xiaomi-mimo-audio-understanding',
+        modelVersion: 'mimo-v2.5',
+        endpointHost: 'token-plan-cn.xiaomimimo.com',
+        result: {
+          patientId: assessmentDto.patientId,
+          assessmentType: assessmentDto.assessmentType,
+          physicalConditions: assessmentDto.physicalConditions,
+          status: 'transcribed',
+          transcript: assessmentDto.rawInputSummary.transcript,
+        },
+      });
+    }
+    if (
+      operation === 'assessment_draft' &&
+      providerCallId === 'ai-call-20260524-001'
+    ) {
+      return providerLedgerRecord({
+        id: providerLedgerOperationIds.aiMay,
+        provider: 'xiaomi-mimo',
+        modelVersion: 'mimo-v2.5',
+        endpointHost: 'token-plan-cn.xiaomimimo.com',
+        result: {
+          patientId: assessmentDto.patientId,
+          assessmentType: assessmentDto.assessmentType,
+          status: 'pending_human_review',
+          riskLevel: 'moderate',
+          scoreSummary: assessmentDto.scoreSummary,
+          rawInputSummary: {
+            transcript: assessmentDto.rawInputSummary.transcript,
+            analysisSummary: assessmentDto.rawInputSummary.analysisSummary,
+          },
+          physicalConditions: assessmentDto.physicalConditions,
+        },
+      });
+    }
+    if (
+      operation === 'assessment_draft' &&
+      providerCallId === 'ai-call-20260815-001'
+    ) {
+      return providerLedgerRecord({
+        id: providerLedgerOperationIds.aiAugust,
+        provider: 'xiaomi-mimo',
+        modelVersion: 'MiMo-V2.5',
+        endpointHost: 'token-plan-cn.xiaomimimo.com',
+        result: {
+          patientId: productionAssessmentDto.patientId,
+          assessmentType: productionAssessmentDto.assessmentType,
+          status: 'pending_human_review',
+          riskLevel: 'moderate',
+          scoreSummary: productionAssessmentDto.scoreSummary,
+          rawInputSummary: {
+            transcript: productionAssessmentDto.rawInputSummary.transcript,
+            analysisSummary:
+              productionAssessmentDto.rawInputSummary.analysisSummary,
+          },
+          physicalConditions: productionAssessmentDto.physicalConditions,
+        },
+      });
+    }
+    return null;
+  }
+
+  function createSpeechAiRawInputSummary() {
+    return {
+      ...assessmentDto.rawInputSummary,
+      source: 'speech_ai_assessment',
+      evidence: {
+        ai: {
+          provider: 'xiaomi-mimo',
+          model: 'mimo-v2.5',
+          modelVersion: 'mimo-v2.5',
+          callId: 'ai-call-20260524-001',
+          endpointRef:
+            'https://token-plan-cn.xiaomimimo.com/v1/chat/completions',
+          promptVersion: 'cognitive-assessment-mimo-2026-05',
+          calledAt: '2026-05-24T10:00:00.000Z',
+        },
+        speech: {
+          provider: 'xiaomi-mimo-audio-understanding',
+          modelVersion: 'mimo-v2.5',
+          callId: 'speech-call-20260524-001',
+          endpointRef:
+            'https://token-plan-cn.xiaomimimo.com/v1/chat/completions',
+          source: 'provider_audio_understanding',
+          calledAt: '2026-05-24T09:58:00.000Z',
+          audio: {
+            mimeType: 'audio/wav',
+            durationSeconds: 42,
+          },
+        },
+        humanReview: {
+          required: true,
+          reviewerUserId: doctorUser.id,
+          reviewedAt: '2026-05-24T10:03:00.000Z',
+          conclusion: 'approved',
+        },
+      },
+    };
+  }
 
   const encryptedAssessmentId = '283713da-322c-462f-9784-42da468f3dd4';
   const encryptedRiskId = '1181f2dd-e397-48c2-a7e2-feb993bf9eaa';
@@ -11217,7 +11953,7 @@ describe('AppService assessment consent requirements', () => {
       ({ data }: { data: Record<string, unknown> }) => Promise.resolve(data),
     );
 
-    await service.createAssessment(doctorUser, assessmentDto);
+    await service.createAssessment(doctorUser, productionAssessmentDto);
 
     const assessmentData = mockArg<{
       data: Record<string, unknown> & { id: string; resultEnvelope: unknown };
@@ -11273,8 +12009,19 @@ describe('AppService assessment consent requirements', () => {
         testSensitiveEncryptionKey,
       ),
     ).toEqual({
-      scoreSummary: assessmentDto.scoreSummary,
-      rawInputSummary: assessmentDto.rawInputSummary,
+      scoreSummary: productionAssessmentDto.scoreSummary,
+      physicalConditions: productionAssessmentDto.physicalConditions,
+      rawInputSummary: objectContaining({
+        ...productionAssessmentDto.rawInputSummary,
+        evidence: objectContaining({
+          humanReview: objectContaining({
+            required: true,
+            reviewerUserId: doctorUser.id,
+            reviewedAt: anyValue(String),
+            conclusion: 'approved',
+          }),
+        }),
+      }),
     });
     const decryptedRisk = decryptSensitiveJson<Record<string, unknown>>(
       riskData.reasonEnvelope,
@@ -11296,7 +12043,18 @@ describe('AppService assessment consent requirements', () => {
         },
         testSensitiveEncryptionKey,
       ),
-    ).toEqual({ inputSummary: assessmentDto.rawInputSummary });
+    ).toEqual({
+      inputSummary: objectContaining({
+        ...productionAssessmentDto.rawInputSummary,
+        evidence: objectContaining({
+          humanReview: objectContaining({
+            reviewerUserId: doctorUser.id,
+            reviewedAt: anyValue(String),
+            conclusion: 'approved',
+          }),
+        }),
+      }),
+    });
     const decryptedAiOutput = decryptSensitiveJson<{
       outputSummary: { reasonSummary: string };
     }>(
@@ -11311,9 +12069,11 @@ describe('AppService assessment consent requirements', () => {
     expect(decryptedAiOutput.outputSummary.reasonSummary).toContain('MMSE 22');
 
     const auditJson = JSON.stringify(prisma.auditLog.create.mock.calls);
-    expect(auditJson).not.toContain(assessmentDto.rawInputSummary.transcript);
     expect(auditJson).not.toContain(
-      assessmentDto.rawInputSummary.analysisSummary,
+      productionAssessmentDto.rawInputSummary.transcript,
+    );
+    expect(auditJson).not.toContain(
+      productionAssessmentDto.rawInputSummary.analysisSummary,
     );
     expect(auditJson).not.toContain('MMSE 22');
   });
@@ -11329,7 +12089,7 @@ describe('AppService assessment consent requirements', () => {
     );
 
     await expect(
-      service.createAssessment(doctorUser, assessmentDto),
+      service.createAssessment(doctorUser, productionAssessmentDto),
     ).rejects.toBeInstanceOf(ConflictException);
   });
 
@@ -11356,7 +12116,7 @@ describe('AppService assessment consent requirements', () => {
       prisma.$transaction.mockRejectedValueOnce(error);
 
       await expect(
-        service.createAssessment(doctorUser, assessmentDto),
+        service.createAssessment(doctorUser, productionAssessmentDto),
       ).rejects.toBe(error);
     },
   );
@@ -11379,6 +12139,7 @@ describe('AppService assessment consent requirements', () => {
     expect(result).toEqual([
       objectContaining({
         id: encryptedAssessmentId,
+        source: 'clinician_input',
         scoreSummary: assessmentDto.scoreSummary,
         rawInputSummary: assessmentDto.rawInputSummary,
         riskGrades: [
@@ -11514,7 +12275,7 @@ describe('AppService assessment consent requirements', () => {
       });
 
     await expect(
-      service.createAssessment(doctorUser, assessmentDto),
+      service.createAssessment(doctorUser, productionAssessmentDto),
     ).rejects.toBeInstanceOf(ForbiddenException);
 
     expect(prisma.consentRecord.findFirst).toHaveBeenCalledWith({
@@ -11597,12 +12358,13 @@ describe('AppService assessment consent requirements', () => {
     });
 
     await expect(
-      service.createAssessment(doctorUser, assessmentDto),
+      service.createAssessment(doctorUser, productionAssessmentDto),
     ).resolves.toMatchObject({
       id: stringMatching(
         /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
       ),
       patientId: 'patient-profile-id',
+      physicalConditions: ['upper_limb_limited'],
     });
 
     const createdAssessmentId = mockArg<{ data: { id: string } }>(
@@ -11613,7 +12375,7 @@ describe('AppService assessment consent requirements', () => {
         id: createdAssessmentId,
         patientId: 'patient-profile-id',
         assessmentType: 'MMSE/CDR',
-        source: 'clinician_input',
+        source: 'production_ai_assessment',
         resultEnvelope: anyValue(Object),
         completedAt: anyValue(Date),
       }),
@@ -11647,7 +12409,7 @@ describe('AppService assessment consent requirements', () => {
         patientId: 'patient-profile-id',
         assessmentId: createdAssessmentId,
         analysisScene: 'assessment_summary',
-        modelVersion: 'spark-manual-v1',
+        modelVersion: 'MiMo-V2.5',
         confidence: 0.84,
         inputEnvelope: anyValue(Object),
         outputEnvelope: anyValue(Object),
@@ -12053,6 +12815,7 @@ describe('AppService assessment consent requirements', () => {
     const ad8Dto = {
       patientId: 'patient-profile-id',
       assessmentType: 'AD-8',
+      physicalConditions: ['no_known_limitations'],
       scoreSummary: {
         ad8Total: 4,
         itemMemoryProblems: 1,
@@ -12065,11 +12828,10 @@ describe('AppService assessment consent requirements', () => {
         itemDailyThinkingMemoryProblems: 0,
       },
       rawInputSummary: {
-        source: 'clinician_input',
+        ...productionAssessmentDto.rawInputSummary,
         transcript: '照护者访谈提示近期重复提问和日期定向问题增多。',
         analysisSummary:
           'AD-8 总分 4 分，提示认知改变可能，建议结合 MMSE/CDR 复核。',
-        modelVersion: 'ad8-clinician-structured-v1',
         confidence: 0.82,
         informant: {
           name: '李明',
@@ -12105,6 +12867,26 @@ describe('AppService assessment consent requirements', () => {
       patientId: 'patient-profile-id',
       assessmentType: 'AD-8',
     });
+    prisma.providerOperation.findFirst.mockResolvedValue(
+      providerLedgerRecord({
+        id: providerLedgerOperationIds.aiAugust,
+        provider: 'xiaomi-mimo',
+        modelVersion: 'MiMo-V2.5',
+        endpointHost: 'token-plan-cn.xiaomimimo.com',
+        result: {
+          patientId: ad8Dto.patientId,
+          assessmentType: ad8Dto.assessmentType,
+          status: 'pending_human_review',
+          riskLevel: 'moderate',
+          scoreSummary: ad8Dto.scoreSummary,
+          rawInputSummary: {
+            transcript: ad8Dto.rawInputSummary.transcript,
+            analysisSummary: ad8Dto.rawInputSummary.analysisSummary,
+          },
+          physicalConditions: ad8Dto.physicalConditions,
+        },
+      }),
+    );
 
     await expect(
       service.createAssessment(doctorUser, ad8Dto),
@@ -12125,7 +12907,7 @@ describe('AppService assessment consent requirements', () => {
       objectContaining({
         patientId: 'patient-profile-id',
         assessmentType: 'AD-8',
-        source: 'clinician_input',
+        source: 'production_ai_assessment',
         resultEnvelope: anyValue(Object),
         completedAt: anyValue(Date),
       }),
@@ -12259,7 +13041,45 @@ describe('AppService assessment consent requirements', () => {
     expect(prisma.assessmentRecord.create).not.toHaveBeenCalled();
   });
 
-  it('rejects assessment when source is not an allowed production or clinician source', async () => {
+  it.each(['clinician_input', 'clinician_recorded_trial_assessment'])(
+    'rejects manual formal assessment source %s',
+    async (source) => {
+      const { prisma, service } = createService();
+      grantAssessmentConsents(prisma);
+
+      await expect(
+        service.createAssessment(doctorUser, {
+          ...assessmentDto,
+          rawInputSummary: {
+            ...assessmentDto.rawInputSummary,
+            source,
+          },
+        }),
+      ).rejects.toThrow(
+        '正式评估来源必须为 production_ai_assessment 或 speech_ai_assessment。',
+      );
+
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(prisma.assessmentRecord.create).not.toHaveBeenCalled();
+    },
+  );
+
+  it('rejects non-array physicalConditions on a formal AI assessment', async () => {
+    const { prisma, service } = createService();
+    grantAssessmentConsents(prisma);
+
+    await expect(
+      service.createAssessment(doctorUser, {
+        ...productionAssessmentDto,
+        physicalConditions: 'upper-limb',
+      }),
+    ).rejects.toThrow('physicalConditions 必须是字符串数组。');
+
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(prisma.assessmentRecord.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects assessment when source is not a production AI source', async () => {
     const { prisma, service } = createService();
     prisma.patientProfile.findUnique.mockResolvedValue({
       id: 'patient-profile-id',
@@ -12512,6 +13332,26 @@ describe('AppService assessment consent requirements', () => {
       patientId: 'patient-profile-id',
       assessmentType: 'MMSE/CDR',
     });
+    prisma.providerOperation.findFirst.mockResolvedValue(
+      providerLedgerRecord({
+        id: providerLedgerOperationIds.sparkMay,
+        provider: 'iflytek-spark',
+        modelVersion: 'spark-x1-2026-05',
+        endpointHost: 'spark-api.customer-health.cn',
+        result: {
+          patientId: assessmentDto.patientId,
+          assessmentType: assessmentDto.assessmentType,
+          status: 'pending_human_review',
+          riskLevel: 'moderate',
+          scoreSummary: assessmentDto.scoreSummary,
+          rawInputSummary: {
+            transcript: assessmentDto.rawInputSummary.transcript,
+            analysisSummary: assessmentDto.rawInputSummary.analysisSummary,
+          },
+          physicalConditions: assessmentDto.physicalConditions,
+        },
+      }),
+    );
 
     const productionRawInputSummary = {
       ...assessmentDto.rawInputSummary,
@@ -12575,6 +13415,93 @@ describe('AppService assessment consent requirements', () => {
     expect(
       decryptedResult.rawInputSummary.evidence.humanReview.reviewedAt,
     ).not.toBe('2026-05-24T10:03:00.000Z');
+    expect(prisma.providerOperation.findFirst).toHaveBeenCalledWith({
+      where: {
+        patientId: 'patient-profile-id',
+        operation: 'assessment_draft',
+        providerCallId: 'ai-call-20260524-001',
+        status: 'completed',
+      },
+      select: {
+        id: true,
+        provider: true,
+        modelVersion: true,
+        endpointHost: true,
+        responseCiphertext: true,
+        responseHmac: true,
+      },
+    });
+  });
+
+  it.each([
+    {
+      fieldName: 'scoreSummary',
+      dto: {
+        ...productionAssessmentDto,
+        scoreSummary: { ...productionAssessmentDto.scoreSummary, mmse: 21 },
+      },
+    },
+    {
+      fieldName: 'transcript',
+      dto: {
+        ...productionAssessmentDto,
+        rawInputSummary: {
+          ...productionAssessmentDto.rawInputSummary,
+          transcript: '客户端修改后的评估转写。',
+        },
+      },
+    },
+    {
+      fieldName: 'analysisSummary',
+      dto: {
+        ...productionAssessmentDto,
+        rawInputSummary: {
+          ...productionAssessmentDto.rawInputSummary,
+          analysisSummary: '客户端修改后的分析摘要。',
+        },
+      },
+    },
+    {
+      fieldName: 'physicalConditions',
+      dto: {
+        ...productionAssessmentDto,
+        physicalConditions: ['no_known_limitations'],
+      },
+    },
+  ])(
+    'rejects production AI assessment when $fieldName differs from the ledger response',
+    async ({ fieldName, dto }) => {
+      const { prisma, service } = createService();
+      grantAssessmentConsents(prisma);
+
+      await expect(service.createAssessment(doctorUser, dto)).rejects.toThrow(
+        new RegExp(`${fieldName}.*账本响应不一致`),
+      );
+
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(prisma.assessmentRecord.create).not.toHaveBeenCalled();
+    },
+  );
+
+  it('rejects production AI assessment when the ledger response HMAC is invalid', async () => {
+    const { prisma, service } = createService();
+    grantAssessmentConsents(prisma);
+    const ledgerOperation = providerLedgerRecordForCall(
+      'assessment_draft',
+      'ai-call-20260815-001',
+    );
+    if (!ledgerOperation) throw new Error('Missing test ledger operation.');
+    prisma.providerOperation.findFirst.mockResolvedValue({
+      ...ledgerOperation,
+      responseHmac: '0'.repeat(64),
+    });
+
+    await expect(
+      service.createAssessment(doctorUser, productionAssessmentDto),
+    ).rejects.toThrow('账本响应证据无法验证，不能入库。');
+
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(prisma.assessmentRecord.create).not.toHaveBeenCalled();
   });
 
   it('creates speech AI assessment from frontend evidence envelope with AI, speech, and human review evidence', async () => {
@@ -12614,41 +13541,7 @@ describe('AppService assessment consent requirements', () => {
       assessmentType: 'MMSE/CDR',
     });
 
-    const speechAiRawInputSummary = {
-      ...assessmentDto.rawInputSummary,
-      source: 'speech_ai_assessment',
-      evidence: {
-        ai: {
-          provider: 'xiaomi-mimo',
-          model: 'mimo-v2.5',
-          modelVersion: 'mimo-v2.5',
-          callId: 'ai-call-20260524-001',
-          endpointRef:
-            'https://token-plan-cn.xiaomimimo.com/v1/chat/completions',
-          promptVersion: 'cognitive-assessment-mimo-2026-05',
-          calledAt: '2026-05-24T10:00:00.000Z',
-        },
-        speech: {
-          provider: 'xiaomi-mimo-audio-understanding',
-          modelVersion: 'mimo-v2.5',
-          callId: 'speech-call-20260524-001',
-          endpointRef:
-            'https://token-plan-cn.xiaomimimo.com/v1/chat/completions',
-          source: 'provider_audio_understanding',
-          calledAt: '2026-05-24T09:58:00.000Z',
-          audio: {
-            mimeType: 'audio/wav',
-            durationSeconds: 42,
-          },
-        },
-        humanReview: {
-          required: true,
-          reviewerUserId: doctorUser.id,
-          reviewedAt: '2026-05-24T10:03:00.000Z',
-          conclusion: 'approved',
-        },
-      },
-    };
+    const speechAiRawInputSummary = createSpeechAiRawInputSummary();
 
     await expect(
       service.createAssessment(doctorUser, {
@@ -12692,7 +13585,95 @@ describe('AppService assessment consent requirements', () => {
     expect(
       decryptedResult.rawInputSummary.evidence.humanReview.reviewedAt,
     ).not.toBe('2026-05-24T10:03:00.000Z');
+    expect(prisma.providerOperation.findFirst).toHaveBeenCalledWith({
+      where: {
+        patientId: 'patient-profile-id',
+        operation: 'assessment_draft',
+        providerCallId: 'ai-call-20260524-001',
+        status: 'completed',
+      },
+      select: {
+        id: true,
+        provider: true,
+        modelVersion: true,
+        endpointHost: true,
+        responseCiphertext: true,
+        responseHmac: true,
+      },
+    });
+    expect(prisma.providerOperation.findFirst).toHaveBeenCalledWith({
+      where: {
+        patientId: 'patient-profile-id',
+        operation: 'speech_transcript',
+        providerCallId: 'speech-call-20260524-001',
+        status: 'completed',
+      },
+      select: {
+        id: true,
+        provider: true,
+        modelVersion: true,
+        endpointHost: true,
+        responseCiphertext: true,
+        responseHmac: true,
+      },
+    });
   });
+
+  it.each(['transcript', 'physicalConditions'] as const)(
+    'rejects speech AI assessment when the speech %s differs from the ledger response',
+    async (fieldName) => {
+      const { prisma, service } = createService();
+      grantAssessmentConsents(prisma);
+      prisma.consentRecord.findFirst.mockResolvedValueOnce({
+        id: 'microphone-consent-id',
+        patientId: 'patient-profile-id',
+        consentType: 'microphone_capture',
+        consentVersion: 'v1.2',
+        status: 'granted',
+        revokedAt: null,
+      });
+      const mismatchedSpeechOperation = providerLedgerRecord({
+        id: providerLedgerOperationIds.speechMay,
+        provider: 'xiaomi-mimo-audio-understanding',
+        modelVersion: 'mimo-v2.5',
+        endpointHost: 'token-plan-cn.xiaomimimo.com',
+        result: {
+          patientId: assessmentDto.patientId,
+          assessmentType: assessmentDto.assessmentType,
+          physicalConditions:
+            fieldName === 'physicalConditions'
+              ? ['wheelchair']
+              : assessmentDto.physicalConditions,
+          status: 'transcribed',
+          transcript:
+            fieldName === 'transcript'
+              ? '与正式评估不一致的语音转写。'
+              : assessmentDto.rawInputSummary.transcript,
+        },
+      });
+      prisma.providerOperation.findFirst.mockImplementation(
+        ({ where }: { where: { operation: string; providerCallId: string } }) =>
+          Promise.resolve(
+            where.operation === 'speech_transcript'
+              ? mismatchedSpeechOperation
+              : providerLedgerRecordForCall(
+                  'assessment_draft',
+                  where.providerCallId,
+                ),
+          ),
+      );
+
+      await expect(
+        service.createAssessment(doctorUser, {
+          ...assessmentDto,
+          rawInputSummary: createSpeechAiRawInputSummary(),
+        }),
+      ).rejects.toThrow(new RegExp(`${fieldName}.*账本响应不一致`));
+
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(prisma.assessmentRecord.create).not.toHaveBeenCalled();
+    },
+  );
 
   it('rejects speech AI assessment when speech evidence lacks provider call time or audio summary', async () => {
     const { prisma, service } = createService();
@@ -12918,6 +13899,8 @@ describe('AppService assessment consent requirements', () => {
       await expect(
         service.createAiAssessmentDraft(doctorUser, {
           patientId: 'patient-profile-id',
+          assessmentType: 'MMSE/CDR',
+          physicalConditions: ['no_known_limitations'],
           transcript: '患者完成 MMSE 量表，回忆与执行功能表现下降。',
         }),
       ).rejects.toBeInstanceOf(BadRequestException);
@@ -12944,6 +13927,8 @@ describe('AppService assessment consent requirements', () => {
       await expect(
         service.createAiAssessmentDraft(doctorUser, {
           patientId: 'patient-profile-id',
+          assessmentType: 'MMSE/CDR',
+          physicalConditions: ['no_known_limitations'],
           transcript: '患者完成 MMSE 量表，回忆与执行功能表现下降。',
         }),
       ).rejects.toBeInstanceOf(BadRequestException);
@@ -12969,6 +13954,8 @@ describe('AppService assessment consent requirements', () => {
       await expect(
         service.createAiAssessmentDraft(doctorUser, {
           patientId: 'patient-profile-id',
+          assessmentType: 'MMSE/CDR',
+          physicalConditions: ['no_known_limitations'],
           transcript: '患者完成 MMSE 量表，回忆与执行功能表现下降。',
         }),
       ).rejects.toBeInstanceOf(ForbiddenException);
@@ -12995,6 +13982,8 @@ describe('AppService assessment consent requirements', () => {
       await expect(
         service.createAiAssessmentDraft(doctorUser, {
           patientId: 'patient-profile-id',
+          assessmentType: 'MMSE/CDR',
+          physicalConditions: ['no_known_limitations'],
           transcript: '患者完成 MMSE 量表，回忆与执行功能表现下降。',
         }),
       ).rejects.toBeInstanceOf(ProviderResponseRejectedException);
@@ -13043,6 +14032,8 @@ describe('AppService assessment consent requirements', () => {
       try {
         await service.createAiAssessmentDraft(doctorUser, {
           patientId: 'patient-profile-id',
+          assessmentType: 'MMSE/CDR',
+          physicalConditions: ['no_known_limitations'],
           transcript: '患者完成 MMSE 量表，回忆与执行功能表现下降。',
         });
       } catch (error) {
@@ -13083,6 +14074,8 @@ describe('AppService assessment consent requirements', () => {
       await expect(
         service.createAiAssessmentDraft(doctorUser, {
           patientId: 'patient-profile-id',
+          assessmentType: 'MMSE/CDR',
+          physicalConditions: ['no_known_limitations'],
           transcript: '患者完成 MMSE 量表，回忆与执行功能表现下降。',
         }),
       ).rejects.toMatchObject({
@@ -13131,6 +14124,8 @@ describe('AppService assessment consent requirements', () => {
       void service
         .createAiAssessmentDraft(doctorUser, {
           patientId: 'patient-profile-id',
+          assessmentType: 'MMSE/CDR',
+          physicalConditions: ['no_known_limitations'],
           transcript: '患者完成 MMSE 量表，回忆与执行功能表现下降。',
         })
         .catch((error: unknown) => {
@@ -13182,6 +14177,7 @@ describe('AppService assessment consent requirements', () => {
                   analysisSummary:
                     '患者短时记忆与执行功能下降，建议进行反应、注意力与上肢协调训练。',
                   confidence: 0.82,
+                  physicalConditions: ['upper_limb_limited'],
                 }),
               },
             },
@@ -13193,6 +14189,7 @@ describe('AppService assessment consent requirements', () => {
         service.createAiAssessmentDraft(doctorUser, {
           patientId: 'patient-profile-id',
           assessmentType: 'MMSE/CDR',
+          physicalConditions: ['upper_limb_limited'],
           transcript: '患者完成 MMSE 量表，回忆与执行功能表现下降。',
         }),
       ).resolves.toMatchObject({
@@ -13208,6 +14205,7 @@ describe('AppService assessment consent requirements', () => {
           executive: 50,
           language: 72,
         },
+        physicalConditions: ['upper_limb_limited'],
         rawInputSummary: {
           source: 'production_ai_assessment',
           transcript: '患者完成 MMSE 量表，回忆与执行功能表现下降。',
@@ -13242,6 +14240,18 @@ describe('AppService assessment consent requirements', () => {
           }),
         }),
       );
+      const requestBody = JSON.parse(mockRequestBody(fetchSpy)) as {
+        messages: Array<{ role: string; content: string }>;
+      };
+      expect(requestBody.messages[0].content).toMatch(
+        /confidence 必须在 0 到 1（含边界）之间/,
+      );
+      const userPrompt = JSON.parse(requestBody.messages[1].content) as {
+        responseContract: { confidence: string };
+      };
+      expect(userPrompt.responseContract.confidence).toMatch(
+        /0 到 1（含边界）的 JSON number/,
+      );
       expect(prisma.assessmentRecord.create).not.toHaveBeenCalled();
       expect(prisma.riskGradeRecord.create).not.toHaveBeenCalled();
       expect(prisma.aiAnalysisRecord.create).not.toHaveBeenCalled();
@@ -13255,6 +14265,53 @@ describe('AppService assessment consent requirements', () => {
           result: 'success',
         }),
       });
+    });
+
+    it('rejects an AI draft when physicalConditions is not a string array', async () => {
+      configureAiEnv();
+      const { prisma, service } = createService();
+      prisma.patientProfile.findUnique.mockResolvedValue({
+        id: 'patient-profile-id',
+        responsibleDoctorId: 'doctor-profile-id',
+      });
+      grantRequiredConsents(prisma);
+      jest.spyOn(globalThis, 'fetch').mockResolvedValue(
+        providerJsonResponse({
+          id: 'mimo-call-invalid-conditions-001',
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  scoreSummary: {
+                    mmse: 21,
+                    cdr: 1,
+                    memory: 45,
+                    orientation: 62,
+                    executive: 50,
+                    language: 72,
+                  },
+                  analysisSummary: '患者短时记忆与执行功能下降。',
+                  confidence: 0.82,
+                  physicalConditions: 'upper-limb',
+                }),
+              },
+            },
+          ],
+        }),
+      );
+
+      await expect(
+        service.createAiAssessmentDraft(doctorUser, {
+          patientId: 'patient-profile-id',
+          assessmentType: 'MMSE/CDR',
+          physicalConditions: ['no_known_limitations'],
+          transcript: '患者完成 MMSE 量表，回忆与执行功能表现下降。',
+        }),
+      ).rejects.toBeInstanceOf(ProviderResponseRejectedException);
+
+      expect(prisma.assessmentRecord.create).not.toHaveBeenCalled();
+      expect(prisma.riskGradeRecord.create).not.toHaveBeenCalled();
+      expect(prisma.aiAnalysisRecord.create).not.toHaveBeenCalled();
     });
 
     it('returns an AD-8 AI draft without requiring MMSE or CDR scores', async () => {
@@ -13296,6 +14353,7 @@ describe('AppService assessment consent requirements', () => {
         service.createAiAssessmentDraft(doctorUser, {
           patientId: 'patient-profile-id',
           assessmentType: 'AD-8',
+          physicalConditions: ['no_known_limitations'],
           transcript: '照护者完成 AD-8 访谈，报告重复提问和财务处理困难。',
         }),
       ).resolves.toMatchObject({
@@ -13321,6 +14379,11 @@ describe('AppService assessment consent requirements', () => {
       };
       const userPrompt = JSON.parse(requestBody.messages[1].content) as {
         requiredScoreSummaryFields: string[];
+        validationChecklist: string[];
+        responseContract: {
+          assessmentType: string;
+          scoreSummary: string;
+        };
       };
       expect(userPrompt.requiredScoreSummaryFields).toEqual([
         'ad8Total',
@@ -13335,6 +14398,18 @@ describe('AppService assessment consent requirements', () => {
       ]);
       expect(userPrompt.requiredScoreSummaryFields).not.toContain('mmse');
       expect(userPrompt.requiredScoreSummaryFields).not.toContain('cdr');
+      expect(requestBody.messages[0].content).toMatch(
+        /ad8Total；不一致的结果不得返回/,
+      );
+      expect(userPrompt.responseContract.assessmentType).toMatch(
+        /不能自行切换量表路径/,
+      );
+      expect(userPrompt.responseContract.scoreSummary).toMatch(
+        /必须且只能包含 requiredScoreSummaryFields/,
+      );
+      expect(userPrompt.validationChecklist).toContain(
+        'ad8Total must exactly equal that sum',
+      );
       expect(prisma.assessmentRecord.create).not.toHaveBeenCalled();
       expect(prisma.riskGradeRecord.create).not.toHaveBeenCalled();
     });
@@ -13375,6 +14450,7 @@ describe('AppService assessment consent requirements', () => {
       const draft = await service.createAiAssessmentDraft(doctorUser, {
         patientId: 'patient-profile-id',
         assessmentType: 'MMSE/CDR',
+        physicalConditions: ['no_known_limitations'],
         transcript: '患者完成 MMSE 量表，回忆与执行功能表现下降。',
       });
 
@@ -13530,6 +14606,7 @@ describe('AppService assessment consent requirements', () => {
           service.startAiConversation(doctorUser, {
             patientId: 'patient-profile-id',
             assessmentType: 'MMSE/CDR',
+            physicalConditions: ['no_known_limitations'],
           }),
         ).rejects.toBeInstanceOf(ForbiddenException);
 
@@ -13574,6 +14651,7 @@ describe('AppService assessment consent requirements', () => {
           service.startAiConversation(doctorUser, {
             patientId: 'patient-profile-id',
             assessmentType: 'MMSE/CDR',
+            physicalConditions: ['no_known_limitations'],
           }),
         ).resolves.toMatchObject({
           id: stringMatching(/^[0-9a-f-]{36}$/),
@@ -13640,6 +14718,7 @@ describe('AppService assessment consent requirements', () => {
           service.startAiConversation(doctorUser, {
             patientId: 'patient-profile-id',
             assessmentType: 'unsupported-scale',
+            physicalConditions: ['no_known_limitations'],
           }),
         ).rejects.toBeInstanceOf(BadRequestException);
 
@@ -13655,7 +14734,12 @@ describe('AppService assessment consent requirements', () => {
           createdByUserId: 'doctor-user-id',
           assessmentType: 'MMSE/CDR',
           status: 'active',
-          metadata: { turnCount: 1 },
+          metadata: {
+            turnCount: 1,
+            assessmentContext: {
+              physicalConditions: ['no_known_limitations'],
+            },
+          },
           provider: 'xiaomi-mimo',
           modelVersion: 'MiMo-V2.5',
           endpointRef:
@@ -13884,7 +14968,12 @@ describe('AppService assessment consent requirements', () => {
           patientId: 'patient-profile-id',
           assessmentType: 'MMSE/CDR',
           status: 'active',
-          metadata: { turnCount: 0 },
+          metadata: {
+            turnCount: 0,
+            assessmentContext: {
+              physicalConditions: ['no_known_limitations'],
+            },
+          },
         });
         prisma.patientProfile.findUnique.mockResolvedValue({
           id: 'patient-profile-id',
@@ -13962,7 +15051,12 @@ describe('AppService assessment consent requirements', () => {
           patientId: 'patient-profile-id',
           assessmentType: 'MMSE/CDR',
           status: 'active',
-          metadata: { turnCount: 22 },
+          metadata: {
+            turnCount: 22,
+            assessmentContext: {
+              physicalConditions: ['no_known_limitations'],
+            },
+          },
         });
         prisma.patientProfile.findUnique.mockResolvedValue({
           id: 'patient-profile-id',
@@ -14075,7 +15169,12 @@ describe('AppService assessment consent requirements', () => {
           patientId: 'patient-profile-id',
           assessmentType: 'MMSE/CDR',
           status: 'active',
-          metadata: { turnCount: 0 },
+          metadata: {
+            turnCount: 0,
+            assessmentContext: {
+              physicalConditions: ['no_known_limitations'],
+            },
+          },
         });
         prisma.patientProfile.findUnique.mockResolvedValue({
           id: 'patient-profile-id',
@@ -14152,6 +15251,9 @@ describe('AppService assessment consent requirements', () => {
             status: 'active',
             metadata: {
               turnCount: failureMode === 'out-of-sync turn state' ? 1 : 0,
+              assessmentContext: {
+                physicalConditions: ['no_known_limitations'],
+              },
             },
           });
           prisma.patientProfile.findUnique.mockResolvedValue({
@@ -14216,7 +15318,12 @@ describe('AppService assessment consent requirements', () => {
             patientId: 'patient-profile-id',
             assessmentType: 'MMSE/CDR',
             status: 'active',
-            metadata: { turnCount: 1 },
+            metadata: {
+              turnCount: 1,
+              assessmentContext: {
+                physicalConditions: ['no_known_limitations'],
+              },
+            },
           });
           prisma.patientProfile.findUnique.mockResolvedValue({
             id: 'patient-profile-id',
@@ -14269,7 +15376,12 @@ describe('AppService assessment consent requirements', () => {
           patientId: 'patient-profile-id',
           assessmentType: 'MMSE/CDR',
           status: 'active',
-          metadata: { turnCount: 0 },
+          metadata: {
+            turnCount: 0,
+            assessmentContext: {
+              physicalConditions: ['no_known_limitations'],
+            },
+          },
         });
         prisma.patientProfile.findUnique.mockResolvedValue({
           id: 'patient-profile-id',
@@ -14346,7 +15458,12 @@ describe('AppService assessment consent requirements', () => {
           createdByUserId: 'doctor-user-id',
           assessmentType: 'MMSE/CDR',
           status: 'active',
-          metadata: { turnCount: 0 },
+          metadata: {
+            turnCount: 0,
+            assessmentContext: {
+              physicalConditions: ['no_known_limitations'],
+            },
+          },
         };
         const pendingSession = {
           ...activeSession,
@@ -14425,7 +15542,7 @@ describe('AppService assessment consent requirements', () => {
         expect(prisma.aiConversationMessage.create).not.toHaveBeenCalled();
       });
 
-      it('submits a session into explicit pending_human_review state', async () => {
+      it('returns decrypted message fields when a patient submits a session for review', async () => {
         const { prisma, service } = createService();
         const activeSession = {
           id: conversationSessionId,
@@ -14433,7 +15550,12 @@ describe('AppService assessment consent requirements', () => {
           createdByUserId: 'doctor-user-id',
           assessmentType: 'MMSE/CDR',
           status: 'active',
-          metadata: { turnCount: 0 },
+          metadata: {
+            turnCount: 0,
+            assessmentContext: {
+              physicalConditions: ['no_known_limitations'],
+            },
+          },
         };
         const pendingSession = {
           ...activeSession,
@@ -14446,7 +15568,22 @@ describe('AppService assessment consent requirements', () => {
             reviewNote: '请医生结合量表复核。',
           }),
           completedAt: new Date('2026-06-03T09:30:00.000Z'),
-          messages: [],
+          messages: [
+            {
+              id: userMessageId,
+              sessionId: conversationSessionId,
+              turnIndex: 1,
+              role: 'user',
+              contentEnvelope: encryptedConversationMessage(userMessageId, {
+                content: conversationMessage,
+                contentSnapshot: { clinicalContext: '患者提交时的上下文' },
+                evidenceMetadata: {
+                  source: 'clinician_or_patient_input',
+                },
+              }),
+              createdAt: new Date('2026-06-03T09:01:00.000Z'),
+            },
+          ],
         };
         prisma.aiConversationSession.findUnique
           .mockResolvedValueOnce(activeSession)
@@ -14458,7 +15595,7 @@ describe('AppService assessment consent requirements', () => {
         prisma.aiConversationSession.updateMany.mockResolvedValue({ count: 1 });
 
         await expect(
-          service.completeAiConversation(doctorUser, conversationSessionId, {
+          service.completeAiConversation(patientUser, conversationSessionId, {
             summary: '患者主诉近期记忆和日期定向下降。',
             reviewNote: '请医生结合量表复核。',
           }),
@@ -14467,6 +15604,16 @@ describe('AppService assessment consent requirements', () => {
           status: 'pending_human_review',
           summary: '患者主诉近期记忆和日期定向下降。',
           reviewNote: '请医生结合量表复核。',
+          messages: [
+            objectContaining({
+              id: userMessageId,
+              content: conversationMessage,
+              contentSnapshot: { clinicalContext: '患者提交时的上下文' },
+              evidenceMetadata: {
+                source: 'clinician_or_patient_input',
+              },
+            }),
+          ],
         });
 
         expect(prisma.aiConversationSession.updateMany).toHaveBeenCalledWith({
@@ -14593,6 +15740,31 @@ describe('AppService assessment consent requirements', () => {
           .mockResolvedValueOnce(pendingSession)
           .mockResolvedValueOnce(reviewedSession);
         prisma.aiConversationSession.updateMany.mockResolvedValue({ count: 1 });
+        const linkedAssessmentId = '7a01bd2d-4b69-43f4-9d45-21f0fb570c72';
+        prisma.assessmentRecord.findMany.mockResolvedValue([
+          {
+            id: linkedAssessmentId,
+            resultEnvelope: encryptSensitiveJson(
+              {
+                scoreSummary: {},
+                rawInputSummary: {
+                  conversationEvidence: {
+                    sessionId: conversationSessionId,
+                    patientId: 'patient-profile-id',
+                    assessmentType: 'MMSE/CDR',
+                    status: 'pending_human_review',
+                  },
+                },
+              },
+              {
+                tableName: 'assessment_record',
+                recordId: linkedAssessmentId,
+                fieldName: 'resultEnvelope',
+              },
+              testSensitiveEncryptionKey,
+            ),
+          },
+        ]);
 
         await expect(
           service.reviewAiConversation(doctorUser, conversationSessionId, {
@@ -14658,6 +15830,7 @@ describe('AppService assessment consent requirements', () => {
               reviewedByUserId: true,
               reviewedAt: true,
               metadata: true,
+              assessmentType: true,
             },
           },
         );
@@ -14675,7 +15848,7 @@ describe('AppService assessment consent requirements', () => {
         );
       });
 
-      it('lists patient AI conversations by patient access', async () => {
+      it('returns decrypted pending-review message fields on patient refresh and responsible doctor read', async () => {
         const { prisma, service } = createService();
         prisma.patientProfile.findUnique.mockResolvedValue({
           id: 'patient-profile-id',
@@ -14717,6 +15890,31 @@ describe('AppService assessment consent requirements', () => {
           doctorUser,
           'patient-profile-id',
         );
+        const patientRefreshResult = await service.listPatientAiConversations(
+          patientUser,
+          'patient-profile-id',
+        );
+        expect(patientRefreshResult).toEqual([
+          objectContaining({
+            id: conversationSessionId,
+            patientId: 'patient-profile-id',
+            status: 'pending_human_review',
+            summary: '列表中的会话总结。',
+            messages: [
+              {
+                id: userMessageId,
+                sessionId: conversationSessionId,
+                turnIndex: 1,
+                role: 'user',
+                content: conversationMessage,
+                createdAt: new Date('2026-06-03T09:01:00.000Z'),
+              },
+            ],
+          }),
+        ]);
+        expect(JSON.stringify(patientRefreshResult)).not.toMatch(
+          /reviewNote|contentSnapshot|evidenceMetadata|provider|endpoint|prompt|metadata|reviewedByUserId/,
+        );
         expect(result).toEqual([
           objectContaining({
             id: conversationSessionId,
@@ -14729,10 +15927,14 @@ describe('AppService assessment consent requirements', () => {
                 id: userMessageId,
                 content: conversationMessage,
                 contentSnapshot: { clinicalContext: '列表临床上下文' },
+                evidenceMetadata: {
+                  source: 'clinician_or_patient_input',
+                },
               }),
             ],
           }),
         ]);
+        expect(result[0]?.messages?.[0]).not.toHaveProperty('reviewNote');
         expect(JSON.stringify(result)).not.toContain('Envelope');
 
         expect(prisma.aiConversationSession.findMany).toHaveBeenCalledWith({
@@ -14776,6 +15978,51 @@ describe('AppService assessment consent requirements', () => {
         ).not.toMatch(
           /"summary":true|"reviewNote":true|"content":true|"contentSnapshot":true|"evidenceMetadata":true/,
         );
+      });
+
+      it('rejects a decryptable message payload that substitutes reviewNote for message fields', async () => {
+        const { prisma, service } = createService();
+        prisma.patientProfile.findUnique.mockResolvedValue({
+          id: 'patient-profile-id',
+          responsibleDoctorId: 'doctor-profile-id',
+        });
+        prisma.aiConversationSession.findMany.mockResolvedValue([
+          {
+            id: conversationSessionId,
+            patientId: 'patient-profile-id',
+            status: 'pending_human_review',
+            summaryEnvelope: encryptedConversationSessionField(
+              'summaryEnvelope',
+              { summary: '有效总结。' },
+            ),
+            reviewEnvelope: encryptedConversationSessionField(
+              'reviewEnvelope',
+              { reviewNote: '有效复核说明。' },
+            ),
+            messages: [
+              {
+                id: userMessageId,
+                sessionId: conversationSessionId,
+                turnIndex: 1,
+                role: 'user',
+                contentEnvelope: encryptSensitiveJson(
+                  { reviewNote: '不应作为消息内容返回。' },
+                  {
+                    tableName: 'ai_conversation_message',
+                    recordId: userMessageId,
+                    fieldName: 'contentEnvelope',
+                  },
+                  testSensitiveEncryptionKey,
+                ),
+                createdAt: new Date('2026-06-03T09:01:00.000Z'),
+              },
+            ],
+          },
+        ]);
+
+        await expect(
+          service.listPatientAiConversations(doctorUser, 'patient-profile-id'),
+        ).rejects.toThrow('AI 会话消息加密载荷格式无效。');
       });
 
       it.each(
@@ -14883,6 +16130,7 @@ describe('AppService assessment consent requirements', () => {
     const speechTranscriptDto = {
       patientId: 'patient-profile-id',
       assessmentType: 'MMSE/CDR',
+      physicalConditions: ['no_known_limitations'],
       audio: {
         contentBase64: Buffer.from('formal-audio-bytes').toString('base64'),
         mimeType: 'audio/wav',
@@ -17136,7 +18384,7 @@ describe('AppService desensitized data export', () => {
         maskedMobilePhone: '138****6721',
         maskedCaregiverName: '李*',
         maskedCaregiverPhone: '139****8206',
-        responsibleDoctor: '王医生',
+        responsibleDoctor: '王*',
         status: 'active',
         createdAt: createdAt.toISOString(),
       },
@@ -17245,27 +18493,113 @@ describe('AppService desensitized data export', () => {
   it.each([
     ['admin', adminUser],
     ['super admin', superAdminUser],
-  ])('denies %s patient-level assessment exports', async (_label, actor) => {
+  ])(
+    'exports only doctor-confirmed assessments with safe fields for %s',
+    async (_label, actor) => {
+      const { prisma, service } = createService();
+      const createdAt = new Date('2026-05-14T09:00:00.000Z');
+      const assessmentId = 'f2dd8ef2-7c13-45c5-b5ad-5e21cb9a5f40';
+      const patientId = '4c12f91a-c184-4687-9c86-fda9b7f3ce19';
+      prisma.assessmentRecord.findMany.mockResolvedValue([
+        {
+          id: assessmentId,
+          patientId,
+          assessmentType: 'MMSE',
+          status: 'doctor_confirmed',
+          resultEnvelope: encryptSensitiveJson(
+            {
+              scoreSummary: {
+                mmse: 24,
+                cdr: 0,
+                memory: 5,
+                orientation: 5,
+                executive: 5,
+                language: 5,
+              },
+              rawInputSummary: {
+                transcript: 'raw transcript must not be exported',
+                analysisSummary: 'raw AI analysis must not be exported',
+                evidence: {
+                  provider: 'secret-provider',
+                  callId: 'secret-call-id',
+                  endpointRef: 'https://secret.example.invalid/assess',
+                },
+              },
+            },
+            {
+              tableName: 'assessment_record',
+              recordId: assessmentId,
+              fieldName: 'resultEnvelope',
+            },
+            testSensitiveEncryptionKey,
+          ),
+          createdAt,
+          patient: {
+            id: patientId,
+            identityEnvelope: encryptedPatientField(
+              patientId,
+              'identityEnvelope',
+              { name: '患者甲', gender: 'female', age: 72 },
+            ),
+          },
+          riskGrades: [{ riskLevel: 'moderate' }],
+          aiAnalyses: [{ confidence: 0.86 }],
+        },
+      ]);
+
+      const exported = await service.exportDataset(actor, 'assessments', {
+        format: 'json',
+        reason: '科研统计',
+      });
+
+      expect(exported.payload.rows).toEqual([
+        expect.objectContaining({
+          assessmentExportId: expect.stringMatching(
+            /^assessment_[a-f0-9]{12}$/,
+          ) as string,
+          patientExportId: expect.stringMatching(
+            /^patient_[a-f0-9]{12}$/,
+          ) as string,
+          maskedPatientName: '患*',
+          assessmentType: 'MMSE',
+          mmse: 24,
+          cdr: 0,
+          riskLevel: 'moderate',
+          aiConfidence: 0.86,
+        }),
+      ]);
+      const payloadText = JSON.stringify(exported.payload);
+      expect(payloadText).not.toContain('raw transcript must not be exported');
+      expect(payloadText).not.toContain('raw AI analysis must not be exported');
+      expect(payloadText).not.toContain('secret-provider');
+      expect(payloadText).not.toContain('secret-call-id');
+      expect(payloadText).not.toContain('secret.example.invalid');
+      expect(prisma.assessmentRecord.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: objectContaining({ status: 'doctor_confirmed' }),
+        }),
+      );
+    },
+  );
+
+  it('keeps clinical exports behind the existing data.export permission', async () => {
     const { prisma, service } = createService();
-    prisma.assessmentRecord.findMany.mockResolvedValue([]);
 
     await expect(
-      service.exportDataset(actor, 'assessments', {
+      service.exportDataset(doctorUser, 'assessments', {
         format: 'json',
         reason: '科研统计',
       }),
     ).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(
+      service.exportDataset(doctorUser, 'training-records', {
+        format: 'json',
+        reason: '训练质量复盘',
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
 
     expect(prisma.assessmentRecord.findMany).not.toHaveBeenCalled();
-    expect(prisma.auditLog.create).toHaveBeenCalledWith({
-      data: objectContaining({
-        actorUserId: actor.id,
-        action: 'data.export',
-        targetId: 'assessments',
-        result: 'denied',
-        metadata: objectContaining({ stage: 'authorization' }),
-      }),
-    });
+    expect(prisma.trainingSession.findMany).not.toHaveBeenCalled();
   });
 
   it('denies risk-level filtering that could reveal patient clinical state', async () => {
@@ -17320,28 +18654,112 @@ describe('AppService desensitized data export', () => {
     ['admin', adminUser],
     ['super admin', superAdminUser],
   ])(
-    'denies %s clinical training-record exports without relying on precise filters',
+    'exports only completed training records and preserves safe result states for %s',
     async (_label, actor) => {
       const { prisma, service } = createService();
-      prisma.trainingSession.findMany.mockResolvedValue([]);
-
-      await expect(
-        service.exportDataset(actor, 'training-records', {
-          format: 'csv',
-          reason: '训练质量复盘',
-        }),
-      ).rejects.toBeInstanceOf(ForbiddenException);
-
-      expect(prisma.trainingSession.findMany).not.toHaveBeenCalled();
-      expect(prisma.auditLog.create).toHaveBeenCalledWith({
-        data: objectContaining({
-          actorUserId: actor.id,
-          action: 'data.export',
-          targetId: 'training-records',
-          result: 'denied',
-          metadata: objectContaining({ stage: 'authorization' }),
-        }),
+      const patientId = 'e3e1caa5-7e2a-4cbf-94a8-cc4b6d3e39cd';
+      const identityEnvelope = encryptedPatientField(
+        patientId,
+        'identityEnvelope',
+        { name: '患者乙', gender: 'male', age: 68 },
+      );
+      const startedAt = new Date('2026-05-14T09:00:00.000Z');
+      const trainingResult = (overrides: Record<string, unknown>) => ({
+        score: 88,
+        completionRate: 0.92,
+        durationSeconds: 180,
+        reactionTimeMs: 420,
+        motionAccuracy: 0.91,
+        exerciseIntensity: 'moderate',
+        abnormalFlag: false,
+        qualityFlag: 'valid',
+        reviewStatus: null,
+        reviewConclusion: null,
+        rawPayloadHash: 'raw-payload-secret',
+        metricsSummary: { internal: 'metrics-summary-secret' },
+        reviewEnvelope: { reviewNote: 'review-note-secret' },
+        reviewedByUserId: 'real-reviewer-id',
+        reviewedAt: null,
+        ...overrides,
       });
+      prisma.trainingSession.findMany.mockResolvedValue([
+        {
+          id: '6b53c7db-5bf0-4d36-b6cb-6e6c29ad4a01',
+          patientId,
+          sessionStatus: 'completed',
+          syncStatus: 'synced',
+          startedAt,
+          patient: { id: patientId, identityEnvelope },
+          gameContent: { name: '记忆配对' },
+          result: trainingResult({}),
+        },
+        {
+          id: 'f1ca2c6e-a8a5-42cb-9e93-14d96a2fc3ca',
+          patientId,
+          sessionStatus: 'completed',
+          syncStatus: 'synced',
+          startedAt: new Date('2026-05-14T10:00:00.000Z'),
+          patient: { id: patientId, identityEnvelope },
+          gameContent: { name: '反应训练' },
+          result: trainingResult({
+            abnormalFlag: true,
+            qualityFlag: 'suspicious',
+            reviewStatus: 'reviewed',
+            reviewConclusion: 'needs_retrain',
+          }),
+        },
+        {
+          id: 'a67bfe26-6d70-49c9-885b-a82d160aa40c',
+          patientId,
+          sessionStatus: 'completed',
+          syncStatus: 'synced',
+          startedAt: new Date('2026-05-14T11:00:00.000Z'),
+          patient: { id: patientId, identityEnvelope },
+          gameContent: { name: '注意力训练' },
+          result: trainingResult({
+            qualityFlag: 'suspicious',
+          }),
+        },
+      ]);
+
+      const exported = await service.exportDataset(actor, 'training-records', {
+        format: 'json',
+        reason: '训练质量复盘',
+      });
+
+      expect(exported.payload.rows).toHaveLength(3);
+      expect(exported.payload.rows.map((row) => row.resultStatus)).toEqual([
+        'valid',
+        'abnormal',
+        'review_required',
+      ]);
+      expect(exported.payload.rows[1]).toEqual(
+        expect.objectContaining({
+          qualityFlag: 'suspicious',
+          abnormalFlag: true,
+          reviewStatus: 'reviewed',
+          reviewConclusion: 'needs_retrain',
+        }),
+      );
+      const payloadText = JSON.stringify(exported.payload);
+      expect(payloadText).not.toContain('raw-payload-secret');
+      expect(payloadText).not.toContain('metrics-summary-secret');
+      expect(payloadText).not.toContain('review-note-secret');
+      expect(payloadText).not.toContain('real-reviewer-id');
+      expect(prisma.trainingSession.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: objectContaining({ sessionStatus: 'completed' }),
+        }),
+      );
+      const query = mockArg<{ select: Record<string, unknown> }>(
+        prisma.trainingSession.findMany,
+      );
+      const selectedFields = JSON.stringify(query.select);
+      expect(selectedFields).not.toContain('rawPayloadHash');
+      expect(selectedFields).not.toContain('metricsSummary');
+      expect(selectedFields).not.toContain('reviewEnvelope');
+      expect(selectedFields).not.toContain('reviewedByUserId');
+      expect(selectedFields).not.toContain('device');
     },
   );
 

@@ -365,6 +365,20 @@ export class AppController {
   }
 
   @UseGuards(AuthGuard)
+  @Get('ai/conversations/:id/assessment-draft')
+  async getAiConversationAssessmentDraft(
+    @CurrentUser() user: RequestUser,
+    @Param('id') sessionId: string,
+  ) {
+    return {
+      draft: await this.appService.getAiConversationAssessmentDraft(
+        user,
+        sessionId,
+      ),
+    };
+  }
+
+  @UseGuards(AuthGuard)
   @Get('patients/:id/ai-conversations')
   listPatientAiConversations(
     @CurrentUser() user: RequestUser,

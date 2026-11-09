@@ -476,6 +476,9 @@ test("offline backfill rolls back a prior update and serializes concurrent Postg
   const admin = new PrismaClient({ datasources: { db: { url: baseUrl } } });
   let client;
   let dmlClient;
+  let barrierClient;
+  const updateBarrierLockId = advisoryLockId + 1;
+  let barrierHeld = false;
 
   try {
     await admin.$executeRawUnsafe(`CREATE SCHEMA "${schemaName}"`);
@@ -595,7 +598,7 @@ test("offline backfill rolls back a prior update and serializes concurrent Postg
       `CREATE FUNCTION "${schemaName}"."delay_sensitive_update"()
          RETURNS trigger AS $$
          BEGIN
-           PERFORM pg_sleep(2);
+           PERFORM pg_advisory_xact_lock(${updateBarrierLockId});
            RETURN NEW;
          END;
          $$ LANGUAGE plpgsql`,
@@ -605,6 +608,19 @@ test("offline backfill rolls back a prior update and serializes concurrent Postg
          BEFORE UPDATE ON "user"
          FOR EACH ROW EXECUTE FUNCTION "${schemaName}"."delay_sensitive_update"()`,
     );
+
+    // A dedicated single-connection pool keeps the session lock on the same backend.
+    // Hold updates until both the ordinary DML and second backfill are observed waiting.
+    const barrierUrl = new URL(databaseUrl);
+    barrierUrl.searchParams.set("connection_limit", "1");
+    barrierClient = new PrismaClient({
+      datasources: { db: { url: barrierUrl.toString() } },
+    });
+    await barrierClient.$queryRawUnsafe(
+      'SELECT 1 AS "locked" FROM pg_advisory_lock($1)',
+      updateBarrierLockId,
+    );
+    barrierHeld = true;
 
     const firstBackfill = startPnpm(["db:sensitive:backfill"], {
       DATABASE_URL: databaseUrl,
@@ -640,6 +656,11 @@ test("offline backfill rolls back a prior update and serializes concurrent Postg
       ...keyEnvironment,
     });
     await waitForAdvisoryLock(client, false);
+    await barrierClient.$queryRawUnsafe(
+      'SELECT pg_advisory_unlock($1) AS "unlocked"',
+      updateBarrierLockId,
+    );
+    barrierHeld = false;
     const [migrated, , validated] = await Promise.all([
       firstBackfill.completed,
       ordinaryInsert,
@@ -726,6 +747,13 @@ test("offline backfill rolls back a prior update and serializes concurrent Postg
     );
     assert.deepEqual(batchInspection, { rows: 101, migratedRows: 101 });
   } finally {
+    if (barrierHeld) {
+      await barrierClient.$queryRawUnsafe(
+        'SELECT pg_advisory_unlock($1) AS "unlocked"',
+        updateBarrierLockId,
+      );
+    }
+    await barrierClient?.$disconnect();
     await dmlClient?.$disconnect();
     await client?.$disconnect();
     await admin.$executeRawUnsafe(
