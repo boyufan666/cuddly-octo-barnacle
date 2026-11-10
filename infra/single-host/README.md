@@ -67,3 +67,31 @@ curl --fail --max-time 10 -I https://hd117.com/
 6. 验证登录、HTTPS、匿名访问保护、备份恢复和 MiMo 连通性，再交付账号。
 
 首次证书签发使用 `nginx.conf`（HTTP）；签发成功后安装 `nginx-tls.conf`，不要在证书文件尚不存在时启用 TLS 配置。
+
+## 训练内容接入与交付检查
+
+`db:bootstrap:production` 只初始化机构与账号，不注册游戏、采集条件或协议。复制 Unity/WebGL、MediaPipe 和网页资源不等于训练内容已经发布。服务 readiness 也不检查这些业务配置。
+
+发布已有内容应使用管理员正式管理接口，按游戏编码检查是否已存在，核对当前源码目录、版本、输入方式、指标与真实资源后逐项登记；Unity 还须通过独立的构建绑定接口校验 manifest。不得运行整库 seed 来补生产配置，不得导入演示患者、成绩、授权或冒称已获医师批准的采集规则。
+
+完整训练交付必须分别记录：
+
+1. 已发布游戏清单、版本、发布审计及运行资源校验。
+2. 经负责人确认的采集条件、协议和适用范围；技术阈值须注明来源，不能自行推断临床适用范围。
+3. 专用虚构患者的方案推荐、医师确认、采集批次准备、实际训练与结果复核；无法现场验证的摄像头、动作或音频应明确列为未验收。
+
+游戏、条件或协议为零时，应报告“训练业务未配置”，不能以构建、静态资源 HTTP 200 或独立回归通过宣称训练闭环可用。升级时保留既有配置，新增内容使用显式发布流程，不自动创建默认协议或批次。
+
+现有9项内容的登记工具（从仓库根目录执行，Node版本须满足项目要求）：
+
+```sh
+node scripts/build-existing-production-game-catalog.mjs /absolute/path/catalog.json
+python3 scripts/register-existing-production-games.py \
+  --base-url https://your-production-host \
+  --credentials /absolute/path/credentials.json \
+  --catalog /absolute/path/catalog.json \
+  --backup-evidence /absolute/path/verified-backup.sha256 \
+  --evidence-dir /absolute/path/evidence
+```
+
+默认只登录、读取和比较；审阅后显式加 `--apply` 才登记缺少的内容，同编码但字段不同即停止，不覆盖。凭据文件须为0600的普通文件，结构为 `{"administrator":{"account":"…","password":"…"}}`，不要提交版本库。备份证据须在独立完成真实备份及可读性校验后填写，格式为 `SHA256  服务器备份绝对路径`；登记工具不会替代备份或恢复验证。Unity登记与构建绑定分两步，失败须查看证据后人工处理，不自动重试或降级。
