@@ -1931,7 +1931,7 @@ export function RoleWorkspace() {
         planItemForRequirement?.gameContent,
       );
       if (!prepRequirement.ready) {
-        setActionStatus("训练安排已同步，但训练内容尚未完成正式配置。");
+        setActionStatus(`训练安排已同步，${prepRequirement.reason}`);
         return;
       }
       const requiresCamera = prepRequirement.requiresCameraCheck;

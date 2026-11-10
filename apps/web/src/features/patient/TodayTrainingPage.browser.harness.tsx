@@ -12,6 +12,8 @@ declare global {
   interface Window {
     todayTrainingHarness: {
       showActiveSession: () => void;
+      showNoActiveSession: () => void;
+      preparationItemIds: () => string[];
       snapshot: () => {
         abortReasons: string[];
         resumeCalls: number;
@@ -40,6 +42,14 @@ const currentPlan = {
       durationMinutes: 10,
       difficulty: "medium",
       gameContent,
+    },
+    {
+      id: "item-2",
+      rehabPlanId: "plan-1",
+      gameContentId: "game-2",
+      durationMinutes: 8,
+      difficulty: "easy",
+      gameContent: { ...gameContent, id: "game-2", name: "镜像训练" },
     },
   ],
 } as RehabPlan;
@@ -72,15 +82,18 @@ function Harness() {
   const [hasActiveSession, setHasActiveSession] = useState(true);
   const [isAborting, setIsAborting] = useState(false);
   const [resumeCalls, setResumeCalls] = useState(0);
+  const [preparationItemIds, setPreparationItemIds] = useState<string[]>([]);
   const [status, setStatus] = useState<string | null>(null);
 
   useEffect(() => {
     window.todayTrainingHarness = {
       showActiveSession: () => setHasActiveSession(true),
+      showNoActiveSession: () => setHasActiveSession(false),
+      preparationItemIds: () => preparationItemIds,
       snapshot: () => ({ abortReasons, resumeCalls }),
       succeedNextAbort: () => setAbortOutcome("success"),
     };
-  }, [abortReasons, resumeCalls]);
+  }, [abortReasons, resumeCalls, preparationItemIds]);
 
   return (
     <>
@@ -113,7 +126,9 @@ function Harness() {
         onResumeTraining={async () => {
           setResumeCalls((current) => current + 1);
         }}
-        onStartPreparation={() => undefined}
+        onStartPreparation={(task) => {
+          if (task) setPreparationItemIds((current) => [...current, task.id]);
+        }}
         onViewRecords={() => undefined}
         patient={patient}
         todayTrainingRecords={todayTrainingRecords}

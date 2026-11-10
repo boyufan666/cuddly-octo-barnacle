@@ -592,6 +592,7 @@ type TtsSpeechOutputDto = {
 
 type RecommendPlanDto = {
   patientId: string;
+  gameContentIds?: string[];
 };
 
 type ConfirmPlanDto = {
@@ -5909,6 +5910,26 @@ export class AppService {
       'rehab_plan_recommend_required',
     );
 
+    let requestedGameIds: string[] | undefined;
+    if (dto.gameContentIds !== undefined) {
+      if (
+        !Array.isArray(dto.gameContentIds) ||
+        dto.gameContentIds.length === 0 ||
+        dto.gameContentIds.length > 9 ||
+        dto.gameContentIds.some(
+          (id) => typeof id !== 'string' || !id.trim() || id !== id.trim(),
+        )
+      ) {
+        throw new BadRequestException(
+          '显式选择必须包含 1 到 9 个有效训练游戏 ID。',
+        );
+      }
+      if (new Set(dto.gameContentIds).size !== dto.gameContentIds.length) {
+        throw new BadRequestException('显式选择不能包含重复训练游戏。');
+      }
+      requestedGameIds = dto.gameContentIds;
+    }
+
     const currentRisk = await this.prisma.riskGradeRecord.findFirst({
       where: { patientId: dto.patientId, isCurrent: true },
       orderBy: { createdAt: 'desc' },
@@ -5976,18 +5997,28 @@ export class AppService {
       );
     }
 
-    const selectedGames = safeGames
-      .map((game) => ({
-        game,
-        score: this.scoreGame(
-          game.trainingTargets,
-          game.tags,
-          effectiveRiskLevel,
-          physicalConditions,
-        ),
-      }))
-      .sort((a, b) => this.compareGameRecommendationCandidates(a, b))
-      .slice(0, 3);
+    const scoredGames = safeGames.map((game) => ({
+      game,
+      score: this.scoreGame(
+        game.trainingTargets,
+        game.tags,
+        effectiveRiskLevel,
+        physicalConditions,
+      ),
+    }));
+    const selectedGames = requestedGameIds
+      ? requestedGameIds.map((id) => {
+          const selected = scoredGames.find(({ game }) => game.id === id);
+          if (!selected) {
+            throw new BadRequestException(
+              '显式选择包含不存在、未正式发布或不满足当前身体状况准入的训练游戏。',
+            );
+          }
+          return selected;
+        })
+      : scoredGames
+          .sort((a, b) => this.compareGameRecommendationCandidates(a, b))
+          .slice(0, 3);
 
     return this.prisma
       .$transaction(async (tx) => {
@@ -6054,6 +6085,10 @@ export class AppService {
               patientId: dto.patientId,
               riskGradeId: currentRisk.id,
               doctorId: actingDoctorId,
+              selectionSource: requestedGameIds
+                ? 'explicit_game_selection'
+                : 'ranked_recommendation',
+              selectedGameContentIds: selectedGames.map(({ game }) => game.id),
             },
           },
         });

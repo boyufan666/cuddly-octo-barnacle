@@ -101,3 +101,32 @@ test("successful abort clears the local reason before a future active session", 
 function snapshot(page: Page) {
   return page.evaluate(() => window.todayTrainingHarness.snapshot());
 }
+
+test("patients can choose a later approved task without changing the default next action", async () => {
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage();
+  page.setDefaultTimeout(2_000);
+  try {
+    await page.setContent('<main id="root"></main>');
+    await page.addScriptTag({ path: bundlePath });
+    assert.equal(await page.getByRole("region", { name: "选择训练" }).count(), 0);
+
+    await page.evaluate(() => window.todayTrainingHarness.showNoActiveSession());
+    await page.getByRole("button", { name: "选择训练：镜像训练", exact: true }).click();
+    assert.deepEqual(
+      await page.evaluate(() => window.todayTrainingHarness.preparationItemIds()),
+      ["item-2"],
+    );
+    await page.getByTestId("patient-next-action").click();
+    assert.deepEqual(
+      await page.evaluate(() => window.todayTrainingHarness.preparationItemIds()),
+      ["item-2", "item-1"],
+    );
+
+    await page.evaluate(() => window.todayTrainingHarness.showActiveSession());
+    await page.getByTestId("patient-resume-training").waitFor();
+    assert.equal(await page.getByRole("region", { name: "选择训练" }).count(), 0);
+  } finally {
+    await browser.close();
+  }
+});

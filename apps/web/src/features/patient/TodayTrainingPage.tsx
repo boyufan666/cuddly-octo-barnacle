@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { StatusBadge } from "@/components/ui/StatusBadge";
+import { TrainingTaskPicker } from "./TrainingTaskPicker";
 import type {
   CaregiverSummaryResponse,
   PatientProfile,
@@ -277,6 +278,15 @@ function TodayTrainingPageContent({
           {primaryAction.label}
         </Button>
       )}
+      {activeTrainingResolution.status === "none" && tasks.length > 0 ? (
+        <TrainingTaskPicker
+          completedPlanItemIds={completedPlanItemIds}
+          items={tasks}
+          nextTaskId={nextTask?.id}
+          onSelectPlanItem={onStartPreparation}
+          onViewRecords={onViewRecords}
+        />
+      ) : null}
     </section>
   );
 }

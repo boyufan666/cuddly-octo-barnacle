@@ -10968,6 +10968,140 @@ describe('AppService rehab plan recommendation game readiness', () => {
     ],
   };
 
+  function createExplicitSelectionService(
+    physicalConditions = ['no_known_limitations'],
+  ) {
+    const context = createService();
+    const { prisma } = context;
+    prisma.patientProfile.findUnique.mockResolvedValue({
+      id: 'patient-profile-id',
+      userId: 'patient-user-id',
+      responsibleDoctorId: 'doctor-profile-id',
+    });
+    prisma.riskGradeRecord.findFirst.mockResolvedValue({
+      id: 'risk-id',
+      riskLevel: 'high',
+      confirmedById: 'doctor-user-id',
+      confirmedAt: new Date('2026-05-20T05:30:00.000Z'),
+      assessment: recommendationAssessment(physicalConditions),
+    });
+    const games = [
+      ...[
+        'garden_reach',
+        'mirror_sequence',
+        'nebula_sort',
+        'balance_breath',
+        'bilateral_rhythm_sync',
+        'orbital_trace_follow',
+        'center_shift_bridge',
+      ].map((code) => ({ ...releasedBrowserPoseGame, id: code, code })),
+      releasedUnityGame,
+      releasedCognitiveGame,
+    ];
+    prisma.gameContent.findMany.mockResolvedValue(games);
+    prisma.rehabPlan.create.mockImplementation(({ data }) =>
+      Promise.resolve({
+        id: 'plan-id',
+        ...data,
+        items: data.items.create.map((item) => ({
+          ...item,
+          gameContent: games.find((game) => game.id === item.gameContentId)!,
+        })),
+      }),
+    );
+    return { ...context, games };
+  }
+
+  it('preserves the default three selections when explicit IDs are omitted', async () => {
+    const { service, prisma } = createExplicitSelectionService();
+    await service.recommendPlan(doctorUser, {
+      patientId: 'patient-profile-id',
+    });
+    expect(
+      prisma.rehabPlan.create.mock.calls[0][0].data.items.create,
+    ).toHaveLength(3);
+    expect(prisma.auditLog.create).toHaveBeenCalledWith({
+      data: objectContaining({
+        metadata: objectContaining({
+          selectionSource: 'ranked_recommendation',
+        }),
+      }),
+    });
+  });
+
+  it('keeps all nine explicitly selected ready games in requested order and pending confirmation', async () => {
+    const { service, prisma, games } = createExplicitSelectionService();
+    const ids = games.map((game) => game.id).reverse();
+    const result = await service.recommendPlan(doctorUser, {
+      patientId: 'patient-profile-id',
+      gameContentIds: ids,
+    });
+    expect(result.items.map((item) => item.gameContentId)).toEqual(ids);
+    expect(result.items.map((item) => item.sequence)).toEqual([
+      1, 2, 3, 4, 5, 6, 7, 8, 9,
+    ]);
+    expect(result.status).toBe('pending_confirm');
+    expect(result.isCurrent).toBe(false);
+    expect(prisma.auditLog.create).toHaveBeenCalledWith({
+      data: objectContaining({
+        metadata: objectContaining({
+          selectionSource: 'explicit_game_selection',
+          selectedGameContentIds: ids,
+        }),
+      }),
+    });
+  });
+
+  it.each([
+    [[]],
+    [['garden_reach', 'garden_reach']],
+    [Array.from({ length: 10 }, (_, index) => `game-${index}`)],
+    [['unknown-game']],
+    [[' garden_reach']],
+  ])(
+    'rejects invalid explicit IDs without creating a substitute plan: %j',
+    async (ids) => {
+      const { service, prisma } = createExplicitSelectionService();
+      await expect(
+        service.recommendPlan(doctorUser, {
+          patientId: 'patient-profile-id',
+          gameContentIds: ids,
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.rehabPlan.create).not.toHaveBeenCalled();
+    },
+  );
+
+  it('rejects an explicitly chosen unpublished game rather than selecting another ready game', async () => {
+    const { service, prisma, games } = createExplicitSelectionService();
+    prisma.gameContent.findMany.mockResolvedValue([
+      ...games,
+      {
+        ...releasedBrowserPoseGame,
+        id: 'unreleased',
+        publishedStatus: 'draft',
+      },
+    ]);
+    await expect(
+      service.recommendPlan(doctorUser, {
+        patientId: 'patient-profile-id',
+        gameContentIds: ['garden_reach', 'unreleased'],
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.rehabPlan.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects an explicitly chosen physically incompatible game without dropping it', async () => {
+    const { service, prisma } = createExplicitSelectionService(['wheelchair']);
+    await expect(
+      service.recommendPlan(doctorUser, {
+        patientId: 'patient-profile-id',
+        gameContentIds: ['cognitive-game-id', 'garden_reach'],
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.rehabPlan.create).not.toHaveBeenCalled();
+  });
+
   it('recommends formally ready Unity, browser pose, and cognitive web games', async () => {
     const { prisma, service } = createService();
     prisma.patientProfile.findUnique.mockResolvedValue({

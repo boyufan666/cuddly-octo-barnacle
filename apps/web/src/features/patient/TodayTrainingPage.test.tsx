@@ -106,6 +106,7 @@ test("Today prioritizes the unfinished session without exposing technical identi
   assert.match(html, /继续本次训练/);
   assert.match(html, /终止本次训练/);
   assert.doesNotMatch(html, /开始训练准备/);
+  assert.doesNotMatch(html, /aria-label="选择训练"|选择训练：/);
   assert.doesNotMatch(html, /session-secret-id|batch-secret-id|Provider/i);
 });
 
@@ -119,6 +120,42 @@ test("Today hard-blocks inconsistent active records without offering a session a
 
   assert.match(html, /联系工作人员/);
   assert.doesNotMatch(html, /继续本次训练|终止本次训练|开始训练准备/);
+  assert.doesNotMatch(html, /aria-label="选择训练"|选择训练：/);
+});
+
+test("Today exposes the current plan choices while retaining its next-task recommendation", async () => {
+  const html = await renderToday({
+    activeTrainingResolution: { status: "none" },
+    currentPlan: {
+      ...currentPlan,
+      items: [
+        ...currentPlan.items,
+        {
+          ...currentPlan.items[0],
+          id: "item-2",
+          gameContent: { ...currentPlan.items[0].gameContent, name: "镜像训练" },
+        },
+      ],
+    },
+  });
+
+  assert.match(html, /选择训练：记忆训练/);
+  assert.match(html, /选择训练：镜像训练/);
+  assert.match(html, /建议先做/);
+  assert.match(html, /开始训练准备/);
+});
+
+test("completed plan items offer records instead of restarting training", async () => {
+  const html = await renderToday({
+    activeTrainingResolution: { status: "none" },
+    todayTrainingRecords: {
+      ...todayTrainingRecords,
+      sessions: [{ ...activeSession, sessionStatus: "completed", result: {} } as TrainingRecordSession],
+    },
+  });
+
+  assert.match(html, /查看训练记录：记忆训练/);
+  assert.doesNotMatch(html, /选择训练：记忆训练|开始训练准备/);
 });
 
 test("resume and abort expose independent busy labels while preventing conflicting actions", async () => {
