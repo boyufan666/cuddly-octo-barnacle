@@ -95,3 +95,7 @@ python3 scripts/register-existing-production-games.py \
 ```
 
 默认只登录、读取和比较；审阅后显式加 `--apply` 才登记缺少的内容，同编码但字段不同即停止，不覆盖。凭据文件须为0600的普通文件，结构为 `{"administrator":{"account":"…","password":"…"}}`，不要提交版本库。备份证据须在独立完成真实备份及可读性校验后填写，格式为 `SHA256  服务器备份绝对路径`；登记工具不会替代备份或恢复验证。Unity登记与构建绑定分两步，失败须查看证据后人工处理，不自动重试或降级。
+
+项目负责人自行确定技术采集范围时，使用 `scripts/register-technical-collection-config.py` 的显式 `--base-url`、`--credentials`、`--catalog`、`--runtime-gates`、`--backup-evidence`、`--evidence-dir` 参数。先只读生成并审阅9项条件/协议，再加 `--apply`。runtime-gates JSON应由当前正式浏览器游戏定义生成，并逐项核对源码阈值；Unity独立指定的置信度参数在范围文档记录。工具不执行整库seed、不覆盖冲突配置，也不替代真实备份与恢复验证。
+
+本项目当前范围见 `docs/learning-demo-collection-scope.md`：按负责人选择沿用正式接口及普通技术名称，技术范围由负责人授权设计；不得据此宣称存在临床批准或独立sandbox。配置登记、方案确认、批次ready与真实训练完成是不同状态，分别保存证据。
