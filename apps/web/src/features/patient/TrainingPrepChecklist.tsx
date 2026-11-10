@@ -1,7 +1,11 @@
+import { PoseCheckPreview, type CheckPoseAction } from "./PoseCheckPreview";
 import { Camera, CheckCircle2, Footprints, ListChecks } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
-import { StatusBadge, type StatusBadgeStatus } from "@/components/ui/StatusBadge";
+import {
+  StatusBadge,
+  type StatusBadgeStatus,
+} from "@/components/ui/StatusBadge";
 import { resolveTrainingStartReadiness } from "@/lib/training-start-readiness";
 import type { RehabPlan } from "@/types/api";
 
@@ -24,7 +28,7 @@ type TrainingPrepChecklistProps = {
   isBusy: boolean;
   isRefreshingPreparation: boolean;
   onCheckDevice: () => Promise<void>;
-  onCheckPose: () => Promise<void>;
+  onCheckPose: CheckPoseAction;
   onRefreshTrainingPreparation: (planItem?: TrainingTask) => Promise<void>;
   onStartTraining: () => Promise<void>;
   planItem?: TrainingTask;
@@ -47,11 +51,13 @@ export function TrainingPrepChecklist({
   requiresCameraCheck,
 }: TrainingPrepChecklistProps) {
   const cameraDeviceReady =
-    readiness.cameraPermission === "granted" && Boolean(readiness.cameraDeviceId);
+    readiness.cameraPermission === "granted" &&
+    Boolean(readiness.cameraDeviceId);
   const poseCheckReady = readiness.poseCheckStatus === "ready";
   const poseCheckDescription = resolvePatientPoseCheckDescription(
     readiness.poseCheckStatus,
     requiresCameraCheck,
+    readiness.poseError,
   );
   const deviceReady = !requiresCameraCheck || cameraDeviceReady;
   const poseReady = !requiresCameraCheck || poseCheckReady;
@@ -105,8 +111,8 @@ export function TrainingPrepChecklist({
       action: !requiresCameraCheck
         ? "本次训练不需要站位检查。"
         : poseCheckReady
-          ? "保持上半身和双手在画面内。"
-          : "请完成站位检查，确认画面稳定。",
+          ? "检查已通过，训练时请保持上半身入镜。"
+          : "请在实时画面中调整位置，再完成站位检查。",
       description: !requiresCameraCheck
         ? "训练过程中请跟随页面提示。"
         : poseCheckDescription,
@@ -118,9 +124,14 @@ export function TrainingPrepChecklist({
   ];
 
   return (
-    <section className="patient-task-layout grid gap-5" data-testid="patient-prep-flow">
+    <section
+      className="patient-task-layout grid gap-5"
+      data-testid="patient-prep-flow"
+    >
       <div>
-        <p className="text-sm font-black text-[var(--accent-strong)]">训练准备</p>
+        <p className="text-sm font-black text-[var(--accent-strong)]">
+          训练准备
+        </p>
         <h2 className="mt-2 text-3xl font-black text-[var(--ink-strong)] md:text-4xl">
           训练前检查
         </h2>
@@ -157,7 +168,7 @@ export function TrainingPrepChecklist({
         </ol>
 
         {requiresCameraCheck ? (
-          <div className="grid gap-3 md:grid-cols-2">
+          <div className="grid gap-3 md:grid-cols-2 md:items-start">
             <Button
               intent="secondary"
               isLoading={readiness.cameraPermission === "requesting"}
@@ -165,13 +176,11 @@ export function TrainingPrepChecklist({
             >
               检测摄像头
             </Button>
-            <Button
-              intent="secondary"
-              isLoading={readiness.poseCheckStatus === "loading"}
-              onClick={() => void onCheckPose()}
-            >
-              站位检查
-            </Button>
+            <PoseCheckPreview
+              onCheckPose={onCheckPose}
+              disabled={!hasCameraConsent || !cameraDeviceReady}
+              isChecking={readiness.poseCheckStatus === "loading"}
+            />
           </div>
         ) : null}
 
@@ -197,6 +206,7 @@ export function TrainingPrepChecklist({
 function resolvePatientPoseCheckDescription(
   status: TrainingReadinessView["poseCheckStatus"],
   requiresCameraCheck: boolean,
+  poseError?: string,
 ) {
   if (!requiresCameraCheck) {
     return "训练过程中请跟随页面提示。";
@@ -205,10 +215,10 @@ function resolvePatientPoseCheckDescription(
     return "站位检查通过后即可进入训练。";
   }
   if (status === "error") {
-    return "画面不够稳定，请调整站位后重试。";
+    return poseError ?? "站位检查未完成，请查看检查提示。";
   }
   if (status === "loading") {
-    return "正在检查站位，请保持上半身和双手在画面内。";
+    return "正在读取摄像头姿态，请保持上半身入镜。";
   }
   return "站位检查通过后即可进入训练。";
 }
@@ -239,11 +249,19 @@ function PrepStepCard({
       <div>
         <div className="flex flex-wrap items-center gap-2">
           <Icon className="h-5 w-5 text-[var(--accent-strong)]" />
-          <h4 className="text-lg font-black text-[var(--ink-strong)]">{label}</h4>
-          {ready ? <CheckCircle2 className="h-5 w-5 text-[var(--success-strong)]" /> : null}
+          <h4 className="text-lg font-black text-[var(--ink-strong)]">
+            {label}
+          </h4>
+          {ready ? (
+            <CheckCircle2 className="h-5 w-5 text-[var(--success-strong)]" />
+          ) : null}
         </div>
-        <p className="mt-1 font-bold leading-6 text-[var(--ink-soft)]">{description}</p>
-        <p className="mt-1 text-sm font-bold leading-6 text-[var(--ink-soft)]">{action}</p>
+        <p className="mt-1 font-bold leading-6 text-[var(--ink-soft)]">
+          {description}
+        </p>
+        <p className="mt-1 text-sm font-bold leading-6 text-[var(--ink-soft)]">
+          {action}
+        </p>
       </div>
       <StatusBadge status={badgeStatus}>{status}</StatusBadge>
     </li>

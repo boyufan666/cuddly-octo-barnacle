@@ -14,6 +14,12 @@ import {
   ensureBrowserPoseRuntimeAssets,
 } from "./browser-pose-runtime-assets";
 import { withBenignPoseConsoleErrorSuppressed } from "./pose-runtime-console";
+import {
+  observePoseReadiness,
+  PoseVideoFrameTimeout,
+  poseVideoFrameTimeoutMs,
+  waitForPoseVideoFrame,
+} from "./pose-readiness-observation";
 
 export type PoseLandmark = NormalizedLandmark;
 
@@ -40,51 +46,66 @@ export type PoseTrainingRuntime = {
   stop: () => void;
 };
 
-export async function checkPoseReadiness(): Promise<PoseReadinessResult> {
+export async function checkPoseReadiness({
+  videoElement,
+  signal,
+}: {
+  videoElement: HTMLVideoElement;
+  signal?: AbortSignal;
+}): Promise<PoseReadinessResult> {
+  throwIfPoseRuntimePreparationAborted(signal);
   const deviceId = requireBrowserPoseCameraDeviceId();
   const opened = await openBrowserPoseCamera({
     deviceId,
     width: { ideal: 640 },
     height: { ideal: 480 },
   });
-
-  let video: HTMLVideoElement | undefined;
+  let cameraStopped = false;
+  const stopCamera = () => {
+    if (cameraStopped) return;
+    cameraStopped = true;
+    releaseVideoElement(videoElement);
+    stopMediaStream(opened.stream);
+  };
+  signal?.addEventListener("abort", stopCamera, { once: true });
   try {
-    video = await createReadyVideo(opened.stream);
+    throwIfPoseRuntimePreparationAborted(signal);
+    await attachStreamToVideo(videoElement, opened.stream, signal);
+    try {
+      await waitForPoseVideoFrame(
+        videoElement,
+        undefined,
+        poseVideoFrameTimeoutMs,
+        signal,
+      );
+    } catch (error) {
+      if (error instanceof PoseVideoFrameTimeout) {
+        throw new Error(
+          "摄像头首帧加载超时，请检查实时预览、浏览器权限和设备占用情况。",
+        );
+      }
+      throw error;
+    }
     const poseLandmarker = await getPoseLandmarker();
-    const result = detectPoseForVideo(poseLandmarker, video, performance.now());
-    const pose = result.landmarks[0];
-    if (!pose?.length) {
-      throw new Error(
-        "未检测到完整人体姿态，请确认全身或上半身进入摄像头画面。",
-      );
-    }
-
-    const visibleLandmarks = pose.filter(
-      (landmark) => (landmark.visibility ?? 0) >= 0.5,
+    throwIfPoseRuntimePreparationAborted(signal);
+    const observation = await observePoseReadiness(
+      videoElement,
+      (timestampMs) =>
+        detectPoseForVideo(poseLandmarker, videoElement, timestampMs)
+          .landmarks[0] ?? [],
+      signal,
     );
-    const averageVisibility =
-      pose.reduce((sum, landmark) => sum + (landmark.visibility ?? 0), 0) /
-      pose.length;
-
-    if (visibleLandmarks.length < 12 || averageVisibility < 0.45) {
-      throw new Error(
-        "姿态关键点置信度不足，请改善光线、站远一些并保持身体入镜。",
-      );
-    }
-
     return {
       poseRuntimeStatus: "ready",
       poseModelVersion,
-      poseLandmarkCount: pose.length,
-      poseAverageVisibility: Number(averageVisibility.toFixed(3)),
+      ...observation,
       poseQualityFlag: "valid",
       cameraDeviceId: opened.deviceId,
       checkedAt: new Date().toISOString(),
     };
   } finally {
-    if (video) releaseVideoElement(video);
-    stopMediaStream(opened.stream);
+    signal?.removeEventListener("abort", stopCamera);
+    stopCamera();
   }
 }
 
@@ -173,11 +194,6 @@ function detectPoseForVideo(
   return withBenignPoseConsoleErrorSuppressed(() =>
     poseLandmarker.detectForVideo(video, timestampMs),
   );
-}
-
-function createReadyVideo(stream: MediaStream) {
-  const video = document.createElement("video");
-  return attachStreamToVideo(video, stream);
 }
 
 function attachStreamToVideo(

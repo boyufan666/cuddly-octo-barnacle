@@ -4,6 +4,7 @@ import { webcrypto } from "node:crypto";
 import type { ConsentRecord } from "@/types/api";
 import {
   createPoseTrainingRuntime,
+  checkPoseReadiness,
 } from "./pose-readiness.ts";
 import {
   openBrowserPoseCamera,
@@ -77,7 +78,42 @@ test("pose runtime releases video and camera when local model preparation fails"
   assert.equal(video.pauseCount, 1);
 });
 
+test("visible pose precheck abort releases the camera while waiting for its first real frame", async () => {
+  const video = new FakeVideoElement(true);
+  let stopCalls = 0;
+  installBrowserEnvironment(() => {
+    stopCalls += 1;
+  });
+  synchronizeBrowserPoseCameraConsent(cameraConsent);
+  await prepareCameraSelection();
+  stopCalls = 0;
+  const controller = new AbortController();
+  const checking = checkPoseReadiness({
+    videoElement: video as unknown as HTMLVideoElement,
+    signal: controller.signal,
+  });
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  controller.abort();
+  await assert.rejects(checking, /训练准备已停止/);
+  assert.equal(stopCalls, 1);
+  assert.equal(video.srcObject, null);
+  assert.equal(video.pauseCount, 1);
+  assert.equal(video.frameCallbackCancelled, true);
+});
+
 class FakeVideoElement {
+  readyState = 2;
+  videoWidth = 640;
+  videoHeight = 480;
+  error = null;
+  ended = false;
+  frameCallbackCancelled = false;
+  requestVideoFrameCallback() {
+    return 1;
+  }
+  cancelVideoFrameCallback() {
+    this.frameCallbackCancelled = true;
+  }
   muted = false;
   playsInline = false;
   autoplay = false;
@@ -120,8 +156,7 @@ class FakeVideoElement {
 function installBrowserEnvironment(onStop: () => void) {
   installGlobal("window", {
     isSecureContext: true,
-    setTimeout: (callback: TimerHandler) =>
-      globalThis.setTimeout(callback, 10),
+    setTimeout: (callback: TimerHandler) => globalThis.setTimeout(callback, 10),
     clearTimeout: globalThis.clearTimeout.bind(globalThis),
   });
   installGlobal("navigator", {

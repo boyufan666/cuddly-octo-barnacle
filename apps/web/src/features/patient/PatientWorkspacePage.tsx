@@ -1,5 +1,7 @@
 "use client";
 
+import type { CheckPoseAction } from "./PoseCheckPreview";
+
 import type { ReactNode } from "react";
 import { EmptyState } from "@/components/ui/EmptyState";
 import type {
@@ -13,7 +15,10 @@ import type {
   TrainingRecordsResponse,
   TrainingSession,
 } from "@/types/api";
-import { PatientProfilePage, type PatientCaregiverBindingFormState } from "./PatientProfilePage";
+import {
+  PatientProfilePage,
+  type PatientCaregiverBindingFormState,
+} from "./PatientProfilePage";
 import { TodayTrainingPage } from "./TodayTrainingPage";
 import { TrainingPrepChecklist } from "./TrainingPrepChecklist";
 import {
@@ -23,7 +28,12 @@ import {
 import { TrainingResultPage } from "./TrainingResultPage";
 import type { ActivePatientTrainingSessionResolution } from "./patient-training-actions";
 
-export type PatientWorkspaceScreen = "today" | "prep" | "game" | "result" | "profile";
+export type PatientWorkspaceScreen =
+  | "today"
+  | "prep"
+  | "game"
+  | "result"
+  | "profile";
 
 type TrainingTask = RehabPlan["items"][number];
 
@@ -71,7 +81,7 @@ type PatientWorkspacePageProps = {
     value: string | boolean,
   ) => void;
   onCheckDevice: () => Promise<void>;
-  onCheckPose: () => Promise<void>;
+  onCheckPose: CheckPoseAction;
   onEnterTrainingPrep: (planItem?: TrainingTask) => void;
   onGrantConsent: (consentType: ConsentType) => Promise<void>;
   onRefreshTrainingPreparation: (planItem?: TrainingTask) => Promise<void>;
@@ -223,16 +233,16 @@ export function PatientWorkspacePage({
 
   return (
     <PatientWorkspaceFrame active={active}>
-        <PatientProfilePage
-          caregiverBindingForm={caregiverBindingForm}
-          isBindingCaregiver={isBindingCaregiver}
-          isConsentBusy={isConsentBusy}
-          isRevokingCaregiver={isRevokingCaregiver}
-          isRevokingConsent={isRevokingConsent}
+      <PatientProfilePage
+        caregiverBindingForm={caregiverBindingForm}
+        isBindingCaregiver={isBindingCaregiver}
+        isConsentBusy={isConsentBusy}
+        isRevokingCaregiver={isRevokingCaregiver}
+        isRevokingConsent={isRevokingConsent}
         onBindCaregiver={onBindCaregiver}
-          onCaregiverBindingFormChange={onCaregiverBindingFormChange}
-          onGrantConsent={onGrantConsent}
-          onRevokeCaregiver={onRevokeCaregiver}
+        onCaregiverBindingFormChange={onCaregiverBindingFormChange}
+        onGrantConsent={onGrantConsent}
+        onRevokeCaregiver={onRevokeCaregiver}
         onRevokeConsent={onRevokeConsent}
         patient={patient}
       />

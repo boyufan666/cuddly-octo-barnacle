@@ -342,6 +342,7 @@ export function RoleWorkspace() {
     null,
   );
   const workspaceMountedRef = useRef(false);
+  const poseCheckGenerationRef = useRef(0);
   const activeWorkspaceGenerationRef = useRef(0);
   const activeRoleDataTokenRef = useRef<string | null>(null);
   const activePatientIdRef = useRef<string | null>(null);
@@ -1998,7 +1999,10 @@ export function RoleWorkspace() {
     }
   }
 
-  async function handleCheckPoseReadiness() {
+  async function handleCheckPoseReadiness(
+    videoElement: HTMLVideoElement,
+    signal?: AbortSignal,
+  ) {
     const actionIdentity = captureRoleActionIdentity();
     const prepRequirement = resolveTrainingPrepCameraRequirement(
       selectedPlanItem?.gameContent,
@@ -2015,6 +2019,12 @@ export function RoleWorkspace() {
       return;
     }
 
+    if (signal?.aborted) return;
+    const checkGeneration = ++poseCheckGenerationRef.current;
+    const isCurrentCheck = () =>
+      checkGeneration === poseCheckGenerationRef.current &&
+      isRoleActionIdentityCurrent(actionIdentity);
+
     startBusyAction("checkPose");
     setDataError(null);
     setTrainingReadiness((current) => ({
@@ -2023,13 +2033,24 @@ export function RoleWorkspace() {
       poseError: undefined,
     }));
 
+    const handleAbort = () => {
+      if (!isCurrentCheck()) return;
+      setTrainingReadiness((current) => ({
+        ...current,
+        poseRuntimeStatus: "unknown",
+        poseError: undefined,
+      }));
+      finishBusyAction("checkPose");
+    };
+    signal?.addEventListener("abort", handleAbort, { once: true });
+
     try {
-      const result = await checkPoseReadiness();
-      if (!isRoleActionIdentityCurrent(actionIdentity)) return;
+      const result = await checkPoseReadiness({ videoElement, signal });
+      if (!isCurrentCheck() || signal?.aborted) return;
       setTrainingReadiness((current) => mergePoseReadiness(current, result));
       setActionStatus("体感识别已准备好，可以进入训练。");
     } catch (error) {
-      if (!isRoleActionIdentityCurrent(actionIdentity)) return;
+      if (!isCurrentCheck() || signal?.aborted) return;
       const message = patientSafeTrainingActionErrorMessage(
         error,
         "站位检查失败",
@@ -2041,7 +2062,8 @@ export function RoleWorkspace() {
       }));
       setDataError(message);
     } finally {
-      if (isRoleActionIdentityCurrent(actionIdentity)) {
+      signal?.removeEventListener("abort", handleAbort);
+      if (isCurrentCheck() && !signal?.aborted) {
         finishBusyAction("checkPose");
       }
     }
