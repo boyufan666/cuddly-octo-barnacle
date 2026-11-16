@@ -129,10 +129,51 @@ test("shows the real physician recommendation for every attention conclusion", (
 
 test("shows no result state before a training record is saved", () => {
   const markup = renderToStaticMarkup(
-    <TrainingResultPage onBackToday={() => undefined} trainingRecords={{ sessions: [], summary: { abnormalCount: 0, averageScore: 0, completedSessions: 0, totalSessions: 0 } }} />,
+    <TrainingResultPage
+      onBackToday={() => undefined}
+      trainingRecords={{
+        sessions: [],
+        summary: {
+          abnormalCount: 0,
+          averageScore: 0,
+          completedSessions: 0,
+          totalSessions: 0,
+        },
+      }}
+    />,
   );
 
   assert.match(markup, /暂无训练结果/);
   assert.match(markup, /完成训练并保存后/);
   assert.doesNotMatch(markup, /尚未复核|无需复核|已接受/);
+});
+
+test("persisted suspicious upload_failed result remains visible but excluded from completion trends", () => {
+  const records = trainingRecords();
+  records.sessions[0].sessionStatus = "upload_failed";
+  const html = renderToStaticMarkup(
+    <TrainingResultPage onBackToday={() => {}} trainingRecords={records} />,
+  );
+  assert.match(html, /节律触达训练/);
+  assert.match(html, /记录已保存，待医师复核/);
+  assert.match(html, /尚未复核/);
+  assert.match(html, /1 次/);
+  assert.match(html, /暂无近期趋势/);
+  assert.match(html, /暂不计入合格训练完成次数和趋势/);
+  assert.doesNotMatch(
+    html,
+    /internal-quality-audit-detail|反应时间|本次训练已完成/,
+  );
+});
+
+test("an unsynced failure without a persisted result is not displayed as saved", () => {
+  const records = trainingRecords();
+  records.sessions[0].sessionStatus = "upload_failed";
+  records.sessions[0].syncStatus = "failed";
+  records.sessions[0].result = null;
+  const html = renderToStaticMarkup(
+    <TrainingResultPage onBackToday={() => {}} trainingRecords={records} />,
+  );
+  assert.doesNotMatch(html, /节律触达训练/);
+  assert.match(html, /0 次/);
 });

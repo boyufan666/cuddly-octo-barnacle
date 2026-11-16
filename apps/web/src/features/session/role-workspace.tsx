@@ -423,6 +423,17 @@ export function RoleWorkspace() {
     });
   }, []);
 
+  const invalidateTrainingReadiness = useCallback(() => {
+    poseCheckGenerationRef.current += 1;
+    setTrainingReadiness(emptyTrainingReadiness);
+    setBusyActions((current) => {
+      const next = new Set(current);
+      next.delete("checkPose");
+      next.delete("checkDevice");
+      return next;
+    });
+  }, []);
+
   const {
     clearRoleData,
     data,
@@ -434,6 +445,7 @@ export function RoleWorkspace() {
     setDataError,
     setDataStatus,
   } = useRoleData({
+    onCameraSelectionInvalidated: invalidateTrainingReadiness,
     isRequestCurrent: (operationToken) =>
       shouldApplyAuthenticatedSideEffect({
         operationToken,
@@ -1900,6 +1912,9 @@ export function RoleWorkspace() {
       setActive("device");
       return;
     }
+    if (selectedTrainingPlanItemId !== planItemForPrep.id) {
+      invalidateTrainingReadiness();
+    }
     setSelectedTrainingPlanItemId(planItemForPrep.id);
     setActiveTrainingSession(null);
     setTrainingResultDraft(null);
@@ -1964,6 +1979,10 @@ export function RoleWorkspace() {
       return;
     }
 
+    const checkGeneration = ++poseCheckGenerationRef.current;
+    const isCurrentCheck = () =>
+      checkGeneration === poseCheckGenerationRef.current &&
+      isRoleActionIdentityCurrent(actionIdentity);
     startBusyAction("checkDevice");
     setDataError(null);
     setTrainingReadiness((current) => ({
@@ -1974,14 +1993,14 @@ export function RoleWorkspace() {
 
     try {
       const readiness = await checkCameraReadiness();
-      if (!isRoleActionIdentityCurrent(actionIdentity)) return;
+      if (!isCurrentCheck()) return;
       setTrainingReadiness((current) => ({
         ...current,
         ...readiness,
       }));
       setActionStatus("摄像头设备已确认。");
     } catch (error) {
-      if (!isRoleActionIdentityCurrent(actionIdentity)) return;
+      if (!isCurrentCheck()) return;
       const message = patientSafeTrainingActionErrorMessage(
         error,
         "摄像头检测失败",
@@ -1993,7 +2012,7 @@ export function RoleWorkspace() {
       }));
       setDataError(message);
     } finally {
-      if (isRoleActionIdentityCurrent(actionIdentity)) {
+      if (isCurrentCheck()) {
         finishBusyAction("checkDevice");
       }
     }

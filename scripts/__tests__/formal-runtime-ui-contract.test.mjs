@@ -379,9 +379,12 @@ test("runtime surfaces keep real adapters while patient-visible copy stays produ
   );
   assert.doesNotMatch(
     prepMarkupSource,
-    /poseError|关键点|置信度|poseModelVersion|poseLandmarkCount|poseAverageVisibility/,
+    /关键点|置信度|poseModelVersion|poseLandmarkCount|poseAverageVisibility/,
   );
-  assert.match(prepSource, /画面不够稳定，请调整站位后重试/);
+  assert.match(prepSource, /readiness\.poseError/);
+  assert.match(prepSource, /return poseError \?\? "站位检查未完成，请查看检查提示。"/);
+  assert.match(prepMarkupSource, /<PoseCheckPreview/);
+  assert.match(prepSource, /poseCheckDescription/);
   assert.match(
     browserVisibleCopy + unityVisibleCopy,
     /正在准备训练|训练进行中|训练暂不可开始|站位情况|训练准备状态/,

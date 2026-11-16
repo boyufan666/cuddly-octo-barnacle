@@ -40,8 +40,16 @@ export function TrainingResultPage({
       </div>
 
       <Card tone="patient">
-        <StatusBadge status={result ? "complete" : "pending"}>
-          {result ? "本次训练已完成" : "等待训练完成"}
+        <StatusBadge
+          status={
+            latest && isValidTrainingResult(latest) ? "complete" : "pending"
+          }
+        >
+          {latest
+            ? isValidTrainingResult(latest)
+              ? "本次训练已完成"
+              : "记录已保存，待医师复核"
+            : "等待训练完成"}
         </StatusBadge>
         {result && latest ? (
           <>
@@ -57,7 +65,9 @@ export function TrainingResultPage({
                   训练记录
                 </p>
                 <p className="mt-2 font-bold leading-7 text-[var(--ink-soft)]">
-                  最近一次训练已经进入记录页，可按今日安排继续下一项。
+                  {latest && isValidTrainingResult(latest)
+                    ? "最近一次训练已经进入记录页，可按今日安排继续下一项。"
+                    : "本次记录已保存，暂不计入合格训练完成次数和趋势，请等待医师复核。"}
                 </p>
               </div>
               <div>
@@ -103,10 +113,7 @@ export function TrainingResultPage({
           </p>
         </div>
         <div className="grid gap-3 md:grid-cols-3">
-          <ResultFact
-            label="已保存记录"
-            value={`${savedSessions.length} 次`}
-          />
+          <ResultFact label="已保存记录" value={`${savedSessions.length} 次`} />
           <ResultFact
             label="最近训练"
             value={latest?.gameContent.name ?? "待训练"}
@@ -128,18 +135,27 @@ export function TrainingResultPage({
   );
 }
 
-type CompletedTrainingSession = TrainingRecordSession & {
+type SavedTrainingSession = TrainingRecordSession & {
   result: NonNullable<TrainingRecordSession["result"]>;
 };
 
 function hasTrainingResult(
   session: TrainingRecordSession,
-): session is CompletedTrainingSession {
-  return session.sessionStatus === "completed" && Boolean(session.result);
+): session is SavedTrainingSession {
+  return (
+    session.syncStatus === "synced" &&
+    (session.sessionStatus === "completed" ||
+      session.sessionStatus === "upload_failed") &&
+    Boolean(session.result)
+  );
 }
 
-function isValidTrainingResult(session: CompletedTrainingSession) {
-  return session.result.qualityFlag === "valid" && !session.result.abnormalFlag;
+function isValidTrainingResult(session: SavedTrainingSession) {
+  return (
+    session.sessionStatus === "completed" &&
+    session.result.qualityFlag === "valid" &&
+    !session.result.abnormalFlag
+  );
 }
 
 function ResultFact({ label, value }: { label: string; value: string }) {
@@ -155,7 +171,7 @@ function ResultFact({ label, value }: { label: string; value: string }) {
   );
 }
 
-function summarizeTrend(sessions: CompletedTrainingSession[]) {
+function summarizeTrend(sessions: SavedTrainingSession[]) {
   if (!sessions.length) {
     return {
       description: "完成训练后，这里会显示近期完成情况和变化方向。",

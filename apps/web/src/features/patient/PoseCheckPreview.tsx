@@ -53,7 +53,7 @@ export function PoseCheckPreview({
           className="h-full w-full object-contain"
         />
         <p
-          className="absolute inset-x-0 bottom-0 bg-black/70 p-3 text-center text-sm font-bold text-white"
+          className="absolute inset-x-0 bottom-0 bg-[var(--ink-strong)] p-3 text-center text-sm font-bold text-[var(--ink-inverse)]"
           aria-live="polite"
         >
           {isChecking

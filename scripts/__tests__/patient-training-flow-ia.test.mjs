@@ -60,10 +60,11 @@ test("patient training flow is task-first and hides game engine metadata", async
   assert.match(todaySource, /查看今日训练记录/);
   assert.match(todaySource, /completedPlanItemIds/);
   assert.match(todaySource, /nextTask/);
-  assert.doesNotMatch(todaySource, /<TrainingTaskPicker/);
-  assert.doesNotMatch(todaySource, /items=\{tasks\}/);
+  assert.match(todaySource, /activeTrainingResolution\.status === "none" && tasks\.length > 0/);
+  assert.match(todaySource, /<TrainingTaskPicker/);
+  assert.match(todaySource, /items=\{tasks\}/);
   assert.doesNotMatch(todaySource, /selectedPlanItem/);
-  assert.doesNotMatch(todaySource, /onSelectPlanItem/);
+  assert.match(todaySource, /onSelectPlanItem=\{onStartPreparation\}/);
   assert.doesNotMatch(todaySource, /今日进度|completionPercent|uppercase/);
   assert.doesNotMatch(todaySource, /训练积分与进展|当前积分|已解锁|最近奖励/);
   assert.doesNotMatch(

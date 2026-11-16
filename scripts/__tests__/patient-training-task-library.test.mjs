@@ -31,7 +31,7 @@ test("patient training category and purpose helpers map only business labels", (
   assert.deepEqual(patientTrainingPurposeLabel(["unknown-purpose"]), []);
 });
 
-test("patient today training shows only the next plan item before prep", async () => {
+test("patient today training preserves next task and offers current-plan choices through preparation", async () => {
   const todaySource = await readFile(
     join(rootDir, "apps/web/src/features/patient/TodayTrainingPage.tsx"),
     "utf8",
@@ -51,9 +51,13 @@ test("patient today training shows only the next plan item before prep", async (
   assert.match(taskPickerSource, /aria-label=.*gameContent\.name|aria-label=.*task\.name|选择训练/);
   assert.match(todaySource, /下一项训练/);
   assert.match(todaySource, /onStartPreparation\(nextTask\)/);
-  assert.doesNotMatch(todaySource, /<TrainingTaskPicker\b/);
+  assert.match(todaySource, /activeTrainingResolution\.status === "none" && tasks\.length > 0/);
+  assert.match(todaySource, /<TrainingTaskPicker\b/);
+  assert.match(todaySource, /onSelectPlanItem=\{onStartPreparation\}/);
+  assert.match(todaySource, /nextTaskId=\{nextTask\?\.id\}/);
+  assert.match(taskPickerSource, /if \(done\) \{\s*onViewRecords\(\);\s*return;/);
   assert.doesNotMatch(todaySource, /selected\w*PlanItem|selected\w*Task/);
-  assert.doesNotMatch(todaySource, /items=\{tasks\}/);
+  assert.match(todaySource, /items=\{tasks\}/);
   assert.match(todaySource, /开始训练准备|进入 .* 准备/);
   assert.match(prepSource, /planItem\?\.gameContent\.name|selectedTask\?\.name|训练安排/);
 });

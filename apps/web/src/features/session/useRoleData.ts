@@ -66,6 +66,7 @@ type RolePatientRosterLoaders = {
 type UseRoleDataOptions = {
   isRequestCurrent?: (requestEpoch: string) => boolean;
   onUnauthorized?: (message: string) => void;
+  onCameraSelectionInvalidated?: () => void;
 };
 
 export type RoleDataCameraSelectionTransfer = Readonly<{
@@ -82,6 +83,7 @@ type RoleDataLoadContext = {
 export function useRoleData({
   isRequestCurrent,
   onUnauthorized,
+  onCameraSelectionInvalidated,
 }: UseRoleDataOptions = {}) {
   const [data, setData] = useState<AppData>({});
   const [dataStatus, setDataStatus] = useState("未登录");
@@ -117,6 +119,7 @@ export function useRoleData({
       }
 
       synchronizeRolePatientCameraConsent(undefined);
+      onCameraSelectionInvalidated?.();
       setData((current) => clearPatientClinicalData(current));
       setDataStatus("加载核心业务数据");
       setDataError(null);
@@ -374,12 +377,14 @@ export function useRoleData({
         }
         if (error instanceof ApiError && error.status === 401) {
           synchronizeRolePatientCameraConsent(undefined);
+          onCameraSelectionInvalidated?.();
           setDataStatus("登录已过期");
           setDataError("登录已过期，请重新登录。");
           onUnauthorized?.("登录已过期，请重新登录。");
           return;
         }
         synchronizeRolePatientCameraConsent(undefined);
+        onCameraSelectionInvalidated?.();
         setData((current) => clearPatientClinicalData(current));
         setPanelErrors([]);
         setDataStatus("核心业务数据加载失败");
@@ -388,17 +393,21 @@ export function useRoleData({
         );
       }
     },
-    [isRequestCurrent, onUnauthorized],
+    [isRequestCurrent, onUnauthorized, onCameraSelectionInvalidated],
   );
 
-  const clearRoleData = useCallback((status: string, message?: string) => {
-    currentRequestSequenceRef.current += 1;
-    synchronizeRolePatientCameraConsent(undefined);
-    setData({});
-    setPanelErrors([]);
-    setDataStatus(status);
-    setDataError(message ?? null);
-  }, []);
+  const clearRoleData = useCallback(
+    (status: string, message?: string) => {
+      currentRequestSequenceRef.current += 1;
+      synchronizeRolePatientCameraConsent(undefined);
+      onCameraSelectionInvalidated?.();
+      setData({});
+      setPanelErrors([]);
+      setDataStatus(status);
+      setDataError(message ?? null);
+    },
+    [onCameraSelectionInvalidated],
+  );
 
   return {
     clearRoleData,

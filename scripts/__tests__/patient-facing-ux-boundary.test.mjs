@@ -347,7 +347,7 @@ test("patient facing screens hide internal evidence, confidence, and review voca
   assert.match(unityGameVisibleCopy, /正在准备训练|训练进行中|训练暂不可开始/);
 });
 
-test("patient training preparation maps raw pose errors to fixed user copy", async () => {
+test("patient training preparation preserves actionable pose errors without exposing model telemetry", async () => {
   const prepSource = await readFile(
     join(rootDir, "apps/web/src/features/patient/TrainingPrepChecklist.tsx"),
     "utf8",
@@ -356,9 +356,19 @@ test("patient training preparation maps raw pose errors to fixed user copy", asy
 
   assert.doesNotMatch(
     prepMarkupSource,
-    /readiness\.poseError|poseModelVersion|poseLandmarkCount|poseAverageVisibility|关键点|置信度/,
+    /poseModelVersion|poseLandmarkCount|poseAverageVisibility|关键点|置信度/,
   );
-  assert.match(prepSource, /画面不够稳定，请调整站位后重试/);
+  assert.match(prepSource, /readiness\.poseError/);
+  assert.match(prepSource, /return poseError \?\? "站位检查未完成，请查看检查提示。"/);
+  assert.match(prepSource, /description: !requiresCameraCheck[\s\S]{0,100}: poseCheckDescription/);
+  assert.match(prepMarkupSource, /<PrepStepCard key=\{step\.label\} index=\{index \+ 1\} \{\.\.\.step\}/);
+  assert.match(prepMarkupSource, /<PoseCheckPreview/);
+  const observationSource = await readFile(
+    join(rootDir, "apps/web/src/lib/pose-readiness-observation.ts"), "utf8",
+  );
+  for (const reason of ["观察期间未检测到人体姿态", "姿态关键点置信度不足", "姿态未连续达到检查标准", "摄像头画面未持续更新", "摄像头视频读取失败"]) {
+    assert.ok(observationSource.includes(reason), `missing distinct pose failure: ${reason}`);
+  }
 });
 
 test("patient-facing action feedback uses user language instead of audit or session jargon", async () => {

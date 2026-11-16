@@ -811,6 +811,19 @@ lsof() {
   if [[ "$requested_fd" == "cwd" ]]; then
     [[ -n "$process_name" ]] || return 1
     builtin kill -0 "$requested_pid" >/dev/null 2>&1 || return 1
+    # The fixture runs nohup asynchronously. Wait for its explicit ready marker,
+    # rather than treating scheduler timing as a process-ownership failure.
+    local ready_file="$LAUNCHER_TEST_ROOT/$process_name.ready"
+    local ready_attempt
+    for ((ready_attempt = 0; ready_attempt < 200; ready_attempt++)); do
+      [[ ! -f "$ready_file" ]] || break
+      builtin kill -0 "$requested_pid" >/dev/null 2>&1 || return 1
+      /bin/sleep 0.01
+    done
+    if [[ ! -f "$ready_file" ]]; then
+      printf 'launcher fixture process did not signal ready\n' >&2
+      return 1
+    fi
     local cwd_file="$LAUNCHER_TEST_ROOT/$process_name.cwd"
     [[ -f "$cwd_file" ]] || return 1
     local process_cwd
@@ -1105,11 +1118,13 @@ nohup() {
   if [[ "$LAUNCHER_TERM_MODE" == "api-stays-alive" && "$process_name" == "api" ]]; then
     trap '' TERM
     trap 'exit 0' USR1
+    : > "$LAUNCHER_TEST_ROOT/$process_name.ready"
     while :; do
       /bin/sleep 1
     done
   fi
   trap 'record_launcher_event "term:'"$process_name"'"; exit 0' TERM
+  : > "$LAUNCHER_TEST_ROOT/$process_name.ready"
   while :; do
     /bin/sleep 1
   done
