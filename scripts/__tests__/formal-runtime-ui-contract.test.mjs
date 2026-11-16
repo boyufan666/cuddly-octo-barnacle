@@ -295,7 +295,7 @@ test("runtime surfaces keep real adapters while patient-visible copy stays produ
   assert.match(unitySurface, /fetchValidatedUnityManifest/);
   assert.match(
     unitySurface,
-    /allowInsecureOrigin: process\.env\.NODE_ENV !== "production"/,
+    /allowInsecureOrigin:\s*process\.env\.NODE_ENV !== "production"\s*\|\|\s*isLoopbackHttpOrigin\(window\.location\.origin\),/,
   );
   assert.match(unitySurface, /readUnityRuntime/);
   assert.match(unitySurface, /isExpectedUnityTrainingMessageSource/);
