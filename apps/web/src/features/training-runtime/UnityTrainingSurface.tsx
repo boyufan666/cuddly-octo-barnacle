@@ -16,6 +16,7 @@ import {
 } from "@/lib/pose-readiness";
 import { isGameReadyForTraining } from "@/lib/formal-training-content-readiness";
 import {
+  assertUnityReachInputContract,
   createUnityPoseHitTracker,
   type UnityPoseGuidanceSnapshot,
 } from "@/lib/unity-pose-guidance";
@@ -274,6 +275,7 @@ export function UnityTrainingSurface(props: UnityTrainingSurfaceProps) {
       setRuntimeState("loading");
 
       try {
+        assertUnityReachInputContract(game, trainingSession);
         const { collectionBatchId, gameRunId, gameVersion } =
           expectedBridgeContext;
         const bridgeProtocolVersion = readRequiredText(
@@ -289,7 +291,8 @@ export function UnityTrainingSurface(props: UnityTrainingSurfaceProps) {
           manifestUrl,
           game,
           origin: window.location.origin,
-          allowInsecureOrigin: process.env.NODE_ENV !== "production" ||
+          allowInsecureOrigin:
+            process.env.NODE_ENV !== "production" ||
             isLoopbackHttpOrigin(window.location.origin),
         });
         const runtime = readUnityRuntime(manifest);
@@ -779,13 +782,11 @@ async function startUnityPoseForwarding({
     const {
       guidance,
       lastAcceptedAtMs,
-      reachHit,
+      reachHits,
       requiredStableFrames,
       stableFrames,
     } = hitTracker.update(landmarks, timestampMs);
-    if (reachHit) {
-      sentHitCount += 1;
-    }
+    sentHitCount += reachHits.length;
     if (timestampMs - lastGuidanceUpdateAtMs >= 80) {
       lastGuidanceUpdateAtMs = timestampMs;
       onGuidance(guidance);
@@ -797,7 +798,7 @@ async function startUnityPoseForwarding({
         lastAcceptedAtMs,
       });
     }
-    if (reachHit) {
+    for (const reachHit of reachHits) {
       unityInstance.SendMessage(
         runtime.unitySessionObjectName,
         runtime.reachHitMethod,

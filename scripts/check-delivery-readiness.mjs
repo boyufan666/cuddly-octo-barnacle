@@ -113,12 +113,13 @@ export const requiredGitTrackedRuntimeAssets = [
   "apps/web/public/mediapipe/tasks-vision/wasm/vision_wasm_nosimd_internal.js",
   "apps/web/public/mediapipe/tasks-vision/wasm/vision_wasm_nosimd_internal.wasm",
   "apps/web/public/unity/rehab-unity-bridge.js",
-  "apps/web/public/unity/rhythm_reach_3d/0.1.2/index.html",
-  "apps/web/public/unity/rhythm_reach_3d/0.1.2/manifest.json",
-  "apps/web/public/unity/rhythm_reach_3d/0.1.2/Build/0.1.2.data",
+  "apps/web/public/unity/rhythm_reach_3d/0.1.3/index.html",
+  "apps/web/public/unity/rhythm_reach_3d/0.1.3/manifest.json",
+  "apps/web/public/unity/rhythm_reach_3d/0.1.3/Build/0.1.3.data",
   "apps/web/public/unity/rhythm_reach_3d/0.1.2/Build/0.1.2.framework.js",
-  "apps/web/public/unity/rhythm_reach_3d/0.1.2/Build/0.1.2.loader.js",
-  "apps/web/public/unity/rhythm_reach_3d/0.1.2/Build/0.1.2.wasm",
+  "apps/web/public/unity/rhythm_reach_3d/0.1.3/Build/0.1.3.framework.js",
+  "apps/web/public/unity/rhythm_reach_3d/0.1.3/Build/0.1.3.loader.js",
+  "apps/web/public/unity/rhythm_reach_3d/0.1.3/Build/0.1.3.wasm",
 ];
 export const requiredCommittedDeploymentFiles = [
   ".gitattributes",
@@ -162,6 +163,7 @@ const immutableAssetWhitespaceExceptions = [
   "apps/web/public/mediapipe/tasks-vision/wasm/vision_wasm_module_internal.js",
   "apps/web/public/mediapipe/tasks-vision/wasm/vision_wasm_nosimd_internal.js",
   "apps/web/public/unity/rhythm_reach_3d/0.1.2/Build/0.1.2.framework.js",
+  "apps/web/public/unity/rhythm_reach_3d/0.1.3/Build/0.1.3.framework.js",
 ];
 
 const requiredProductionEnv = [
@@ -791,7 +793,7 @@ export function checkGitAttributesWhitespaceExceptions(content) {
   for (const entry of entries) {
     if (!expectedEntries.has(entry)) {
       failures.push(
-        `.gitattributes 只能为四个已校验哈希的不可变 JS 资源关闭 whitespace 检查，发现非精确条目：${entry}。`,
+        `.gitattributes 只能为五个已校验哈希的不可变 JS 资源关闭 whitespace 检查，发现非精确条目：${entry}。`,
       );
     }
   }

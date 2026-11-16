@@ -87,7 +87,11 @@ test("Phaser pose stage includes patient-facing balance shift copy", async () =>
   assert.match(componentSource, /balance_shift/);
   assert.match(componentSource, /重心转移星桥/);
   assert.match(componentSource, /跟随星桥提示平稳转移重心/);
-  assert.match(componentSource, /centerline|重心线|balanceRail/);
+  assert.doesNotMatch(componentSource, /const bridgeTargets|const tracer|const guideRing|const balanceRail/);
+  const surface = await readFile(join(rootDir, "apps/web/src/features/training-runtime/BrowserPoseTrainingSurface.tsx"), "utf8");
+  assert.match(surface, /renderBrowserPoseVisibleTargets\(activeTarget\)/);
+  assert.match(surface, /data-testid="pose-video-content-targets"/);
+  assert.match(surface, /object-contain/);
 });
 
 function extractFunctionBlock(source, functionName) {

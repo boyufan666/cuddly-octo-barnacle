@@ -15,12 +15,12 @@ test("local seed Unity training content points to the formal Rhythm Reach WebGL 
     await readFile(
       join(
         rootDir,
-        "apps/web/public/unity/rhythm_reach_3d/0.1.2/manifest.json",
+        "apps/web/public/unity/rhythm_reach_3d/0.1.3/manifest.json",
       ),
       "utf8",
     ),
   );
-  const buildBaseUrl = "/unity/rhythm_reach_3d/0.1.2";
+  const buildBaseUrl = "/unity/rhythm_reach_3d/0.1.3";
   const manifestUrl = `${buildBaseUrl}/manifest.json`;
 
   assert.match(

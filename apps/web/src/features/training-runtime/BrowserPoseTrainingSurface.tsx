@@ -38,6 +38,7 @@ import {
   type PoseLandmark,
   type PoseTrainingRuntime,
 } from "@/lib/pose-readiness";
+import { browserPoseContentRect } from "@/lib/browser-pose-viewport";
 import { cn } from "@/lib/utils";
 import type {
   RehabPlan,
@@ -194,6 +195,33 @@ export function BrowserPoseTrainingSurface(
 ) {
   const { durationMinutes, game, trainingSession, onResultReady } = props;
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const [contentRect, setContentRect] =
+    useState<ReturnType<typeof browserPoseContentRect>>();
+  useEffect(() => {
+    const stage = viewportRef.current;
+    const video = videoRef.current;
+    if (!stage || !video) return;
+    const update = () =>
+      setContentRect(
+        browserPoseContentRect(
+          stage.clientWidth,
+          stage.clientHeight,
+          video.videoWidth,
+          video.videoHeight,
+        ),
+      );
+    const observer = new ResizeObserver(update);
+    observer.observe(stage);
+    video.addEventListener("loadedmetadata", update);
+    video.addEventListener("resize", update);
+    update();
+    return () => {
+      observer.disconnect();
+      video.removeEventListener("loadedmetadata", update);
+      video.removeEventListener("resize", update);
+    };
+  }, []);
   const runtimeRef = useRef<PoseTrainingRuntime | null>(null);
   const animationRef = useRef<number | null>(null);
   const preparationAbortRef = useRef<AbortController | null>(null);
@@ -341,6 +369,9 @@ export function BrowserPoseTrainingSurface(
     if (!runtime || !stats) return;
 
     try {
+      const previousTargetId = stats.activeTarget?.id;
+      const previousCheckpoint =
+        stats.activeTarget?.currentTrajectoryCheckpoint;
       const landmarks = runtime.detect(timestampMs);
       updateBrowserPoseStats(stats, landmarks, timestampMs);
       const nextSnapshot = buildBrowserPoseSnapshot(
@@ -360,7 +391,12 @@ export function BrowserPoseTrainingSurface(
         return;
       }
 
-      if (timestampMs - stats.lastSnapshotAtMs >= 250) {
+      if (
+        previousTargetId !== stats.activeTarget?.id ||
+        previousCheckpoint !==
+          stats.activeTarget?.currentTrajectoryCheckpoint ||
+        timestampMs - stats.lastSnapshotAtMs >= 250
+      ) {
         stats.lastSnapshotAtMs = timestampMs;
         setSnapshot(nextSnapshot);
       }
@@ -509,10 +545,13 @@ export function BrowserPoseTrainingSurface(
           {browserPosePhaseLabel(visiblePhase)}
         </Chip>
       </div>
-      <div className="relative aspect-video min-h-[clamp(280px,42vw,420px)] overflow-hidden bg-[var(--surface-muted)]">
+      <div
+        ref={viewportRef}
+        className="relative aspect-video min-h-[clamp(280px,42vw,420px)] overflow-hidden bg-[var(--surface-muted)]"
+      >
         <video
           ref={videoRef}
-          className="h-full w-full scale-x-[-1] object-cover opacity-80"
+          className="h-full w-full scale-x-[-1] object-contain opacity-80"
           muted
           playsInline
         />
@@ -545,7 +584,15 @@ export function BrowserPoseTrainingSurface(
           />
         ) : null}
         <div className="pointer-events-none absolute inset-5 rounded-[var(--radius-card)] border border-[var(--line-inverse)]" />
-        {renderBrowserPoseVisibleTargets(activeTarget)}
+        {contentRect ? (
+          <div
+            className="pointer-events-none absolute"
+            style={contentRect}
+            data-testid="pose-video-content-targets"
+          >
+            {renderBrowserPoseVisibleTargets(activeTarget)}
+          </div>
+        ) : null}
         {snapshot.phase !== "running" ? (
           <div className="absolute inset-0 grid place-items-center bg-[var(--surface-paper)] p-8 text-center">
             <div className="max-w-xl rounded-[var(--radius-card)] border border-[var(--line-subtle)] bg-[var(--surface-paper)] p-6 shadow-[var(--shadow-panel)]">
@@ -859,14 +906,14 @@ function BrowserPoseVisibleTarget({
   return (
     <div
       className={cn(
-        "pointer-events-none absolute grid -translate-x-1/2 -translate-y-1/2 place-items-center rounded-[var(--radius-card)] border-4 shadow-[var(--shadow-panel)]",
+        "pointer-events-none absolute grid -translate-x-1/2 -translate-y-1/2 place-items-center rounded-[50%] border-4 shadow-[var(--shadow-panel)]",
         toneClassName[tone],
       )}
       style={{
         left: `${x * 100}%`,
         top: `${y * 100}%`,
-        height: `${radius * 220}px`,
-        width: `${radius * 220}px`,
+        height: `${radius * 200}%`,
+        width: `${radius * 200}%`,
       }}
     >
       <span className="rounded-[var(--radius-control)] bg-[var(--surface-paper)] px-3 py-1 text-sm font-bold">
@@ -1222,7 +1269,7 @@ function selectTargetWrist(
   return wrist;
 }
 
-function isBrowserPoseTargetHit(
+export function isBrowserPoseTargetHit(
   landmarks: PoseLandmark[],
   target: BrowserPoseTarget,
 ) {

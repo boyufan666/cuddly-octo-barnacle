@@ -48,6 +48,8 @@ test("four enhanced games render real Phaser stages and open their start gate wi
     })()`);
     await page.addScriptTag({ path: bundle });
     for (const code of [
+      "mirror_sequence",
+      "nebula_sort",
       "balance_breath",
       "orbital_trace_follow",
       "center_shift_bridge",
@@ -65,6 +67,8 @@ test("four enhanced games render real Phaser stages and open their start gate wi
       );
     }
     for (const code of [
+      "mirror_sequence",
+      "nebula_sort",
       "balance_breath",
       "orbital_trace_follow",
       "center_shift_bridge",
@@ -88,6 +92,24 @@ test("four enhanced games render real Phaser stages and open their start gate wi
         0,
       );
     }
+    const colorChecks = await page.evaluate(`(() => {
+      const colors = ["rgb(191 216 255)", "#bfd8ff", "#abc", "rgb(166 210 197)", "#a6d2c5", "#bfd8ffff", "rgb(100% 0% 0%)", "hsl(120 100% 50%)"];
+      const values = colors.map(color => window.testPhaserCssColor(color, "test-token"));
+      let rejected = true;
+      for (const invalid of ["invalid-color", "currentColor", "var(--missing)", "transparent", "#ffffff00", "rgba(0,0,0,0.5)"]) {
+        let failed = false;
+        try { window.testPhaserCssColor(invalid, "bad-token"); } catch { failed = true; }
+        rejected = rejected && failed;
+      }
+      return { values, rejected };
+    })()`);
+    assert.deepEqual(colorChecks, {
+      values: [
+        0xbfd8ff, 0xbfd8ff, 0xaabbcc, 0xa6d2c5, 0xa6d2c5, 0xbfd8ff, 0xff0000,
+        0x00ff00,
+      ],
+      rejected: true,
+    });
     assert.deepEqual(errors, []);
   } finally {
     await browser.close();

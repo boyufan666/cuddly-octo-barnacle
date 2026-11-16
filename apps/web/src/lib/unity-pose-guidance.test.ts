@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   buildUnityPoseGuidanceSnapshot,
+  assertUnityReachInputContract,
   createUnityPoseHitTracker,
   type UnityPoseGuidanceLandmark,
 } from "./unity-pose-guidance.ts";
@@ -10,11 +11,14 @@ function landmarks(
   left?: Partial<UnityPoseGuidanceLandmark>,
   right?: Partial<UnityPoseGuidanceLandmark>,
 ) {
-  const values: UnityPoseGuidanceLandmark[] = Array.from({ length: 33 }, () => ({
-    x: 0.5,
-    y: 0.5,
-    visibility: 0.8,
-  }));
+  const values: UnityPoseGuidanceLandmark[] = Array.from(
+    { length: 33 },
+    () => ({
+      x: 0.5,
+      y: 0.5,
+      visibility: 0.8,
+    }),
+  );
   values[15] = { x: 0.2, y: 0.35, visibility: 0.9, ...left };
   values[16] = { x: 0.8, y: 0.4, visibility: 0.92, ...right };
   return values;
@@ -61,13 +65,13 @@ test("createUnityPoseHitTracker emits only after stable real wrist frames", () =
   const first = tracker.update(landmarks(), 1_000);
   const second = tracker.update(landmarks(), 1_040);
 
-  assert.equal(first.reachHit, undefined);
+  assert.equal(first.reachHits.length, 0);
   assert.equal(first.stableFrames, 1);
   assert.equal(first.requiredStableFrames, 2);
-  assert.equal(second.reachHit?.source, "camera_pose");
-  assert.equal(second.reachHit?.targetId, "webgl-pose-1");
-  assert.equal(second.reachHit?.confidence, 0.92);
-  assert.equal(second.reachHit?.x, -0.9);
+  assert.equal(second.reachHits[1]?.source, "camera_pose");
+  assert.equal(second.reachHits[0]?.targetId, "webgl-pose-1");
+  assert.equal(second.reachHits[1]?.confidence, 0.92);
+  assert.equal(second.reachHits[1]?.screenX, 0.2);
   assert.equal(second.stableFrames, 2);
   assert.equal(second.requiredStableFrames, 2);
 });
@@ -86,10 +90,89 @@ test("createUnityPoseHitTracker throttles rapid repeated hits and rejects low co
     1_260,
   );
 
-  assert.ok(first.reachHit);
-  assert.equal(throttled.reachHit, undefined);
+  assert.ok(first.reachHits.length);
+  assert.equal(throttled.reachHits.length, 0);
   assert.equal(throttled.stableFrames, 3);
-  assert.equal(lowConfidence.reachHit, undefined);
+  assert.equal(lowConfidence.reachHits.length, 0);
   assert.equal(lowConfidence.guidance.status, "low_visibility");
   assert.equal(lowConfidence.stableFrames, 0);
+});
+
+test("both wrists retain independent stable frames and unique viewport events", () => {
+  const tracker = createUnityPoseHitTracker({
+    minVisibility: 0.8,
+    stableFrameCount: 2,
+    minIntervalMs: 180,
+  });
+  tracker.update(landmarks(), 1000);
+  const result = tracker.update(landmarks(), 1040);
+  assert.equal(result.reachHits.length, 2);
+  assert.deepEqual(
+    result.reachHits.map((x) => x.side),
+    ["left", "right"],
+  );
+  assert.notEqual(result.reachHits[0].targetId, result.reachHits[1].targetId);
+  for (const hit of result.reachHits)
+    assert.equal(hit.coordinateSpace, "mirrored_viewport");
+  const oneLost = tracker.update(landmarks({ visibility: 0.1 }), 1250);
+  assert.deepEqual(
+    oneLost.reachHits.map((x) => x.side),
+    ["right"],
+  );
+  const recovering = tracker.update(landmarks(), 1500);
+  assert.deepEqual(
+    recovering.reachHits.map((x) => x.side),
+    ["right"],
+  );
+  const recovered = tracker.update(landmarks(), 1710);
+  assert.deepEqual(
+    recovered.reachHits.map((x) => x.side),
+    ["left", "right"],
+  );
+});
+
+test("reach input accepts matching 0.1.3 session and refuses old or mixed snapshots before camera startup", () => {
+  const game = {
+    code: "rhythm_reach_3d",
+    gameVersion: "0.1.3",
+    bridgeProtocolVersion: "1.0.0",
+    manifestUrl: "/unity/rhythm_reach_3d/0.1.3/manifest.json",
+    buildBaseUrl: "/unity/rhythm_reach_3d/0.1.3",
+  };
+  const session = {
+    unityBuildVersion: "0.1.3",
+    bridgeProtocolVersion: "1.0.0",
+    runtimeConfigSnapshot: { ...game },
+  };
+  assert.doesNotThrow(() => assertUnityReachInputContract(game, session));
+  assert.throws(() =>
+    assertUnityReachInputContract({ ...game, gameVersion: "0.1.2" }, session),
+  );
+  assert.throws(() =>
+    assertUnityReachInputContract(game, {
+      ...session,
+      unityBuildVersion: "0.1.2",
+    }),
+  );
+  assert.throws(() =>
+    assertUnityReachInputContract(game, {
+      ...session,
+      runtimeConfigSnapshot: { ...game, gameVersion: "0.1.2" },
+    }),
+  );
+  assert.throws(() =>
+    assertUnityReachInputContract(game, {
+      ...session,
+      runtimeConfigSnapshot: {
+        ...game,
+        manifestUrl: "/unity/rhythm_reach_3d/0.1.2/manifest.json",
+      },
+    }),
+  );
+  assert.throws(() =>
+    assertUnityReachInputContract(game, {
+      ...session,
+      runtimeConfigSnapshot: null,
+    }),
+  );
 });

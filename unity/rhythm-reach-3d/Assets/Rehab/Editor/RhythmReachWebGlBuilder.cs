@@ -13,7 +13,7 @@ namespace Rehab.EditorTools
     {
         private const string GameCode = "rhythm_reach_3d";
         private const string GameName = "Rhythm Reach 3D";
-        private const string GameVersion = "0.1.2";
+        private const string GameVersion = "0.1.3";
         private const string BridgeProtocolVersion = "1.0.0";
         private const string ScenePath = "Assets/Rehab/Scenes/RhythmReachTraining.unity";
         private const string WebGlTemplate = "PROJECT:RehabWebGL";

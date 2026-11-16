@@ -19,7 +19,7 @@ apps/web/public/unity/<gameCode>/<version>/
 建议目录：
 
 ```text
-apps/web/public/unity/rhythm_reach_3d/0.1.2/
+apps/web/public/unity/rhythm_reach_3d/0.1.3/
   Build/
     rhythm_reach_3d.loader.js
     rhythm_reach_3d.framework.js
@@ -65,7 +65,7 @@ Unity 页面或 WebGL 模板需要先加载该文件，再调用 `window.RehabUn
   "collectionBatchId": "collection-batch-id",
   "gameRunId": "run-001",
   "gameCode": "rhythm_reach_3d",
-  "gameVersion": "0.1.2",
+  "gameVersion": "0.1.3",
   "deviceCode": "camera-001",
   "bridgeProtocolVersion": "1.0.0",
   "durationSeconds": 900,
@@ -92,7 +92,7 @@ Unity 训练结束后必须向父页面发送 `postMessage`。事件结构如下
   "sessionId": "training-session-id",
   "collectionBatchId": "collection-batch-id",
   "gameRunId": "run-001",
-  "gameVersion": "0.1.2",
+  "gameVersion": "0.1.3",
   "clientGeneratedAt": "2026-05-20T06:30:00.000Z",
   "rawPayloadHash": "sha256-payload-hash",
   "score": 86,
@@ -106,7 +106,7 @@ Unity 训练结束后必须向父页面发送 `postMessage`。事件结构如下
     "resultContractVersion": "rehab-unity-result-v2",
     "collectionBatchId": "collection-batch-id",
     "gameCode": "rhythm_reach_3d",
-    "gameVersion": "0.1.2",
+    "gameVersion": "0.1.3",
     "deviceCode": "camera-001",
     "gameRunId": "run-001",
     "protocolVersion": "1.0.0",
@@ -326,3 +326,13 @@ public class RehabTrainingResultBridge : MonoBehaviour
 ## 参考
 
 Unity WebGL 与浏览器脚本交互采用 Unity 官方支持的 WebGL browser scripting / JavaScript interop 能力，可通过 `.jslib` 暴露 JavaScript 函数给 C# 调用。
+
+## Rhythm Reach 3D 0.1.3 输入坐标
+
+`rhythm_reach_3d` 0.1.3 的 ReachHit 是游戏内部输入契约，必须显式提供 `coordinateSpace: "mirrored_viewport"`、`screenX` / `screenY`（左上原点的镜像视口归一化坐标）、`side`（`left` 或 `right`）、唯一 `targetId` 和真实 `confidence`。Unity 使用实际训练相机的 `ViewportPointToRay(screenX, 1-screenY, 0)` 与目标 z=4 平面求交，保持原 0.95 命中半径。缺坐标空间的旧输入被拒绝。
+
+双手各自执行原两稳定帧和 180ms 间隔，每个接受事件单独转发；Unity 队列逐条消费并按事件标识去重。输入标识用于消息去重，实际命中仍由 Unity 当前目标与碰撞距离判定，不把输入事件当命中结果。
+
+对外训练结果 envelope 和 metrics 不变，`bridgeProtocolVersion` 仍为 `1.0.0`；内部输入变更由 `gameVersion: "0.1.3"` 标识。Web 在加载及摄像头启动前核对会话版本、运行快照和当前 manifest / buildBaseUrl，一致才启动。保留旧 `0.1.2` 资源用于历史追溯，不能把新 Web 输入契约与旧二进制混发，也不自动迁移正在进行的旧会话。
+
+浏览器 RAF 时间与 Unity `Time.time` 是不同的时钟，源码队列及节流测试不构成真实设备端到端延迟验收；该验收须在新 WebGL 产物和真实设备上测量。

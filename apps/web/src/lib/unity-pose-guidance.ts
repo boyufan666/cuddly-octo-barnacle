@@ -22,9 +22,10 @@ export type UnityPoseGuidanceSnapshot = {
 
 export type UnityReachHit = {
   targetId: string;
-  x: number;
-  y: number;
-  z: number;
+  coordinateSpace: "mirrored_viewport";
+  screenX: number;
+  screenY: number;
+  side: "left" | "right";
   confidence: number;
   source: "camera_pose";
 };
@@ -36,11 +37,6 @@ export type UnityPoseGuidanceOptions = {
 export type UnityPoseHitTrackerOptions = UnityPoseGuidanceOptions & {
   stableFrameCount?: number;
   minIntervalMs?: number;
-  reachXMin?: number;
-  reachXMax?: number;
-  reachYMin?: number;
-  reachYMax?: number;
-  reachZ?: number;
 };
 
 export type UnityPoseHitTrackerUpdate = {
@@ -48,7 +44,7 @@ export type UnityPoseHitTrackerUpdate = {
   stableFrames: number;
   requiredStableFrames: number;
   lastAcceptedAtMs?: number;
-  reachHit?: UnityReachHit;
+  reachHits: UnityReachHit[];
 };
 
 const leftWristIndex = 15;
@@ -56,12 +52,6 @@ const rightWristIndex = 16;
 const defaultMinVisibility = 0.45;
 const defaultStableFrameCount = 2;
 const defaultMinIntervalMs = 180;
-const defaultReachXMin = -1.5;
-const defaultReachXMax = 1.5;
-const defaultReachYMin = -1.1;
-const defaultReachYMax = 1.1;
-const defaultReachZ = 4;
-
 export function buildUnityPoseGuidanceSnapshot(
   landmarks: UnityPoseGuidanceLandmark[],
   options: UnityPoseGuidanceOptions = {},
@@ -76,8 +66,16 @@ export function buildUnityPoseGuidanceSnapshot(
     };
   }
 
-  const leftWrist = toWristCursor(landmarks[leftWristIndex], "left", minVisibility);
-  const rightWrist = toWristCursor(landmarks[rightWristIndex], "right", minVisibility);
+  const leftWrist = toWristCursor(
+    landmarks[leftWristIndex],
+    "left",
+    minVisibility,
+  );
+  const rightWrist = toWristCursor(
+    landmarks[rightWristIndex],
+    "right",
+    minVisibility,
+  );
   if (!leftWrist && !rightWrist) {
     return {
       status: "low_visibility",
@@ -105,16 +103,14 @@ export function createUnityPoseHitTracker(
     1,
     Math.round(options.stableFrameCount ?? defaultStableFrameCount),
   );
-  const minIntervalMs = Math.max(0, options.minIntervalMs ?? defaultMinIntervalMs);
-  const reachXMin = options.reachXMin ?? defaultReachXMin;
-  const reachXMax = options.reachXMax ?? defaultReachXMax;
-  const reachYMin = options.reachYMin ?? defaultReachYMin;
-  const reachYMax = options.reachYMax ?? defaultReachYMax;
-  const reachZ = options.reachZ ?? defaultReachZ;
-
-  let stableSide: UnityPoseWristCursor["side"] | undefined;
-  let stableFrames = 0;
-  let lastEmitAtMs = Number.NEGATIVE_INFINITY;
+  const minIntervalMs = Math.max(
+    0,
+    options.minIntervalMs ?? defaultMinIntervalMs,
+  );
+  const states = {
+    left: { frames: 0, lastEmit: Number.NEGATIVE_INFINITY },
+    right: { frames: 0, lastEmit: Number.NEGATIVE_INFINITY },
+  };
   let lastAcceptedAtMs: number | undefined;
   let nextTargetId = 1;
 
@@ -123,68 +119,42 @@ export function createUnityPoseHitTracker(
       landmarks: UnityPoseGuidanceLandmark[],
       timestampMs: number,
     ): UnityPoseHitTrackerUpdate {
-      const guidance = buildUnityPoseGuidanceSnapshot(landmarks, { minVisibility });
-      if (guidance.status !== "tracking") {
-        stableSide = undefined;
-        stableFrames = 0;
-        return {
-          guidance,
-          stableFrames,
-          requiredStableFrames: stableFrameCount,
-          lastAcceptedAtMs,
-        };
-      }
-
-      const wrist = chooseReachWrist(guidance);
-      if (!wrist) {
-        stableSide = undefined;
-        stableFrames = 0;
-        return {
-          guidance,
-          stableFrames,
-          requiredStableFrames: stableFrameCount,
-          lastAcceptedAtMs,
-        };
-      }
-
-      if (stableSide === wrist.side) {
-        stableFrames += 1;
-      } else {
-        stableSide = wrist.side;
-        stableFrames = 1;
-      }
-
-      if (
-        stableFrames < stableFrameCount ||
-        timestampMs - lastEmitAtMs < minIntervalMs
-      ) {
-        return {
-          guidance,
-          stableFrames,
-          requiredStableFrames: stableFrameCount,
-          lastAcceptedAtMs,
-        };
-      }
-
-      lastEmitAtMs = timestampMs;
-      lastAcceptedAtMs = timestampMs;
-      return {
-        guidance,
-        stableFrames,
-        requiredStableFrames: stableFrameCount,
-        lastAcceptedAtMs,
-        reachHit: {
+      const guidance = buildUnityPoseGuidanceSnapshot(landmarks, {
+        minVisibility,
+      });
+      const reachHits: UnityReachHit[] = [];
+      for (const side of ["left", "right"] as const) {
+        const state = states[side];
+        const wrist =
+          side === "left" ? guidance.leftWrist : guidance.rightWrist;
+        if (!wrist) {
+          state.frames = 0;
+          continue;
+        }
+        state.frames += 1;
+        if (
+          state.frames < stableFrameCount ||
+          timestampMs - state.lastEmit < minIntervalMs
+        )
+          continue;
+        state.lastEmit = timestampMs;
+        lastAcceptedAtMs = timestampMs;
+        reachHits.push({
           targetId: `webgl-pose-${nextTargetId++}`,
-          x: roundCoordinate(
-            reachXMin + wrist.screenX * (reachXMax - reachXMin),
-          ),
-          y: roundCoordinate(
-            reachYMax - wrist.screenY * (reachYMax - reachYMin),
-          ),
-          z: reachZ,
+          coordinateSpace: "mirrored_viewport",
+          screenX: wrist.screenX,
+          screenY: wrist.screenY,
+          side,
           confidence: roundRatio(wrist.visibility),
           source: "camera_pose",
-        },
+        });
+      }
+      return {
+        guidance,
+        stableFrames: Math.max(states.left.frames, states.right.frames),
+        requiredStableFrames: stableFrameCount,
+        lastAcceptedAtMs,
+        reachHits,
       };
     },
   };
@@ -208,14 +178,6 @@ function toWristCursor(
   };
 }
 
-function chooseReachWrist(guidance: UnityPoseGuidanceSnapshot) {
-  if (!guidance.leftWrist) return guidance.rightWrist;
-  if (!guidance.rightWrist) return guidance.leftWrist;
-  return guidance.leftWrist.visibility >= guidance.rightWrist.visibility
-    ? guidance.leftWrist
-    : guidance.rightWrist;
-}
-
 function averageVisibilityOf(landmarks: UnityPoseGuidanceLandmark[]) {
   if (!landmarks.length) return 0;
   return (
@@ -228,6 +190,41 @@ function roundRatio(value: number) {
   return Number(value.toFixed(3));
 }
 
-function roundCoordinate(value: number) {
-  return Number(value.toFixed(4));
+/** This game's input coordinates changed in 0.1.3; the result envelope remains 1.0.0. */
+export function assertUnityReachInputContract(
+  game: {
+    code: string;
+    gameVersion?: string | null;
+    bridgeProtocolVersion?: string | null;
+    manifestUrl?: string | null;
+    buildBaseUrl?: string | null;
+  },
+  session: {
+    unityBuildVersion?: string | null;
+    bridgeProtocolVersion?: string | null;
+    runtimeConfigSnapshot?: unknown;
+  },
+): void {
+  const snapshot = session.runtimeConfigSnapshot;
+  if (
+    game.code !== "rhythm_reach_3d" ||
+    game.gameVersion !== "0.1.3" ||
+    game.bridgeProtocolVersion !== "1.0.0" ||
+    session.unityBuildVersion !== game.gameVersion ||
+    session.bridgeProtocolVersion !== game.bridgeProtocolVersion ||
+    !snapshot ||
+    typeof snapshot !== "object" ||
+    Array.isArray(snapshot)
+  ) {
+    throw new Error("Unity 触达输入版本与训练会话不一致，不能启动训练。");
+  }
+  const config = snapshot as Record<string, unknown>;
+  if (
+    config.gameVersion !== game.gameVersion ||
+    config.bridgeProtocolVersion !== game.bridgeProtocolVersion ||
+    config.manifestUrl !== game.manifestUrl ||
+    config.buildBaseUrl !== game.buildBaseUrl
+  ) {
+    throw new Error("Unity 触达输入版本与训练会话快照不一致，不能启动训练。");
+  }
 }

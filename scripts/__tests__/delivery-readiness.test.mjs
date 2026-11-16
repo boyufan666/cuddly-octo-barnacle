@@ -51,6 +51,7 @@ function createCommittedDeploymentFixture() {
     "apps/web/public/mediapipe/tasks-vision/wasm/vision_wasm_module_internal.js -whitespace",
     "apps/web/public/mediapipe/tasks-vision/wasm/vision_wasm_nosimd_internal.js -whitespace",
     "apps/web/public/unity/rhythm_reach_3d/0.1.2/Build/0.1.2.framework.js -whitespace",
+    "apps/web/public/unity/rhythm_reach_3d/0.1.3/Build/0.1.3.framework.js -whitespace",
   ];
 
   runFixtureGit(cwd, ["init"]);
@@ -203,7 +204,7 @@ test("committed deployment contract includes Render source, Prisma migrations, a
     "packages/db/prisma/migration-manifest.json",
     "packages/db/prisma/migrations/migration_lock.toml",
     "apps/web/public/unity/rehab-unity-bridge.js",
-    "apps/web/public/unity/rhythm_reach_3d/0.1.2/index.html",
+    "apps/web/public/unity/rhythm_reach_3d/0.1.3/index.html",
   ]) {
     assert.ok(
       requiredCommittedDeploymentFiles.includes(path),
@@ -212,7 +213,7 @@ test("committed deployment contract includes Render source, Prisma migrations, a
   }
   for (const path of [
     "apps/web/public/mediapipe/models/pose_landmarker_lite.task",
-    "apps/web/public/unity/rhythm_reach_3d/0.1.2/Build/0.1.2.wasm",
+    "apps/web/public/unity/rhythm_reach_3d/0.1.3/Build/0.1.3.wasm",
   ]) {
     assert.ok(
       requiredGitTrackedRuntimeAssets.includes(path),
@@ -262,6 +263,7 @@ test("immutable asset whitespace exceptions are exact and no public-directory wi
     "apps/web/public/mediapipe/tasks-vision/wasm/vision_wasm_module_internal.js -whitespace",
     "apps/web/public/mediapipe/tasks-vision/wasm/vision_wasm_nosimd_internal.js -whitespace",
     "apps/web/public/unity/rhythm_reach_3d/0.1.2/Build/0.1.2.framework.js -whitespace",
+    "apps/web/public/unity/rhythm_reach_3d/0.1.3/Build/0.1.3.framework.js -whitespace",
   ].join("\n");
   assert.deepEqual(checkGitAttributesWhitespaceExceptions(exact).failures, []);
   assert.deepEqual(
@@ -274,7 +276,7 @@ test("immutable asset whitespace exceptions are exact and no public-directory wi
   const broad = checkGitAttributesWhitespaceExceptions(
     `${exact}\napps/web/public/** -whitespace`,
   );
-  assert.match(broad.failures.join("\n"), /只能为四个/);
+  assert.match(broad.failures.join("\n"), /只能为五个/);
 });
 
 test("package scripts expose non-mutating delivery checks", () => {

@@ -1,8 +1,11 @@
+import { cssColorToPhaserNumber } from "@/components/training/PhaserPoseStage";
 import { createRoot } from "react-dom/client";
 import { BrowserPoseTrainingSurface } from "./BrowserPoseTrainingSurface";
 import { getBrowserPoseGameDefinition } from "@/lib/browser-pose-game-library";
 import type { RehabPlan, TrainingSession } from "@/types/api";
 const codes = [
+  "mirror_sequence",
+  "nebula_sort",
   "balance_breath",
   "orbital_trace_follow",
   "center_shift_bridge",
@@ -28,3 +31,5 @@ createRoot(document.getElementById("root")!).render(
     ))}
   </>,
 );
+
+Object.assign(window, { testPhaserCssColor: cssColorToPhaserNumber });

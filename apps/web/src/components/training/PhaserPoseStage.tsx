@@ -178,145 +178,15 @@ function createPhaserStage({
       });
       title.setAlpha(0.9);
 
-      if (profile === "trajectory_tracking") {
-        const points = [
-          { x: width * 0.18, y: height * 0.58 },
-          { x: width * 0.34, y: height * 0.38 },
-          { x: width * 0.56, y: height * 0.5 },
-          { x: width * 0.78, y: height * 0.3 },
-        ];
-        const trace = this.add.graphics();
-        trace.lineStyle(9, palette.marker, 0.2);
-        trace.beginPath();
-        trace.moveTo(points[0].x, points[0].y);
-        points.slice(1).forEach((point) => trace.lineTo(point.x, point.y));
-        trace.strokePath();
-        trace.lineStyle(3, palette.stroke, 0.82);
-        trace.beginPath();
-        trace.moveTo(points[0].x, points[0].y);
-        points.slice(1).forEach((point) => trace.lineTo(point.x, point.y));
-        trace.strokePath();
-
-        points.forEach((point, index) => {
-          const checkpoint = this.add.ellipse(
-            point.x,
-            point.y,
-            34,
-            34,
-            index === 0 ? palette.stroke : palette.marker,
-            0.28,
-          );
-          checkpoint.setStrokeStyle(3, index === 0 ? palette.stroke : palette.marker, 0.9);
-          this.add.text(point.x - 6, point.y - 10, String(index + 1), {
-            color: palette.text,
-            fontFamily: "Inter, Arial, sans-serif",
-            fontSize: "16px",
-            fontStyle: "bold",
-          });
-          this.tweens.add({
-            targets: checkpoint,
-            alpha: { from: 0.35, to: 0.86 },
-            scale: { from: 0.92, to: 1.2 },
-            duration: 1300 + index * 180,
-            yoyo: true,
-            repeat: -1,
-            ease: "Sine.easeInOut",
-          });
-        });
-
-        const tracer = this.add.ellipse(points[0].x, points[0].y, 20, 20, palette.stroke, 0.88);
-        this.tweens.add({
-          targets: tracer,
-          x: points.map((point) => point.x),
-          y: points.map((point) => point.y),
-          duration: 3600,
-          repeat: -1,
-          yoyo: true,
-          ease: "Sine.easeInOut",
-        });
-      }
-
-      if (profile === "balance_shift") {
-        const balanceRail = this.add.graphics();
-        balanceRail.lineStyle(10, palette.marker, 0.18);
-        balanceRail.beginPath();
-        balanceRail.moveTo(width * 0.18, height * 0.56);
-        balanceRail.lineTo(width * 0.5, height * 0.42);
-        balanceRail.lineTo(width * 0.82, height * 0.56);
-        balanceRail.strokePath();
-        balanceRail.lineStyle(3, palette.stroke, 0.86);
-        balanceRail.beginPath();
-        balanceRail.moveTo(width * 0.18, height * 0.56);
-        balanceRail.lineTo(width * 0.5, height * 0.42);
-        balanceRail.lineTo(width * 0.82, height * 0.56);
-        balanceRail.strokePath();
-
-        const centerline = this.add.rectangle(
-          width * 0.5,
-          height * 0.5,
-          4,
-          height * 0.58,
-          palette.stroke,
-          0.54,
-        );
-        centerline.setStrokeStyle(1, palette.stroke, 0.5);
-
-        const bridgeTargets = [
-          { x: width * 0.22, y: height * 0.56, label: "左" },
-          { x: width * 0.5, y: height * 0.42, label: "中" },
-          { x: width * 0.78, y: height * 0.56, label: "右" },
-        ];
-        bridgeTargets.forEach((point, index) => {
-          const star = this.add.star(
-            point.x,
-            point.y,
-            5,
-            18,
-            34,
-            index === 1 ? palette.stroke : palette.marker,
-            0.72,
-          );
-          star.setStrokeStyle(3, palette.stroke, 0.82);
-          this.add.text(point.x - 10, point.y + 42, point.label, {
-            color: palette.text,
-            fontFamily: "Georgia, serif",
-            fontSize: "20px",
-            fontStyle: "bold",
-          });
-          this.tweens.add({
-            targets: star,
-            alpha: { from: 0.46, to: 0.92 },
-            scale: { from: 0.88, to: 1.16 },
-            duration: 1200 + index * 180,
-            yoyo: true,
-            repeat: -1,
-            ease: "Sine.easeInOut",
-          });
-        });
-      }
-
-      for (let index = 0; index < 9; index += 1) {
-        const guideRing = this.add.ellipse(
-          width * (0.18 + (index % 3) * 0.32),
-          height * (0.32 + Math.floor(index / 3) * 0.22),
-          90 + index * 8,
-          90 + index * 8,
-          palette.marker,
-          0.16,
-        );
-        guideRing.setStrokeStyle(2, palette.stroke, 0.28);
-        this.tweens.add({
-          targets: guideRing,
-          alpha: { from: 0.2, to: 0.62 },
-          scale: { from: 0.88, to: 1.08 },
-          duration: 1800 + index * 120,
-          yoyo: true,
-          repeat: -1,
-          ease: "Sine.easeInOut",
-        });
-      }
-
-      const wave = this.add.rectangle(width / 2, height - 42, width * 0.72, 4, palette.stroke, 0.5);
+      // Gameplay targets are drawn exclusively by the live target overlay.
+      const wave = this.add.rectangle(
+        width / 2,
+        height - 42,
+        width * 0.72,
+        4,
+        palette.stroke,
+        0.5,
+      );
       this.tweens.add({
         targets: wave,
         scaleX: { from: 0.72, to: 1 },
@@ -358,8 +228,14 @@ function resolveStagePalette(
 
   return {
     background: transparentStageBackground,
-    marker: cssColorToPhaserNumber(readCssToken(host, tokenSet.marker), tokenSet.marker),
-    stroke: cssColorToPhaserNumber(readCssToken(host, tokenSet.stroke), tokenSet.stroke),
+    marker: cssColorToPhaserNumber(
+      readCssToken(host, tokenSet.marker),
+      tokenSet.marker,
+    ),
+    stroke: cssColorToPhaserNumber(
+      readCssToken(host, tokenSet.stroke),
+      tokenSet.stroke,
+    ),
     text: readCssToken(host, tokenSet.text),
   };
 }
@@ -367,24 +243,45 @@ function resolveStagePalette(
 function readCssToken(host: HTMLDivElement, tokenName: string) {
   const tokenValue = getComputedStyle(host).getPropertyValue(tokenName).trim();
   if (!tokenValue) {
-    throw new Error(`Missing design token ${tokenName} for Phaser training stage.`);
+    throw new Error(
+      `Missing design token ${tokenName} for Phaser training stage.`,
+    );
   }
   return tokenValue;
 }
 
-function cssColorToPhaserNumber(cssColor: string, tokenName: string) {
-  const channels = cssColor.match(/\d+(?:\.\d+)?/g)?.slice(0, 3).map(Number) ?? [];
-  if (channels.length !== 3 || channels.some((channel) => !Number.isFinite(channel))) {
-    throw new Error(`Invalid design token ${tokenName} for Phaser training stage.`);
+export function cssColorToPhaserNumber(cssColor: string, tokenName: string) {
+  if (
+    !CSS.supports("color", cssColor) ||
+    /currentcolor|inherit|initial|unset|revert|var\(|env\(|light-dark\(/i.test(
+      cssColor,
+    )
+  ) {
+    throw new Error(
+      `Invalid design token ${tokenName} for Phaser training stage.`,
+    );
   }
-
-  const [red, green, blue] = channels.map((channel) =>
-    Math.max(0, Math.min(255, Math.round(channel))),
-  );
+  const canvas = document.createElement("canvas");
+  canvas.width = 1;
+  canvas.height = 1;
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context) {
+    throw new Error("Cannot resolve design colors for Phaser training stage.");
+  }
+  context.fillStyle = cssColor;
+  context.fillRect(0, 0, 1, 1);
+  const [red, green, blue, alpha] = context.getImageData(0, 0, 1, 1).data;
+  if (alpha !== 255) {
+    throw new Error(
+      `Design token ${tokenName} must be an opaque color for Phaser training stage.`,
+    );
+  }
   return red * 65536 + green * 256 + blue;
 }
 
-function resolveStageLabel(profile: BrowserPoseGameDefinition["scoringProfile"]) {
+function resolveStageLabel(
+  profile: BrowserPoseGameDefinition["scoringProfile"],
+) {
   const labels = {
     reaction_reach: "反应触达",
     memory_sequence: "记忆序列",
@@ -398,7 +295,9 @@ function resolveStageLabel(profile: BrowserPoseGameDefinition["scoringProfile"])
   return labels[profile];
 }
 
-function resolveStageRunningCopy(profile: BrowserPoseGameDefinition["scoringProfile"]) {
+function resolveStageRunningCopy(
+  profile: BrowserPoseGameDefinition["scoringProfile"],
+) {
   const copies = {
     reaction_reach: "反应目标出现后尽快触达",
     memory_sequence: "记住序列并按顺序触达",

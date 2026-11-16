@@ -1,4 +1,5 @@
 using UnityEngine;
+using System.Collections.Generic;
 
 namespace Rehab.RhythmReach
 {
@@ -8,7 +9,10 @@ namespace Rehab.RhythmReach
         [SerializeField] private KeyCode developmentHitKey = KeyCode.Space;
         [SerializeField] private float developmentPointerDepth = 4f;
 
-        private bool pendingReachHit;
+        private bool pendingEditorHit;
+        private readonly Queue<WebGlReachHitPayload> pendingReachHits = new Queue<WebGlReachHitPayload>();
+        private readonly HashSet<string> receivedHitIds = new HashSet<string>();
+        [SerializeField] private float targetPlaneDepth = 4f;
         private Vector3 reachHitWorldPosition;
         private bool hasReachHitWorldPosition;
         private string reachHitSource = string.Empty;
@@ -57,27 +61,55 @@ namespace Rehab.RhythmReach
             }
 
             WebGlReachHitPayload payload = JsonUtility.FromJson<WebGlReachHitPayload>(payloadJson);
-            if (payload == null || payload.confidence <= 0f || payload.confidence > 1f)
+            if (payload == null || payload.coordinateSpace != "mirrored_viewport"
+                || string.IsNullOrWhiteSpace(payload.targetId)
+                || (payload.side != "left" && payload.side != "right")
+                || !IsFinite(payload.confidence) || payload.confidence <= 0f || payload.confidence > 1f
+                || !IsFinite(payload.screenX) || payload.screenX < 0f || payload.screenX > 1f
+                || !IsFinite(payload.screenY) || payload.screenY < 0f || payload.screenY > 1f
+                || inputCamera == null || !receivedHitIds.Add(payload.targetId))
             {
                 return;
             }
+            pendingReachHits.Enqueue(payload);
+        }
 
-            reachHitWorldPosition = new Vector3(payload.x, payload.y, payload.z);
-            hasReachHitWorldPosition = true;
-            pendingReachHit = true;
-            reachHitSource = "webgl_pose_event";
-            reachHitConfidence = payload.confidence;
+        public void ClearPendingRuntimeInput()
+        {
+            pendingReachHits.Clear();
+            pendingEditorHit = false;
+            hasReachHitWorldPosition = false;
+        }
+
+        public void ResetRuntimeInput()
+        {
+            ClearPendingRuntimeInput();
+            receivedHitIds.Clear();
+            reachHitSource = string.Empty;
+            reachHitConfidence = 0f;
         }
 
         public bool TryConsumeReachHit()
         {
-            if (!pendingReachHit)
-            {
-                return false;
-            }
-
-            pendingReachHit = false;
+#if UNITY_EDITOR
+            if (pendingEditorHit) { pendingEditorHit = false; return true; }
+#endif
+            if (pendingReachHits.Count == 0) return false;
+            WebGlReachHitPayload payload = pendingReachHits.Dequeue();
+            Ray ray = inputCamera.ViewportPointToRay(new Vector3(payload.screenX, 1f - payload.screenY, 0f));
+            Plane targetPlane = new Plane(Vector3.forward, new Vector3(0f, 0f, targetPlaneDepth));
+            float distance;
+            if (!targetPlane.Raycast(ray, out distance)) return false;
+            reachHitWorldPosition = ray.GetPoint(distance);
+            hasReachHitWorldPosition = true;
+            reachHitSource = "webgl_pose_event";
+            reachHitConfidence = payload.confidence;
             return true;
+        }
+
+        private static bool IsFinite(float value)
+        {
+            return !float.IsNaN(value) && !float.IsInfinity(value);
         }
 
         public bool TryConsumeDevelopmentHit()
@@ -99,7 +131,7 @@ namespace Rehab.RhythmReach
 
             if (Input.GetMouseButtonDown(0) || Input.GetKeyDown(developmentHitKey))
             {
-                pendingReachHit = true;
+                pendingEditorHit = true;
                 reachHitSource = "development-only";
                 reachHitConfidence = 1f;
             }
@@ -109,9 +141,11 @@ namespace Rehab.RhythmReach
         [System.Serializable]
         private sealed class WebGlReachHitPayload
         {
-            public float x;
-            public float y;
-            public float z;
+            public string targetId;
+            public string coordinateSpace;
+            public string side;
+            public float screenX;
+            public float screenY;
             public float confidence;
         }
     }

@@ -32,12 +32,14 @@ namespace Rehab.RhythmReach
             spawner = targetSpawner;
             poseInputBridge = inputBridge;
             metricsAccumulator = accumulator;
+            poseInputBridge.ResetRuntimeInput();
             isRunning = true;
         }
 
         public void Stop()
         {
             isRunning = false;
+            if (poseInputBridge != null) poseInputBridge.ClearPendingRuntimeInput();
             metricsAccumulator = null;
         }
 
@@ -48,12 +50,10 @@ namespace Rehab.RhythmReach
                 return;
             }
 
-            if (!poseInputBridge.TryConsumeReachHit())
+            while (poseInputBridge.TryConsumeReachHit())
             {
-                return;
+                TryRecordActiveTargetHit();
             }
-
-            TryRecordActiveTargetHit();
         }
 
         public bool TryRecordActiveTargetHit()

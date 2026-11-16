@@ -6,7 +6,7 @@ import { pathToFileURL } from "node:url";
 export async function verifyUnityRhythmReachWebGlBuild(options = {}) {
   const rootDir = options.rootDir ?? process.cwd();
   const readArtifact = options.readArtifact ?? readFile;
-  const gameVersion = options.gameVersion ?? "0.1.2";
+  const gameVersion = options.gameVersion ?? "0.1.3";
   const buildDir = resolve(
     rootDir,
     `apps/web/public/unity/rhythm_reach_3d/${gameVersion}`,
