@@ -601,10 +601,18 @@ export function BrowserPoseTrainingSurface(
         <div className="flex flex-wrap gap-3">
           <Button
             className="touch-manipulation"
-            disabled={isRunning || !durationState.ok}
+            disabled={
+              isRunning ||
+              !durationState.ok ||
+              (requiresEnhancedStage && !motionStageReady)
+            }
             onClick={() => void startGame()}
           >
-            {snapshot.phase === "completed" ? "重新训练" : "开始训练"}
+            {requiresEnhancedStage && !motionStageReady
+              ? "正在准备训练画面"
+              : snapshot.phase === "completed"
+                ? "重新训练"
+                : "开始训练"}
           </Button>
           {isRunning ? (
             <Button
@@ -1371,7 +1379,7 @@ function resolveBrowserPoseBalanceEvidence(
   };
 }
 
-function resolveBrowserPoseBodyCenter(
+export function resolveBrowserPoseBodyCenter(
   landmarks: PoseLandmark[],
   minimumLandmarkVisibility: number,
 ) {
@@ -1387,7 +1395,7 @@ function resolveBrowserPoseBodyCenter(
   );
   if (points.length < 2) return undefined;
   return {
-    x: points.reduce((sum, point) => sum + point.x, 0) / points.length,
+    x: 1 - points.reduce((sum, point) => sum + point.x, 0) / points.length,
     y: points.reduce((sum, point) => sum + point.y, 0) / points.length,
   };
 }
